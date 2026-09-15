@@ -48,3 +48,22 @@ Notes on execution (Phase 0):
   (`frontend/shared/ui/`), infra compose with postgres/redis/backend/frontend
   plus `infra/.env.example` covering every required key.
 - No Phase 1+ code (auth, models, routers) was added.
+
+## Phase 1 — Auth, RBAC, Tenant Isolation
+
+> after every phase commit changes okay . do not commit like phase 0 completed do like feat fix like that do not add phase okay first commit the changes and start phaase 1
+
+Notes on execution (Phase 1):
+
+- Committed the pending scaffolding first as
+  `feat: scaffold FastAPI backend, patient web shell and container stack`
+  (conventional style, no phase reference).
+- Scope implemented exactly per `build-plan-deep-dive.md` Phase 1: `User`
+  model with all four roles, Argon2 password hashing, short-lived access
+  (15 min) + long-lived refresh (7 day) JWTs, `RequestContext` /
+  `require_role` / `hospital_scoped_query`, and
+  `POST /auth/register, /auth/login, /auth/refresh` plus `GET /auth/me`.
+- `get_current_context()` re-loads the user row on every request and takes
+  `hospital_id` from the DB, so stale JWT claims can never widen scope;
+  deactivated users are rejected on login, authenticated calls, and refresh.
+- No Phase 2+ code (hospitals, doctors, scheduling) was added.

@@ -20,7 +20,16 @@ class Settings(BaseSettings):
         alias="DATABASE_URL",
     )
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
-    jwt_secret: str = Field(default="change-me-in-env", alias="JWT_SECRET")
+    jwt_secret: str = Field(
+        default="change-me-in-env-use-a-long-random-string", alias="JWT_SECRET"
+    )
+    jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
+    access_token_expire_minutes: int = Field(
+        default=15, alias="ACCESS_TOKEN_EXPIRE_MINUTES"
+    )
+    refresh_token_expire_days: int = Field(
+        default=7, alias="REFRESH_TOKEN_EXPIRE_DAYS"
+    )
     llm_api_key: str = Field(default="", alias="LLM_API_KEY")
     twilio_account_sid: str = Field(default="", alias="TWILIO_ACCOUNT_SID")
     twilio_auth_token: str = Field(default="", alias="TWILIO_AUTH_TOKEN")

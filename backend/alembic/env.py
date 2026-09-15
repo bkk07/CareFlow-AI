@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from app.core.config import settings  # noqa: E402
 from app.core.db import Base  # noqa: E402
+from app.domain.auth import models as auth_models  # noqa: E402,F401 — register User metadata
 
 config = context.config
 
