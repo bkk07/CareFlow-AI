@@ -67,3 +67,28 @@ Notes on execution (Phase 1):
   `hospital_id` from the DB, so stale JWT claims can never widen scope;
   deactivated users are rejected on login, authenticated calls, and refresh.
 - No Phase 2+ code (hospitals, doctors, scheduling) was added.
+
+## Hospital Onboarding
+
+> next phase
+
+Notes on execution (hospital onboarding):
+
+- Scope implemented exactly per `build-plan-deep-dive.md` Phase 2:
+  `Hospital` model with the full lifecycle enum, `AuditEvent` model +
+  `write_audit_event()` helper in `app/core/audit.py` (single choke point
+  for all later domains), service functions
+  `register_hospital()/approve()/reject()/suspend()`, and endpoints
+  `POST /hospitals`, `GET /hospitals/{id}`,
+  `GET /platform/hospitals?status=`,
+  `POST /platform/hospitals/{id}/{approve,reject,suspend}`.
+- Registration creates Hospital(status=submitted) + first hospital-admin
+  User in one transaction; duplicate contact email → 409 pre-check plus
+  unique constraint + IntegrityError fallback for races.
+- `assert_hospital_approved()` is the go-live gate booking/configuration
+  flows must call; the "un-approved hospital cannot create doctors" check
+  is tested directly against it since the doctor domain does not exist yet.
+- `X-Correlation-ID` header (or a generated UUID) is stored on every audit
+  row; `rejection_reason` is returned by `GET /hospitals/{id}` so it is
+  visible to the hospital admin.
+- No Phase 3+ code (configuration, doctors, scheduling) was added.

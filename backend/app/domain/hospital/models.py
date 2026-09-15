@@ -1,0 +1,62 @@
+"""Hospital onboarding models."""
+
+import enum
+import uuid
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, Enum, String, Uuid, func
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.db import Base
+
+
+class HospitalStatus(str, enum.Enum):
+    draft = "draft"
+    submitted = "submitted"
+    under_review = "under_review"
+    approved = "approved"
+    rejected = "rejected"
+    suspended = "suspended"
+
+
+class Hospital(Base):
+    __tablename__ = "hospitals"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    address: Mapped[str] = mapped_column(String(500), nullable=False)
+    contact_email: Mapped[str] = mapped_column(
+        String(255), unique=True, index=True, nullable=False
+    )
+    contact_phone: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[HospitalStatus] = mapped_column(
+        Enum(HospitalStatus, name="hospital_status", validate_strings=True),
+        nullable=False,
+        default=HospitalStatus.submitted,
+    )
+    submitted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    @property
+    def is_live(self) -> bool:
+        """Only approved hospitals pass the go-live gate used by later flows."""
+        return self.status == HospitalStatus.approved
+
+
+__all__ = ["Base", "Hospital", "HospitalStatus"]

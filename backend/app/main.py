@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.health import router as health_router
 from app.core.config import settings
 from app.domain.auth.router import router as auth_router
+from app.domain.hospital.router import router as hospital_router
 
 app = FastAPI(title="CareFlow AI", version="0.1.0")
 
@@ -19,6 +20,7 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(hospital_router)
 
 
 @app.get("/")
