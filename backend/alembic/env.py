@@ -14,6 +14,8 @@ from app.core.db import Base  # noqa: E402
 from app.domain.auth import models as auth_models  # noqa: E402,F401 — register User metadata
 from app.domain.hospital import models as hospital_models  # noqa: E402,F401 — register Hospital metadata
 from app.core import audit as audit_module  # noqa: E402,F401 — register AuditEvent metadata
+from app.domain.doctor import models as doctor_models  # noqa: E402,F401 — register Doctor metadata
+from app.domain.hospital_config import models as config_models  # noqa: E402,F401 — register config metadata
 
 config = context.config
 

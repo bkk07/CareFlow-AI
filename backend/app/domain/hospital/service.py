@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.audit import write_audit_event
+from app.core.deps import RequestContext
 from app.core.security import hash_password
 from app.domain.auth.models import Role, User
 from app.domain.hospital.models import Hospital, HospitalStatus
@@ -44,6 +45,20 @@ def assert_hospital_approved(hospital: Hospital) -> Hospital:
             detail=f"Hospital is not approved (status={hospital.status.value})",
         )
     return hospital
+
+
+def get_managed_hospital(
+    session: Session, hospital_id: uuid.UUID, ctx: RequestContext
+) -> Hospital:
+    """Resolve a hospital the caller administers: 404 if missing, 403 unless
+    the caller's own hospital, 403 unless approved (go-live gate)."""
+    hospital = get_hospital_or_404(session, hospital_id)
+    if ctx.role != Role.hospital_admin or ctx.hospital_id != hospital.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not allowed to manage this hospital",
+        )
+    return assert_hospital_approved(hospital)
 
 
 def register_hospital(

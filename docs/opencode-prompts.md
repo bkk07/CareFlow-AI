@@ -92,3 +92,29 @@ Notes on execution (hospital onboarding):
   row; `rejection_reason` is returned by `GET /hospitals/{id}` so it is
   visible to the hospital admin.
 - No Phase 3+ code (configuration, doctors, scheduling) was added.
+
+## Hospital Configuration + Doctor Management
+
+> Next Phase
+>
+> continue
+
+Notes on execution (hospital configuration + doctor management):
+
+- Scope implemented exactly per `build-plan-deep-dive.md` Phase 3:
+  `Department` / `Specialty` / `AppointmentType` models plus full CRUD
+  routers under `/hospitals/{id}/...`, and the `Doctor` domain
+  (`models.py`, `service.py`, `router.py`) with CRUD plus
+  `POST .../doctors/{id}/activate|deactivate`.
+- Routers use `require_role(hospital_admin)` plus a shared
+  `require_managed_hospital` dependency (404 unknown hospital, 403 other
+  hospital, 403 un-approved hospital via the Phase 2 go-live gate), and
+  list queries go through `hospital_scoped_query`.
+- Activation requires specialty + department + at least one compatible
+  appointment type (empty compatible list counts as universal);
+  deleting a referenced specialty/department is blocked with 409;
+  `external_provider_id` is unique per hospital.
+- Minimal hospital-admin frontend (`frontend/apps/hospital-admin`, login +
+  table+form screens for all four entities) builds cleanly; compose stack
+  left untouched.
+- No Phase 4+ code (scheduling, patients, EHR) was added.
