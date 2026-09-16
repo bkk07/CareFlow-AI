@@ -7,8 +7,10 @@ from app.core.db import get_db
 from app.core.deps import RequestContext, require_role
 from app.domain.auth.models import Role, User
 from app.domain.patient import service
-from app.domain.patient.models import UserPreferences
+from app.domain.patient.models import PatientProfile, UserPreferences
 from app.domain.patient.schemas import (
+    ContactOut,
+    ContactUpdateIn,
     PatientOut,
     PatientUpdateIn,
     PreferencesOut,
@@ -54,3 +56,21 @@ def update_preferences(
     ctx: RequestContext = Depends(_patient),
 ) -> UserPreferences:
     return service.update_preferences(db, ctx.user_id, body)
+
+
+@router.get("/me/contact", response_model=ContactOut)
+def get_contact(
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_patient),
+) -> PatientProfile:
+    return service.get_or_create_profile(db, ctx.user_id)
+
+
+@router.put("/me/contact", response_model=ContactOut)
+def update_contact(
+    body: ContactUpdateIn,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_patient),
+) -> PatientProfile:
+    """Register the phone/name/DOB the telephone channel verifies against."""
+    return service.update_contact(db, ctx.user_id, body)

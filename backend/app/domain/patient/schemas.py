@@ -1,7 +1,7 @@
 """Patient schemas (self-scoped: everything keys off the caller)."""
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -38,3 +38,17 @@ class PreferencesUpdateIn(BaseModel):
     preferred_appointment_type_id: uuid.UUID | None = Field(default=None)
     preferred_time_of_day: TimeOfDay | None = Field(default=None)
     preferred_consultation_mode: ConsultationMode | None = Field(default=None)
+
+
+class ContactOut(BaseModel):
+    patient_user_id: uuid.UUID
+    phone: str | None
+    full_name: str | None
+    date_of_birth: date | None
+    updated_at: datetime
+
+
+class ContactUpdateIn(BaseModel):
+    phone: str | None = Field(default=None, max_length=32)
+    full_name: str | None = Field(default=None, max_length=255)
+    date_of_birth: date | None = Field(default=None)

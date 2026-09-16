@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     twilio_account_sid: str = Field(default="", alias="TWILIO_ACCOUNT_SID")
     twilio_auth_token: str = Field(default="", alias="TWILIO_AUTH_TOKEN")
     twilio_phone_number: str = Field(default="", alias="TWILIO_PHONE_NUMBER")
+    # Phase 14 telephony: public wss:// URL Twilio streams call audio to,
+    # e.g. wss://voice.example.com/voice/telephony/media. Empty disables
+    # the inbound webhook (it answers 503) so local dev needs no tunnel.
+    telephony_stream_url: str = Field(default="", alias="TELEPHONY_STREAM_URL")
 
     backend_cors_origins: str = Field(
         default="http://localhost:5173,http://localhost:5174,http://localhost:5177,http://localhost:3000",

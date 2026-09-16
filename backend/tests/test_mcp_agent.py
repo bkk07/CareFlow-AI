@@ -230,15 +230,16 @@ def slot_iso(day=MONDAY, hour=9):
 # -- registry / middleware -----------------------------------------------------
 
 
-def test_registry_lists_seventeen_tools(client, tool_factory):
+def test_registry_lists_eighteen_tools(client, tool_factory):
     setup = seed_setup(client)
     resp = client.get("/mcp/tools", headers=setup["patient"]["headers"])
     assert resp.status_code == 200
     names = {t["name"] for t in resp.json()["tools"]}
     assert names == set(server._TOOLS.keys())
-    assert len(names) == 17
+    assert len(names) == 18
     assert "create_appointment" in names
     assert "transfer_to_human" in names
+    assert "verify_caller_identity" in names
 
 
 def test_mcp_requires_auth(client, tool_factory):

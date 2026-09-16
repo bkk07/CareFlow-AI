@@ -586,3 +586,38 @@ doctor app 5176 -> 5177 everywhere it was pinned: vite.config.ts
 (server + preview), Dockerfile (EXPOSE + CMD), compose ports +
 healthcheck, backend default CORS origins, .env.example. Verified
 doctor dev serves HTTP 200 on :5177 and compose config is valid.
+
+## Phase 14 — Telephone
+
+> implement next phase (plan Phase 14, telephone)
+
+- `PatientProfile` (`patient_profiles`, migration `0013_telephony`):
+  digit-normalized phone + full name + DOB; `PUT /patients/me/contact`
+  registers them, `GET` reads them back.
+- `app/voice/telephony/`: `audio.py` (G.711 mu-law both ways, 8k<->16k
+  resample, WAV->mulaw, no new deps), `identity.py` (exact + 10-digit
+  suffix phone lookup, normalized name/DOB check that never reveals
+  stored values), `twilio_webhook.py` (`POST /voice/telephony/inbound`
+  -> patient lookup -> TwiML `<Stream>` with caller/patient/
+  conversation params, HMAC-SHA1 signature enforced when
+  TWILIO_AUTH_TOKEN is set, 503 fail-closed without
+  TELEPHONY_STREAM_URL; `/status` logs drops), `media_stream_handler.py`
+  (Twilio WS protocol on `/voice/telephony/media`: mulaw decode ->
+  upsample -> VAD -> STT -> agent -> per-sentence TTS -> mulaw chunks +
+  marks, `clear` on spoken "stop", one silence re-prompt then human
+  escalation; unknown-outcome drops fall through to Phase 8 logic).
+- Trust: sessions start UNVERIFIED; new `verify_caller_identity` tool
+  (name+DOB, 3 attempts then transfer_to_human) flips the flag in
+  AIContext; the orchestrator additionally refuses every patient-data
+  tool on unverified calls via an allowlist (open reads + verify +
+  transfer only) and refreshes the flag mid-turn so the same turn can
+  proceed. Registry grows 17 -> 18 tools.
+- Verification: 209/209 tests (22 new in `test_telephony.py`: audio
+  roundtrip, signature vectors, webhook match/unknown/signature/503,
+  contact normalization, suffix lookup, verify success/lockout/
+  channel check, gate block + unlock, full call verify->book over a
+  real stream socket with a confirmed DB booking, decline path with
+  zero capability rows, clean hangup), migration head SQL checked,
+  live postgres smoke (contact, TwiML match, fail-closed verify,
+  18-tool registry, unknown caller) green. Added `python-multipart`
+  (Twilio posts form-encoded; caught by the live smoke).

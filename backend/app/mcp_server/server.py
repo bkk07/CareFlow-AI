@@ -29,6 +29,7 @@ from app.mcp_server.tools import (
     synchronize_state,
     transfer_to_human,
     update_preferences,
+    verify_caller_identity,
     verify_external_appointment,
 )
 
@@ -64,14 +65,15 @@ for _module in (
     start_workflow,
     get_context,
     update_preferences,
+    verify_caller_identity,
     verify_external_appointment,
     synchronize_state,
     transfer_to_human,
 ):
     _register(_module)
 
-# The plan says "16" but lists 17 tool files; the file list wins.
-assert len(_TOOLS) == 17, f"expected 17 tools, registered {len(_TOOLS)}"
+# 17 tools through Phase 13; verify_caller_identity (Phase 14) makes 18.
+assert len(_TOOLS) == 18, f"expected 18 tools, registered {len(_TOOLS)}"
 
 
 def list_tools() -> list[dict]:

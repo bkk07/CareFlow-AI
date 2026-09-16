@@ -36,6 +36,13 @@ class AIContext(BaseModel):
     pending_clarification: str | None = None
     last_appointment_id: str | None = None
     history: list[dict[str, str]] = Field(default_factory=list)
+    # Phase 14 telephony: "web" everywhere else; "telephony" unlocks
+    # patient-data tools only after the caller proves identity out loud.
+    channel: str = "web"
+    caller_phone: str | None = None
+    caller_patient_id: str | None = None
+    caller_verified: bool = False
+    identity_attempts: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()

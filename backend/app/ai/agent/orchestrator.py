@@ -88,6 +88,65 @@ LOOP_EXHAUSTED = (
 STOPPED = "Okay, I've stopped — what would you like to do instead?"
 
 
+TELEPHONY_GUARD_PROMPT = """
+This is a TELEPHONE call. The caller has no login, so identity is
+unproven until verify_caller_identity reports verified=true:
+- First, ask for their FULL NAME and DATE OF BIRTH (open questions —
+  never guess or read back stored values).
+- Then call verify_caller_identity with the conversation_id from the
+  context JSON below. Until it reports verified=true you MUST NOT
+  discuss, look up, book, move, cancel, or message about ANY patient's
+  care — offer general help (find doctors, check public availability)
+  or transfer_to_human instead.
+- After THREE failed verifications, stop asking and transfer_to_human.
+"""
+
+#: Unverified phone callers may only use these. Everything else —
+#: every tool that reads or mutates a specific patient's data — is
+#: refused deterministically below, not just by the prompt above.
+TELEPHONY_OPEN_TOOLS = frozenset(
+    {
+        "verify_caller_identity",
+        "transfer_to_human",
+        "search_hospitals",
+        "search_doctors",
+        "check_availability",
+        "get_context",
+    }
+)
+
+CALLER_IDENTITY_REQUIRED = (
+    "caller_identity_required: this is a telephone call and the caller "
+    "has not verified their identity yet. Ask for their full name and "
+    "date of birth, then call verify_caller_identity. Do not discuss "
+    "any patient details until it reports verified=true."
+)
+
+
+def _telephony_gate(context, name: str) -> dict | None:
+    """Refusal outcome for patient-data tools on unverified calls."""
+    if context.channel != "telephony" or context.caller_verified:
+        return None
+    if name in TELEPHONY_OPEN_TOOLS:
+        return None
+    return {"ok": False, "error": CALLER_IDENTITY_REQUIRED}
+
+
+def _refresh_verification(context, name: str, outcome: dict) -> None:
+    """verify_caller_identity saves its own copy of the context; pull the
+    flag back into the turn's copy so later calls in the SAME turn are
+    already unlocked."""
+    if name != "verify_caller_identity":
+        return
+    result = outcome.get("result") if isinstance(outcome, dict) else None
+    if not isinstance(result, dict) or not result.get("verified"):
+        return
+    fresh = get_ai_context(context.conversation_id)
+    context.caller_verified = fresh.caller_verified
+    context.caller_patient_id = fresh.caller_patient_id
+    context.identity_attempts = fresh.identity_attempts
+
+
 def is_clinical_request(text: str) -> bool:
     """A purely clinical message: clinical signals, no scheduling intent."""
     lowered = text.lower()
@@ -200,10 +259,13 @@ def run_conversation(
 
     client = AgentToolClient(db, ctx)
     complete_fn = complete or groq_complete
+    system = SYSTEM_PROMPT
+    if context.channel == "telephony":
+        system += TELEPHONY_GUARD_PROMPT
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
-            "content": SYSTEM_PROMPT
+            "content": system
             + "\nConversation context (JSON): "
             + context.model_dump_json(),
         }
@@ -222,7 +284,12 @@ def run_conversation(
         iterations += 1
         step = complete_fn(messages, client.specs())
         for call in step.get("tool_calls") or []:
-            outcome = client.call(call.get("name", ""), call.get("arguments") or {})
+            gated = _telephony_gate(context, call.get("name", ""))
+            if gated is not None:
+                outcome = gated
+            else:
+                outcome = client.call(call.get("name", ""), call.get("arguments") or {})
+                _refresh_verification(context, call.get("name", ""), outcome)
             if call.get("name") == "transfer_to_human" and outcome.get("ok"):
                 escalated = True
             _apply_result_to_context(context, call.get("name", ""), outcome)
@@ -259,11 +326,14 @@ def run_conversation(
 
 __all__ = [
     "AINotConfiguredError",
+    "CALLER_IDENTITY_REQUIRED",
     "CLINICAL_DECLINE",
     "LOOP_EXHAUSTED",
     "MAX_ITERATIONS",
     "STOPPED",
     "SYSTEM_PROMPT",
+    "TELEPHONY_GUARD_PROMPT",
+    "TELEPHONY_OPEN_TOOLS",
     "groq_complete",
     "is_clinical_request",
     "run_conversation",
