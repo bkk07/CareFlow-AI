@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { api, apiError, type Notification } from "../api";
 import { EASE, Page } from "../motion";
+import { BellIcon } from "../icons";
 
 export default function Inbox() {
   const [items, setItems] = useState<Notification[]>([]);
@@ -90,7 +91,7 @@ export default function Inbox() {
               animate={{ scale: 1, rotate: 0 }}
               transition={{ type: "spring", stiffness: 260, damping: 15 }}
             >
-              ✉
+              <BellIcon size={26} />
             </motion.div>
             <h3>All caught up</h3>
             <p>Confirmations and reminders from your care team will land here.</p>

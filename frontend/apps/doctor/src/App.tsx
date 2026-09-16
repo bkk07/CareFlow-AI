@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, MotionConfig, motion } from "framer-motion";
-import { EASE } from "./motion";
+import { ActivePill, EASE } from "./motion";
+import { LogoutIcon, PlusIcon } from "./icons";
 import {
   api,
   login,
@@ -407,14 +408,14 @@ export default function App() {
         <div className="login-wrap">
           <motion.div
             className="card login-card"
-            initial={{ opacity: 0, y: 28, scale: 0.99 }}
+            initial={{ opacity: 0, y: 18, scale: 0.995 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ duration: 0.5, ease: EASE }}
+            transition={{ duration: 0.32, ease: EASE }}
           >
             <div className="login-brand">
               <span className="brand">
                 <span className="brand-badge" aria-hidden>
-                  +
+                  <PlusIcon size={18} />
                 </span>
                 CareFlow <span>AI</span>
               </span>
@@ -494,13 +495,13 @@ export default function App() {
     <div className="layout">
       <motion.aside
         className="sidebar"
-        initial={{ x: -32, opacity: 0 }}
+        initial={{ x: -20, opacity: 0 }}
         animate={{ x: 0, opacity: 1 }}
-        transition={{ duration: 0.45, ease: EASE }}
+        transition={{ duration: 0.3, ease: EASE }}
       >
         <div className="brand">
           <span className="brand-badge" aria-hidden>
-            +
+            <PlusIcon size={16} />
           </span>
           CareFlow <span>AI</span>
         </div>
@@ -514,11 +515,12 @@ export default function App() {
             whileHover={{ x: 3 }}
             whileTap={{ scale: 0.98 }}
           >
+            {tab === t && <ActivePill id="doctor-side" className="side-pill" />}
             {t === "today" ? "Today" : t === "upcoming" ? "Upcoming" : "Calendar"}
           </motion.button>
         ))}
         <div className="spacer" />
-        <button className="btn" onClick={logout}>Log out</button>
+        <button className="btn" onClick={logout}><LogoutIcon size={14} /> Log out</button>
       </motion.aside>
       <main className="content">
         <AnimatePresence mode="wait">

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { api, apiError } from "../api";
 import { EASE, Page } from "../motion";
+import { SendIcon } from "../icons";
 
 interface Turn {
   from: "you" | "agent";
@@ -143,7 +144,9 @@ export default function ChatDebug() {
                 <span className="spinner" aria-hidden /> Sending…
               </>
             ) : (
-              "Send"
+              <>
+                <SendIcon size={16} /> Send
+              </>
             )}
           </motion.button>
         </div>

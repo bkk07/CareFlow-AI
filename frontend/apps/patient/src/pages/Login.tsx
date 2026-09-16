@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { apiError, login } from "../api";
 import { EASE, Page } from "../motion";
+import { CheckIcon, PlusIcon } from "../icons";
 
 const PERKS = [
   "Real open slots, straight from clinic schedules",
@@ -34,10 +35,10 @@ export default function Login({ onDone }: { onDone: () => void }) {
         <div className="login-wrap">
           <motion.div
             className="card login-card"
-            initial={{ opacity: 0, y: 28, scale: 0.99 }}
+            initial={{ opacity: 0, y: 18, scale: 0.995 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.98 }}
-            transition={{ duration: 0.5, ease: EASE }}
+            transition={{ duration: 0.32, ease: EASE }}
           >
             <div className="login-brand">
               <motion.span
@@ -47,7 +48,7 @@ export default function Login({ onDone }: { onDone: () => void }) {
                 transition={{ delay: 0.15, duration: 0.4, ease: EASE }}
               >
                 <span className="brand-badge" aria-hidden>
-                  +
+                  <PlusIcon size={18} />
                 </span>
                 CareFlow <span>AI</span>
               </motion.span>
@@ -73,7 +74,7 @@ export default function Login({ onDone }: { onDone: () => void }) {
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: 0.34 + i * 0.08, duration: 0.35, ease: EASE }}
                   >
-                    ✓ {perk}
+                    <CheckIcon size={14} /> {perk}
                   </motion.li>
                 ))}
               </ul>

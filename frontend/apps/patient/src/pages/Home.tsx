@@ -13,6 +13,7 @@ import {
   type Hospital,
 } from "../api";
 import { EASE, Item, Page, Stagger, itemVariants } from "../motion";
+import { ClockIcon, SearchIcon } from "../icons";
 
 function initials(name: string): string {
   return name
@@ -111,21 +112,21 @@ export default function Home() {
     <Page>
       <motion.div
         className="hero"
-        initial={{ opacity: 0, y: 24, scale: 0.99 }}
+        initial={{ opacity: 0, y: 16, scale: 0.995 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.5, ease: EASE }}
+        transition={{ duration: 0.32, ease: EASE }}
       >
         <motion.h1
-          initial={{ opacity: 0, y: 18 }}
+          initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.08, ease: EASE }}
+          transition={{ duration: 0.32, delay: 0.03, ease: EASE }}
         >
           Find the right doctor, book in minutes
         </motion.h1>
         <motion.p
-          initial={{ opacity: 0, y: 14 }}
+          initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.16, ease: EASE }}
+          transition={{ duration: 0.32, delay: 0.07, ease: EASE }}
         >
           Real availability from live hospital schedules — no phone tag, no waiting rooms.
         </motion.p>
@@ -133,7 +134,7 @@ export default function Home() {
           className="hero-trust"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ duration: 0.5, delay: 0.26 }}
+          transition={{ duration: 0.32, delay: 0.11 }}
         >
           <span>
             <strong>{hospitals.length}</strong>&nbsp;partner hospitals
@@ -145,9 +146,9 @@ export default function Home() {
 
       <motion.div
         className="search-card"
-        initial={{ opacity: 0, y: 28 }}
+        initial={{ opacity: 0, y: 18 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.2, ease: EASE }}
+        transition={{ duration: 0.32, delay: 0.06, ease: EASE }}
       >
         <div className="searchbar" role="search">
           <input
@@ -185,7 +186,9 @@ export default function Home() {
                 <span className="spinner" aria-hidden /> Searching…
               </>
             ) : (
-              "Search"
+              <>
+                <SearchIcon size={17} /> Search
+              </>
             )}
           </motion.button>
         </div>
@@ -274,14 +277,14 @@ export default function Home() {
                       </p>
                       <AnimatePresence mode="wait">
                         {nextSlots[d.id] ? (
-                          <motion.span
-                            key="slot"
-                            className="next-slot"
-                            initial={{ opacity: 0, scale: 0.9 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                          >
-                            Next: {fmt(nextSlots[d.id])}
-                          </motion.span>
+                            <motion.span
+                              key="slot"
+                              className="next-slot"
+                              initial={{ opacity: 0, scale: 0.9 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                            >
+                              <ClockIcon size={14} /> Next: {fmt(nextSlots[d.id])}
+                            </motion.span>
                         ) : (
                           <motion.span
                             key="checking"
@@ -314,15 +317,15 @@ export default function Home() {
                 animate="show"
               >
                 <div className="empty">
-                  <motion.div
-                    className="empty-icon"
-                    aria-hidden
-                    initial={{ scale: 0, rotate: -30 }}
-                    animate={{ scale: 1, rotate: 0 }}
-                    transition={{ type: "spring", stiffness: 260, damping: 16, delay: 0.1 }}
-                  >
-                    ⌕
-                  </motion.div>
+                    <motion.div
+                      className="empty-icon"
+                      aria-hidden
+                      initial={{ scale: 0, rotate: -30 }}
+                      animate={{ scale: 1, rotate: 0 }}
+                      transition={{ type: "spring", stiffness: 260, damping: 16, delay: 0.1 }}
+                    >
+                      <SearchIcon size={26} />
+                    </motion.div>
                   <h3>No doctors match your search</h3>
                   <p>Try a different specialty or hospital — or ask the assistant for help.</p>
                   <Link className="btn btn-primary" to="/chat">

@@ -9,7 +9,8 @@ import {
   useLocation,
 } from "react-router-dom";
 import { api, me, restoreAccessToken, setAccessToken, type CurrentUser } from "./api";
-import { EASE } from "./motion";
+import { ActivePill, EASE } from "./motion";
+import { LogoutIcon, PlusIcon } from "./icons";
 import Book from "./pages/Book";
 import ChatDebug from "./pages/ChatDebug";
 import Home from "./pages/Home";
@@ -71,9 +72,9 @@ function Shell({ user, onLogout }: { user: CurrentUser; onLogout: () => void }) 
     <>
       <motion.header
         className="topbar"
-        initial={{ y: -56, opacity: 0 }}
+        initial={{ y: -24, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.45, ease: EASE }}
+        transition={{ duration: 0.3, ease: EASE }}
       >
         <div className="topbar-inner">
           <Link className="brand" to="/">
@@ -83,7 +84,7 @@ function Shell({ user, onLogout }: { user: CurrentUser; onLogout: () => void }) 
               whileHover={{ rotate: 90 }}
               transition={{ type: "spring", stiffness: 300, damping: 18 }}
             >
-              +
+              <PlusIcon size={16} />
             </motion.span>
             CareFlow <span>AI</span>
           </Link>
@@ -95,8 +96,13 @@ function Shell({ user, onLogout }: { user: CurrentUser; onLogout: () => void }) 
                 end={l.end}
                 className={({ isActive }) => (isActive ? "active" : "")}
               >
-                {l.label}
-                {l.to === "/inbox" && unread > 0 ? ` (${unread})` : ""}
+                {({ isActive }) => (
+                  <>
+                    {isActive && <ActivePill id="patient-nav" className="nav-pill" />}
+                    {l.label}
+                    {l.to === "/inbox" && unread > 0 ? ` (${unread})` : ""}
+                  </>
+                )}
               </NavLink>
             ))}
           </nav>
@@ -109,7 +115,7 @@ function Shell({ user, onLogout }: { user: CurrentUser; onLogout: () => void }) 
               whileHover={{ scale: 1.04 }}
               whileTap={{ scale: 0.96 }}
             >
-              Log out
+              <LogoutIcon size={14} /> Log out
             </motion.button>
           </span>
         </div>

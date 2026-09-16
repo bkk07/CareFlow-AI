@@ -12,13 +12,24 @@ import {
   type Slot,
 } from "../api";
 import { EASE, Page, popVariants } from "../motion";
+import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, SearchIcon } from "../icons";
 
 interface LocationState {
   doctor?: DoctorResult;
 }
 
-function dayLabel(iso: string): string {
-  return new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, {
+function localDay(iso: string): string {
+  // Group by the patient's LOCAL day: slot labels render local time, so the
+  // column header must use the same frame (UTC grouping orphaned late slots).
+  const d = new Date(iso);
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+function dayLabel(day: string): string {
+  const [y, m, dd] = day.split("-").map(Number);
+  return new Date(y, m - 1, dd).toLocaleDateString(undefined, {
     weekday: "short",
     month: "short",
     day: "numeric",
@@ -90,7 +101,7 @@ export default function Book({ patientId }: { patientId: string }) {
               animate={{ scale: 1 }}
               transition={{ type: "spring", stiffness: 260, damping: 16 }}
             >
-              ⌕
+              <SearchIcon size={26} />
             </motion.div>
             <h3>Pick a doctor first</h3>
             <p>Search live availability, then choose a time that suits you.</p>
@@ -110,7 +121,7 @@ export default function Book({ patientId }: { patientId: string }) {
 
   const byDay = new Map<string, Slot[]>();
   for (const s of slots) {
-    const day = s.start.slice(0, 10);
+    const day = localDay(s.start);
     const list = byDay.get(day) ?? [];
     list.push(s);
     byDay.set(day, list);
@@ -172,10 +183,11 @@ export default function Book({ patientId }: { patientId: string }) {
               <motion.span
                 key={label}
                 className={cls}
+                layout
                 animate={step === n ? { scale: [1, 1.08, 1] } : { scale: 1 }}
                 transition={{ duration: 0.3 }}
               >
-                {step > n ? "✓" : n} · {label}
+                {step > n ? <CheckIcon size={13} /> : n} · {label}
               </motion.span>
             );
           })}
@@ -225,7 +237,7 @@ export default function Book({ patientId }: { patientId: string }) {
             disabled={weekOffset === 0 || loadingSlots}
             whileTap={{ scale: 0.95 }}
           >
-            ← Prev week
+            <ChevronLeftIcon size={15} /> Prev week
           </motion.button>
           <motion.button
             className="btn btn-sm"
@@ -233,7 +245,7 @@ export default function Book({ patientId }: { patientId: string }) {
             disabled={loadingSlots}
             whileTap={{ scale: 0.95 }}
           >
-            Next week →
+            Next week <ChevronRightIcon size={15} />
           </motion.button>
           <span className="spacer" />
           {loadingSlots && (
@@ -278,6 +290,7 @@ export default function Book({ patientId }: { patientId: string }) {
                 <motion.div
                   className="slot-day"
                   key={day}
+                  layout
                   variants={{
                     hidden: { opacity: 0, y: 14 },
                     show: { opacity: 1, y: 0, transition: { duration: 0.3, ease: EASE } },
@@ -287,6 +300,7 @@ export default function Book({ patientId }: { patientId: string }) {
                   {list.map((s) => (
                     <motion.button
                       key={s.start}
+                      layout
                       className={`slot${selected?.start === s.start ? " selected" : ""}`}
                       onClick={() => setSelected(s)}
                       aria-pressed={selected?.start === s.start}
@@ -308,7 +322,7 @@ export default function Book({ patientId }: { patientId: string }) {
               exit={{ opacity: 0 }}
             >
               <div className="empty-icon" aria-hidden>
-                ◷
+                <ClockIcon size={26} />
               </div>
               <h3>No open slots this week</h3>
               <p>Try the next week — new availability opens regularly.</p>

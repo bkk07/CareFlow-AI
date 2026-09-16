@@ -10,6 +10,7 @@ import {
   type QuestionnaireResponse,
 } from "../api";
 import { EASE, Page, popVariants } from "../motion";
+import { ClockIcon, XIcon } from "../icons";
 
 const LIVE = ["confirmed", "rescheduled", "sync_pending", "reconciliation_required"];
 
@@ -223,7 +224,7 @@ export default function Visits() {
               animate={{ scale: 1 }}
               transition={{ type: "spring", stiffness: 260, damping: 16 }}
             >
-              ◷
+              <ClockIcon size={26} />
             </motion.div>
             <h3>Nothing scheduled</h3>
             <p>Book your next visit in under a minute.</p>
@@ -253,7 +254,7 @@ export default function Visits() {
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
               >
-                Close ✕
+                Close <XIcon size={14} />
               </motion.button>
             </div>
             <p>

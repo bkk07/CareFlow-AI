@@ -688,3 +688,27 @@ doctor dev serves HTTP 200 on :5177 and compose config is valid.
   per-run-unique specialties so reruns never match stale rows.
 - Verification: 263/263 pytest green (220 existing + 43 new), both
   Playwright specs green headless, scratch stack torn down.
+
+## UI polish pass — toward professional grade (rated 6, pushing to 8)
+
+> user asked for an honest 1-10 UI rating vs professional realtime sites,
+  then to use framer motion to push it to 9
+
+- Honest rating from fresh screenshots: 6/10 (not a 1 — coherent system,
+  real end-to-end flows; capped by emoji iconography, system font stack,
+  slow entrances, single-column slot list, one UTC/local grouping bug).
+  Stated upfront that motion alone cannot reach 9; this pass targets 8.
+- Foundation (mirrored x3): Inter via Google Fonts (+ preconnect,
+  system fallback offline), new `src/icons.tsx` — 24 hand-drawn stroke
+  SVGs, zero dependencies — replacing every emoji glyph (search, clock,
+  check, chevrons, mic, bell, logout, plus, send, ...).
+- Motion language v2 (`motion.tsx` x3): first-paint entrances cut
+  ~0.5s -> ~0.3s, spring presets, opacity-only Fade, whileInView Reveal,
+  and `ActivePill` layoutId sliding indicators — nav pill (patient) and
+  sidebar highlight (admin/doctor) now glide instead of blinking.
+- Fixes: slot day-columns group by LOCAL day (was UTC date + local
+  times, orphaning late slots), hero uses text-wrap:balance, slot times
+  tabular-nums, mic live-ring, layout-animated slots/steps.
+- Verification: builds x3 green (identical CSS hash confirms mirror),
+  fresh screenshots confirm Inter/icons/pills, both Playwright specs
+  still green (16.5s), scratch stack torn down.

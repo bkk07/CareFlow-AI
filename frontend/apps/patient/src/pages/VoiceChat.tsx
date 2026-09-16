@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useWebRTCAudio } from "../voice/useWebRTCAudio";
 import { restoreAccessToken } from "../api";
 import { EASE, Page } from "../motion";
+import { MicIcon } from "../icons";
 
 const API_BASE =
   (import.meta.env.VITE_API_URL as string | undefined) ??
@@ -76,7 +77,7 @@ export default function VoiceChat() {
                 whileHover={{ scale: 1.06 }}
                 whileTap={{ scale: 0.92 }}
               >
-                🎙
+                <MicIcon size={30} />
               </motion.button>
             ) : (
               <motion.div
@@ -90,13 +91,13 @@ export default function VoiceChat() {
                   aria-hidden
                   animate={{ scale: [1, 1.06, 1] }}
                   transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
                 >
-                  🎙
+                  <MicIcon size={30} />
+                  <motion.span
+                    className="mic-ring"
+                    animate={{ scale: [1, 1.35], opacity: [0.6, 0] }}
+                    transition={{ duration: 1.6, repeat: Infinity, ease: "easeOut" }}
+                  />
                 </motion.div>
                 <div className="toolbar" style={{ justifyContent: "center" }}>
                   <motion.button
