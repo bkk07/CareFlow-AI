@@ -922,6 +922,44 @@ def test_chat_endpoint_maps_model_failure_to_502(client, monkeypatch, tool_facto
     assert resp.status_code == 502
 
 
+def test_tool_reschedule_cancel_and_sync_roundtrip(client, tool_factory):
+    setup = seed_setup(client, tag="movecancel")
+    booked = book_via_tool(client, setup, key="move-1").json()["result"]
+    appt_id = booked["appointment_id"]
+    h = setup["patient"]["headers"]
+    start2, end2 = slot_iso(hour=10)
+
+    moved = client.post(
+        "/mcp/call",
+        json={
+            "tool": "reschedule_appointment",
+            "input": {
+                "appointment_id": appt_id,
+                "slot_start": start2,
+                "slot_end": end2,
+            },
+        },
+        headers=h,
+    )
+    assert moved.status_code == 200
+    assert moved.json()["result"]["state"] == "rescheduled"
+
+    synced = client.post(
+        "/mcp/call",
+        json={"tool": "synchronize_state", "input": {"appointment_id": appt_id}},
+        headers=h,
+    )
+    assert synced.status_code == 200
+    assert synced.json()["result"]["synchronized"] is True
+
+    cancelled = client.post(
+        "/mcp/call",
+        json={"tool": "cancel_appointment", "input": {"appointment_id": appt_id}},
+        headers=h,
+    )
+    assert cancelled.json()["result"]["state"] == "cancelled"
+
+
 def test_mcp_call_maps_bad_input_to_422(client, tool_factory):
     setup = seed_setup(client, tag="badinput")
     resp = client.post(

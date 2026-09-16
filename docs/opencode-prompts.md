@@ -326,3 +326,21 @@ Findings and fixes (all verified, no new phases):
   (key material, pre-existing decision), Phase 10/11 501 stubs,
   patient-visible 200-with-outcome on tool booking (agent relays
   it; REST keeps strict 201/202/502).
+
+## Fix-all sweep (Phases 0-9)
+
+> fix all
+
+Remaining findings and fixes:
+
+- `backend/.env.example` sat untracked although `.gitignore`
+  (`!.env.example`) explicitly keeps example files in the repo.
+  Verified both values are empty (no secret), dropped the dead
+  `GROQ_REASONING_MODEL` line (read by nothing in code), and
+  committed it. Real `backend/.env` stays gitignored; a
+  `git grep gsk_` sweep confirms no key material is tracked.
+- `infra/.env.example` now documents `GROQ_API_KEY` as an accepted
+  alias for `LLM_API_KEY`.
+- Added a tool reschedule/cancel/synchronize round-trip test over
+  `/mcp/call` — the last untested tool paths.
+- No TODO/FIXME markers anywhere; unused-import scan clean.
