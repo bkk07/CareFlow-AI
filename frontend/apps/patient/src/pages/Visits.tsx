@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import {
   api,
@@ -8,6 +9,7 @@ import {
   type Questionnaire,
   type QuestionnaireResponse,
 } from "../api";
+import { EASE, Page, popVariants } from "../motion";
 
 const LIVE = ["confirmed", "rescheduled", "sync_pending", "reconciliation_required"];
 
@@ -145,24 +147,55 @@ export default function Visits() {
   const upcoming = items.filter((a) => LIVE.includes(a.state));
   const past = items.filter((a) => !LIVE.includes(a.state));
 
-  function visitRow(a: Appointment, action: string) {
+  function visitRow(a: Appointment, action: string, index: number) {
     return (
-      <div className="row-item" key={a.id}>
+      <motion.div
+        className="row-item"
+        key={a.id}
+        initial={{ opacity: 0, x: -14 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.3, delay: Math.min(index * 0.05, 0.3), ease: EASE }}
+      >
         <span className={`pill pill-${a.state}`}>{a.state.replace(/_/g, " ")}</span>
         <div className="grow">
           <p className="title">{fmt(a.slot_start)}</p>
         </div>
-        <button className="btn btn-sm" onClick={() => void showDetail(a.id)}>
+        <motion.button
+          className="btn btn-sm"
+          onClick={() => void showDetail(a.id)}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+        >
           {action}
-        </button>
-      </div>
+        </motion.button>
+      </motion.div>
     );
   }
 
   return (
-    <>
-      {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
+    <Page>
+      <AnimatePresence>
+        {error && (
+          <motion.p
+            className="error"
+            initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+            animate={{ opacity: 1, height: "auto", marginBottom: "1rem" }}
+            exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+          >
+            {error}
+          </motion.p>
+        )}
+        {notice && (
+          <motion.p
+            className="notice"
+            initial={{ opacity: 0, scale: 0.97 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            {notice}
+          </motion.p>
+        )}
+      </AnimatePresence>
       <div className="card">
         <div className="section-head" style={{ marginTop: 0 }}>
           <h2>Upcoming visits ({loading ? "…" : upcoming.length})</h2>
@@ -180,12 +213,18 @@ export default function Visits() {
             ))}
           </div>
         ) : upcoming.length > 0 ? (
-          <div className="row-list">{upcoming.map((a) => visitRow(a, "Manage"))}</div>
+          <div className="row-list">{upcoming.map((a, i) => visitRow(a, "Manage", i))}</div>
         ) : (
           <div className="empty">
-            <div className="empty-icon" aria-hidden>
+            <motion.div
+              className="empty-icon"
+              aria-hidden
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ type: "spring", stiffness: 260, damping: 16 }}
+            >
               ◷
-            </div>
+            </motion.div>
             <h3>Nothing scheduled</h3>
             <p>Book your next visit in under a minute.</p>
             <Link className="btn btn-primary" to="/">
@@ -195,197 +234,242 @@ export default function Visits() {
         )}
       </div>
 
-      {detail && (
-        <div className="card">
-          <div className="section-head" style={{ marginTop: 0 }}>
-            <h3>Visit details</h3>
-            <button className="btn btn-sm btn-ghost" onClick={() => setDetail(null)}>
-              Close ✕
-            </button>
-          </div>
-          <p>
-            <span className={`pill pill-${detail.state}`}>{detail.state.replace(/_/g, " ")}</span>{" "}
-            <strong>{fmt(detail.slot_start)}</strong> –{" "}
-            {new Date(detail.slot_end).toLocaleTimeString(undefined, {
-              hour: "numeric",
-              minute: "2-digit",
-            })}
-          </p>
-          {(detail.state === "confirmed" || detail.state === "rescheduled") && (
-            <div className="toolbar">
-              <button className="btn btn-danger btn-sm" onClick={() => void cancel(detail.id)}>
-                Cancel visit
-              </button>
-              <button className="btn btn-sm" onClick={() => setRescheduling((v) => !v)}>
-                Reschedule
-              </button>
+      <AnimatePresence>
+        {detail && (
+          <motion.div
+            className="card"
+            key={detail.id}
+            variants={popVariants}
+            initial="hidden"
+            animate="show"
+            exit="exit"
+            layout
+          >
+            <div className="section-head" style={{ marginTop: 0 }}>
+              <h3>Visit details</h3>
+              <motion.button
+                className="btn btn-sm btn-ghost"
+                onClick={() => setDetail(null)}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                Close ✕
+              </motion.button>
             </div>
-          )}
-          {rescheduling && (
-            <div className="form-row" style={{ maxWidth: 640 }}>
-              <div className="field">
-                <label>New start</label>
-                <input
-                  className="input"
-                  type="datetime-local"
-                  value={newStart}
-                  onChange={(e) => setNewStart(e.target.value)}
-                />
-              </div>
-              <div className="field">
-                <label>New end</label>
-                <input
-                  className="input"
-                  type="datetime-local"
-                  value={newEnd}
-                  onChange={(e) => setNewEnd(e.target.value)}
-                />
-              </div>
-              <div className="field">
-                <button
-                  className="btn btn-primary"
-                  onClick={() => void reschedule(detail.id)}
-                  disabled={!newStart || !newEnd}
+            <p>
+              <span className={`pill pill-${detail.state}`}>{detail.state.replace(/_/g, " ")}</span>{" "}
+              <strong>{fmt(detail.slot_start)}</strong> –{" "}
+              {new Date(detail.slot_end).toLocaleTimeString(undefined, {
+                hour: "numeric",
+                minute: "2-digit",
+              })}
+            </p>
+            {(detail.state === "confirmed" || detail.state === "rescheduled") && (
+              <div className="toolbar">
+                <motion.button
+                  className="btn btn-danger btn-sm"
+                  onClick={() => void cancel(detail.id)}
+                  whileHover={{ scale: 1.04 }}
+                  whileTap={{ scale: 0.96 }}
                 >
-                  Move visit
-                </button>
+                  Cancel visit
+                </motion.button>
+                <motion.button
+                  className="btn btn-sm"
+                  onClick={() => setRescheduling((v) => !v)}
+                  whileTap={{ scale: 0.96 }}
+                >
+                  Reschedule
+                </motion.button>
               </div>
-            </div>
-          )}
-          <h4>History</h4>
-          {detail.history.length > 0 ? (
-            <div className="row-list">
-              {detail.history.map((h) => (
-                <div className="row-item" key={h.id}>
-                  <span className={`pill pill-${h.to_state}`}>{h.to_state.replace(/_/g, " ")}</span>
-                  <div className="grow">
-                    <p className="sub">
-                      {h.from_state.replace(/_/g, " ")} → {h.to_state.replace(/_/g, " ")}
-                      {h.reason ? ` · ${h.reason}` : ""}
-                    </p>
+            )}
+            <AnimatePresence initial={false}>
+              {rescheduling && (
+                <motion.div
+                  className="form-row"
+                  style={{ maxWidth: 640 }}
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.28, ease: EASE }}
+                >
+                  <div className="field">
+                    <label>New start</label>
+                    <input
+                      className="input"
+                      type="datetime-local"
+                      value={newStart}
+                      onChange={(e) => setNewStart(e.target.value)}
+                    />
                   </div>
-                  <span className="muted" style={{ fontSize: "0.83rem" }}>
-                    {new Date(h.created_at).toLocaleString()}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="muted">No transitions recorded.</p>
-          )}
+                  <div className="field">
+                    <label>New end</label>
+                    <input
+                      className="input"
+                      type="datetime-local"
+                      value={newEnd}
+                      onChange={(e) => setNewEnd(e.target.value)}
+                    />
+                  </div>
+                  <div className="field">
+                    <motion.button
+                      className="btn btn-primary"
+                      onClick={() => void reschedule(detail.id)}
+                      disabled={!newStart || !newEnd}
+                      whileTap={{ scale: 0.96 }}
+                    >
+                      Move visit
+                    </motion.button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+            <h4>History</h4>
+            {detail.history.length > 0 ? (
+              <div className="row-list">
+                {detail.history.map((h, i) => (
+                  <motion.div
+                    className="row-item"
+                    key={h.id}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: Math.min(i * 0.04, 0.2) }}
+                  >
+                    <span className={`pill pill-${h.to_state}`}>{h.to_state.replace(/_/g, " ")}</span>
+                    <div className="grow">
+                      <p className="sub">
+                        {h.from_state.replace(/_/g, " ")} → {h.to_state.replace(/_/g, " ")}
+                        {h.reason ? ` · ${h.reason}` : ""}
+                      </p>
+                    </div>
+                    <span className="muted" style={{ fontSize: "0.83rem" }}>
+                      {new Date(h.created_at).toLocaleString()}
+                    </span>
+                  </motion.div>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">No transitions recorded.</p>
+            )}
 
-          {formState === "ready" && form && (
-            <>
-              <h4>Pre-visit questions — {form.name}</h4>
-              {form.questions.map((q) => (
-                <div className="field" key={q.id} style={{ maxWidth: 560 }}>
-                  <label>
-                    {q.prompt} {q.required ? "" : "(optional)"}
-                  </label>
-                  {q.type === "yes_no" && (
-                    <select
-                      className="select"
-                      value={String(answers[q.id] ?? false)}
-                      onChange={(e) => setAnswer(q.id, e.target.value === "true")}
-                    >
-                      <option value="false">No</option>
-                      <option value="true">Yes</option>
-                    </select>
-                  )}
-                  {q.type === "choice" && (
-                    <select
-                      className="select"
-                      value={String(answers[q.id] ?? "")}
-                      onChange={(e) => setAnswer(q.id, e.target.value)}
-                    >
-                      <option value="">Select…</option>
-                      {(q.options ?? []).map((o) => (
-                        <option key={o} value={o}>
+            {formState === "ready" && form && (
+              <>
+                <h4>Pre-visit questions — {form.name}</h4>
+                {form.questions.map((q) => (
+                  <div className="field" key={q.id} style={{ maxWidth: 560 }}>
+                    <label>
+                      {q.prompt} {q.required ? "" : "(optional)"}
+                    </label>
+                    {q.type === "yes_no" && (
+                      <select
+                        className="select"
+                        value={String(answers[q.id] ?? false)}
+                        onChange={(e) => setAnswer(q.id, e.target.value === "true")}
+                      >
+                        <option value="false">No</option>
+                        <option value="true">Yes</option>
+                      </select>
+                    )}
+                    {q.type === "choice" && (
+                      <select
+                        className="select"
+                        value={String(answers[q.id] ?? "")}
+                        onChange={(e) => setAnswer(q.id, e.target.value)}
+                      >
+                        <option value="">Select…</option>
+                        {(q.options ?? []).map((o) => (
+                          <option key={o} value={o}>
+                            {o}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {q.type === "multi_choice" &&
+                      (q.options ?? []).map((o) => (
+                        <label key={o} style={{ marginRight: "0.75rem", fontWeight: 400 }}>
+                          <input
+                            type="checkbox"
+                            checked={((answers[q.id] as string[]) ?? []).includes(o)}
+                            onChange={(e) => {
+                              const cur = ((answers[q.id] as string[]) ?? []).slice();
+                              setAnswer(
+                                q.id,
+                                e.target.checked ? [...cur, o] : cur.filter((x) => x !== o),
+                              );
+                            }}
+                          />{" "}
                           {o}
-                        </option>
+                        </label>
                       ))}
-                    </select>
-                  )}
-                  {q.type === "multi_choice" &&
-                    (q.options ?? []).map((o) => (
-                      <label key={o} style={{ marginRight: "0.75rem", fontWeight: 400 }}>
-                        <input
-                          type="checkbox"
-                          checked={((answers[q.id] as string[]) ?? []).includes(o)}
-                          onChange={(e) => {
-                            const cur = ((answers[q.id] as string[]) ?? []).slice();
-                            setAnswer(
-                              q.id,
-                              e.target.checked ? [...cur, o] : cur.filter((x) => x !== o),
-                            );
-                          }}
-                        />{" "}
-                        {o}
-                      </label>
-                    ))}
-                  {q.type === "numeric" && (
-                    <input
-                      className="input"
-                      type="number"
-                      value={String(answers[q.id] ?? "")}
-                      onChange={(e) =>
-                        setAnswer(q.id, e.target.value === "" ? "" : Number(e.target.value))
-                      }
-                    />
-                  )}
-                  {q.type === "date" && (
-                    <input
-                      className="input"
-                      type="date"
-                      value={String(answers[q.id] ?? "")}
-                      onChange={(e) => setAnswer(q.id, e.target.value)}
-                    />
-                  )}
-                  {(q.type === "short_text" || q.type === "long_text") &&
-                    (q.type === "short_text" ? (
+                    {q.type === "numeric" && (
                       <input
                         className="input"
-                        style={{ width: "100%" }}
+                        type="number"
                         value={String(answers[q.id] ?? "")}
-                        onChange={(e) => setAnswer(q.id, e.target.value)}
+                        onChange={(e) =>
+                          setAnswer(q.id, e.target.value === "" ? "" : Number(e.target.value))
+                        }
                       />
-                    ) : (
-                      <textarea
+                    )}
+                    {q.type === "date" && (
+                      <input
                         className="input"
-                        rows={3}
+                        type="date"
                         value={String(answers[q.id] ?? "")}
                         onChange={(e) => setAnswer(q.id, e.target.value)}
                       />
-                    ))}
-                  {q.type === "structured" && (
-                    <p className="muted">Structured answers are collected via the assistant.</p>
-                  )}
-                </div>
-              ))}
-              <button className="btn btn-primary" onClick={() => void submitAnswers()}>
-                Save answers
-              </button>
-              {saved.length > 0 && (
-                <p className="muted">
-                  Last saved: {saved[0].completed ? "complete" : "draft"} ·{" "}
-                  {saved[0].completed_at
-                    ? new Date(saved[0].completed_at).toLocaleString()
-                    : "in progress"}
-                </p>
-              )}
-            </>
-          )}
-        </div>
-      )}
+                    )}
+                    {(q.type === "short_text" || q.type === "long_text") &&
+                      (q.type === "short_text" ? (
+                        <input
+                          className="input"
+                          style={{ width: "100%" }}
+                          value={String(answers[q.id] ?? "")}
+                          onChange={(e) => setAnswer(q.id, e.target.value)}
+                        />
+                      ) : (
+                        <textarea
+                          className="input"
+                          rows={3}
+                          value={String(answers[q.id] ?? "")}
+                          onChange={(e) => setAnswer(q.id, e.target.value)}
+                        />
+                      ))}
+                    {q.type === "structured" && (
+                      <p className="muted">Structured answers are collected via the assistant.</p>
+                    )}
+                  </div>
+                ))}
+                <motion.button
+                  className="btn btn-primary"
+                  onClick={() => void submitAnswers()}
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
+                >
+                  Save answers
+                </motion.button>
+                {saved.length > 0 && (
+                  <p className="muted">
+                    Last saved: {saved[0].completed ? "complete" : "draft"} ·{" "}
+                    {saved[0].completed_at
+                      ? new Date(saved[0].completed_at).toLocaleString()
+                      : "in progress"}
+                  </p>
+                )}
+              </>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="card">
         <h2>Past visits ({past.length})</h2>
         {past.length > 0 ? (
-          <div className="row-list">{past.map((a) => visitRow(a, "View"))}</div>
+          <div className="row-list">{past.map((a, i) => visitRow(a, "View", i))}</div>
         ) : (
           <p className="muted">No past visits yet.</p>
         )}
       </div>
-    </>
+    </Page>
   );
 }

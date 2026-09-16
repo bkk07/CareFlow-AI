@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+import { AnimatePresence, MotionConfig, motion } from "framer-motion";
+import { EASE } from "./motion";
 import {
   api,
   login,
@@ -608,7 +610,12 @@ function AppointmentManager({ hospitalId }: { hospitalId: string }) {
         </tbody>
       </table>
       {detail && (
-        <div style={{ marginTop: "1rem" }}>
+        <motion.div
+          style={{ marginTop: "1rem" }}
+          initial={{ opacity: 0, y: 12, scale: 0.99 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.3, ease: EASE }}
+        >
           <h3>Appointment detail</h3>
           <p>
             {detail.id} · patient {detail.patient_id.slice(0, 8)} · type{" "}
@@ -625,7 +632,7 @@ function AppointmentManager({ hospitalId }: { hospitalId: string }) {
             {detail.history.length === 0 && <li>No transitions recorded.</li>}
           </ul>
           <button className="btn" onClick={() => setDetail(null)}>Close</button>
-        </div>
+        </motion.div>
       )}
     </section>
   );
@@ -971,7 +978,12 @@ function OperationsTab() {
         </tbody>
       </table>
       {detail && (
-        <div style={{ marginTop: "1rem" }}>
+        <motion.div
+          style={{ marginTop: "1rem" }}
+          initial={{ opacity: 0, y: 12, scale: 0.99 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.3, ease: EASE }}
+        >
           <h3>Record detail</h3>
           <p>
             Appointment {detail.appointment.id} · state{" "}
@@ -1009,22 +1021,26 @@ function OperationsTab() {
                   </option>
                 ))}
               </select>
-              <button
+              <motion.button
+                className="btn btn-primary"
                 onClick={() => void resolve(detail.id, "resolved")}
                 disabled={!note.trim()}
+                whileTap={{ scale: 0.96 }}
               >
                 Resolve + move booking
-              </button>{" "}
-              <button
+              </motion.button>{" "}
+              <motion.button
+                className="btn"
                 onClick={() => void resolve(detail.id, "escalated")}
                 disabled={!note.trim()}
+                whileTap={{ scale: 0.96 }}
               >
                 Escalate
-              </button>
+              </motion.button>
             </div>
           )}
           <button className="btn" onClick={() => setDetail(null)}>Close</button>
-        </div>
+        </motion.div>
       )}
     </section>
   );
@@ -1313,7 +1329,12 @@ export default function App() {
     return (
       <div className="container">
         <div className="login-wrap">
-          <div className="card login-card">
+          <motion.div
+            className="card login-card"
+            initial={{ opacity: 0, y: 28, scale: 0.99 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.5, ease: EASE }}
+          >
             <div className="login-brand">
               <span className="brand">
                 <span className="brand-badge" aria-hidden>
@@ -1347,15 +1368,17 @@ export default function App() {
                   }}
                 />
               </div>
-              <button
+              <motion.button
                 className="btn btn-primary btn-lg"
                 style={{ width: "100%" }}
                 onClick={() => void doLogin()}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
               >
                 Log in
-              </button>
+              </motion.button>
             </div>
-          </div>
+          </motion.div>
         </div>
       </div>
     );
@@ -1427,8 +1450,14 @@ export default function App() {
       ];
 
   return (
+    <MotionConfig reducedMotion="user">
     <div className="layout">
-      <aside className="sidebar">
+      <motion.aside
+        className="sidebar"
+        initial={{ x: -32, opacity: 0 }}
+        animate={{ x: 0, opacity: 1 }}
+        transition={{ duration: 0.45, ease: EASE }}
+      >
         <div className="brand">
           <span className="brand-badge" aria-hidden>
             +
@@ -1442,20 +1471,30 @@ export default function App() {
           <div className="side-group" key={g.label}>
             <div className="side-label">{g.label}</div>
             {g.tabs.map((t) => (
-              <button
+              <motion.button
                 key={t}
                 className={activeTab === t ? "active" : ""}
                 onClick={() => setTab(t)}
+                whileHover={{ x: 3 }}
+                whileTap={{ scale: 0.98 }}
               >
                 {TAB_LABELS[t]}
-              </button>
+              </motion.button>
             ))}
           </div>
         ))}
         <div className="spacer" />
         <button className="btn" onClick={logout}>Log out</button>
-      </aside>
+      </motion.aside>
       <main className="content">
+      <AnimatePresence mode="wait">
+      <motion.div
+        key={activeTab}
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -8 }}
+        transition={{ duration: 0.28, ease: EASE }}
+      >
       {activeTab === "overview" && <OverviewTab hospitalId={hospitalId} />}
       {activeTab === "departments" && (
         <NamedManager
@@ -1492,7 +1531,10 @@ export default function App() {
       {activeTab === "platform-appointments" && <PlatformAppointmentsTab />}
       {activeTab === "platform-ai" && <PlatformAITab />}
       {activeTab === "platform-audit" && <PlatformAuditTab />}
+      </motion.div>
+      </AnimatePresence>
       </main>
     </div>
+    </MotionConfig>
   );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   api,
   apiError,
@@ -10,6 +11,7 @@ import {
   type Hospital,
   type Preferences,
 } from "../api";
+import { EASE, Item, Page, Stagger } from "../motion";
 
 const TIMES = ["morning", "afternoon", "evening"];
 const MODES = ["in_person", "video", "phone"];
@@ -26,6 +28,7 @@ export default function Preferences() {
   const [mode, setMode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     api
@@ -60,6 +63,7 @@ export default function Preferences() {
   async function save() {
     setError(null);
     setNotice(null);
+    setSaving(true);
     try {
       const { data } = await api.put<Preferences>("/patients/me/preferences", {
         preferred_hospital_id: hospitalId || null,
@@ -72,23 +76,34 @@ export default function Preferences() {
       setNotice("Preferences saved.");
     } catch (e) {
       setError(apiError(e));
+    } finally {
+      setSaving(false);
     }
   }
 
-  if (error && !prefs) return <p className="error">{error}</p>;
-  if (!prefs) return <p className="muted">Loading…</p>;
+  if (error && !prefs)
+    return (
+      <Page>
+        <p className="error">{error}</p>
+      </Page>
+    );
+  if (!prefs)
+    return (
+      <Page>
+        <div className="card" aria-live="polite">
+          <div className="skeleton" style={{ width: "40%", marginBottom: 12 }} />
+          <div className="skeleton" style={{ height: 40, marginBottom: 10 }} />
+          <div className="skeleton" style={{ height: 40, marginBottom: 10 }} />
+          <div className="skeleton" style={{ height: 40 }} />
+        </div>
+      </Page>
+    );
 
-  return (
-    <div className="card">
-      <h2>Your preferences</h2>
-      <p className="muted">
-        We use these to suggest the right doctors and times — and the assistant
-        remembers them too.
-      </p>
-      {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
-      <div className="field">
-        <label>Preferred hospital</label>
+  const fields = [
+    {
+      key: "hospital",
+      label: "Preferred hospital",
+      control: (
         <select className="select" value={hospitalId} onChange={(e) => setHospitalId(e.target.value)}>
           <option value="">No preference</option>
           {hospitals.map((h) => (
@@ -97,9 +112,12 @@ export default function Preferences() {
             </option>
           ))}
         </select>
-      </div>
-      <div className="field">
-        <label>Preferred doctor</label>
+      ),
+    },
+    {
+      key: "doctor",
+      label: "Preferred doctor",
+      control: (
         <select
           className="select"
           value={doctorId}
@@ -113,9 +131,12 @@ export default function Preferences() {
             </option>
           ))}
         </select>
-      </div>
-      <div className="field">
-        <label>Preferred visit type</label>
+      ),
+    },
+    {
+      key: "type",
+      label: "Preferred visit type",
+      control: (
         <select
           className="select"
           value={typeId}
@@ -129,9 +150,12 @@ export default function Preferences() {
             </option>
           ))}
         </select>
-      </div>
-      <div className="field">
-        <label>Preferred time of day</label>
+      ),
+    },
+    {
+      key: "time",
+      label: "Preferred time of day",
+      control: (
         <select className="select" value={time} onChange={(e) => setTime(e.target.value)}>
           <option value="">No preference</option>
           {TIMES.map((t) => (
@@ -140,9 +164,12 @@ export default function Preferences() {
             </option>
           ))}
         </select>
-      </div>
-      <div className="field">
-        <label>Preferred consultation mode</label>
+      ),
+    },
+    {
+      key: "mode",
+      label: "Preferred consultation mode",
+      control: (
         <select className="select" value={mode} onChange={(e) => setMode(e.target.value)}>
           <option value="">No preference</option>
           {MODES.map((m) => (
@@ -151,10 +178,67 @@ export default function Preferences() {
             </option>
           ))}
         </select>
+      ),
+    },
+  ];
+
+  return (
+    <Page>
+      <div className="card">
+        <h2>Your preferences</h2>
+        <p className="muted">
+          We use these to suggest the right doctors and times — and the assistant
+          remembers them too.
+        </p>
+        <AnimatePresence>
+          {error && (
+            <motion.p
+              className="error"
+              initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+              animate={{ opacity: 1, height: "auto", marginBottom: "1rem" }}
+              exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+            >
+              {error}
+            </motion.p>
+          )}
+          {notice && (
+            <motion.p
+              className="notice"
+              initial={{ opacity: 0, scale: 0.97 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              {notice}
+            </motion.p>
+          )}
+        </AnimatePresence>
+        <Stagger>
+          {fields.map((f) => (
+            <Item key={f.key}>
+              <div className="field">
+                <label>{f.label}</label>
+                {f.control}
+              </div>
+            </Item>
+          ))}
+        </Stagger>
+        <motion.button
+          className="btn btn-primary"
+          onClick={() => void save()}
+          disabled={saving}
+          whileHover={saving ? undefined : { scale: 1.03 }}
+          whileTap={saving ? undefined : { scale: 0.97 }}
+          transition={{ duration: 0.2, ease: EASE }}
+        >
+          {saving ? (
+            <>
+              <span className="spinner" aria-hidden /> Saving…
+            </>
+          ) : (
+            "Save preferences"
+          )}
+        </motion.button>
       </div>
-      <button className="btn btn-primary" onClick={() => void save()}>
-        Save preferences
-      </button>
-    </div>
+    </Page>
   );
 }

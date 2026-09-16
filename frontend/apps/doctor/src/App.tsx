@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+import { AnimatePresence, MotionConfig, motion } from "framer-motion";
+import { EASE } from "./motion";
 import {
   api,
   login,
@@ -115,7 +117,12 @@ function AppointmentList({ range }: { range: "today" | "upcoming" }) {
       <ErrorNote error={error} />
       <AppointmentTable items={items} onDetail={(id) => void showDetail(id)} />
       {detail && (
-        <div style={{ marginTop: "1rem" }}>
+        <motion.div
+          style={{ marginTop: "1rem" }}
+          initial={{ opacity: 0, y: 12, scale: 0.99 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.3, ease: EASE }}
+        >
           <h3>Appointment detail</h3>
           <p>
             Patient {detail.patient_id.slice(0, 8)} · {detail.state} · external{" "}
@@ -133,7 +140,7 @@ function AppointmentList({ range }: { range: "today" | "upcoming" }) {
           ))}
           {responses.length === 0 && <p>No responses submitted.</p>}
           <button className="btn" onClick={() => setDetail(null)}>Close</button>
-        </div>
+        </motion.div>
       )}
     </section>
   );
@@ -398,7 +405,12 @@ export default function App() {
     return (
       <div className="container">
         <div className="login-wrap">
-          <div className="card login-card">
+          <motion.div
+            className="card login-card"
+            initial={{ opacity: 0, y: 28, scale: 0.99 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.5, ease: EASE }}
+          >
             <div className="login-brand">
               <span className="brand">
                 <span className="brand-badge" aria-hidden>
@@ -432,15 +444,17 @@ export default function App() {
                   }}
                 />
               </div>
-              <button
+              <motion.button
                 className="btn btn-primary btn-lg"
                 style={{ width: "100%" }}
                 onClick={() => void doLogin()}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
               >
                 Log in
-              </button>
+              </motion.button>
             </div>
-          </div>
+          </motion.div>
         </div>
       </div>
     );
@@ -476,8 +490,14 @@ export default function App() {
   }
 
   return (
+    <MotionConfig reducedMotion="user">
     <div className="layout">
-      <aside className="sidebar">
+      <motion.aside
+        className="sidebar"
+        initial={{ x: -32, opacity: 0 }}
+        animate={{ x: 0, opacity: 1 }}
+        transition={{ duration: 0.45, ease: EASE }}
+      >
         <div className="brand">
           <span className="brand-badge" aria-hidden>
             +
@@ -487,22 +507,35 @@ export default function App() {
         <div className="who">{profile?.name}</div>
         <div className="side-label">Schedule</div>
         {(["today", "upcoming", "calendar"] as Tab[]).map((t) => (
-          <button
+          <motion.button
             key={t}
             className={tab === t ? "active" : ""}
             onClick={() => setTab(t)}
+            whileHover={{ x: 3 }}
+            whileTap={{ scale: 0.98 }}
           >
             {t === "today" ? "Today" : t === "upcoming" ? "Upcoming" : "Calendar"}
-          </button>
+          </motion.button>
         ))}
         <div className="spacer" />
         <button className="btn" onClick={logout}>Log out</button>
-      </aside>
+      </motion.aside>
       <main className="content">
-        {tab === "today" && <AppointmentList range="today" />}
-        {tab === "upcoming" && <AppointmentList range="upcoming" />}
-        {tab === "calendar" && profile && <CalendarEditor profile={profile} />}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={tab}
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.28, ease: EASE }}
+          >
+            {tab === "today" && <AppointmentList range="today" />}
+            {tab === "upcoming" && <AppointmentList range="upcoming" />}
+            {tab === "calendar" && profile && <CalendarEditor profile={profile} />}
+          </motion.div>
+        </AnimatePresence>
       </main>
     </div>
+    </MotionConfig>
   );
 }

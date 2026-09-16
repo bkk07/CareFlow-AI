@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   api,
@@ -10,6 +11,7 @@ import {
   type DoctorResult,
   type Slot,
 } from "../api";
+import { EASE, Page, popVariants } from "../motion";
 
 interface LocationState {
   doctor?: DoctorResult;
@@ -78,18 +80,31 @@ export default function Book({ patientId }: { patientId: string }) {
 
   if (!doctor) {
     return (
-      <div className="card">
-        <div className="empty">
-          <div className="empty-icon" aria-hidden>
-            ⌕
+      <Page>
+        <div className="card">
+          <div className="empty">
+            <motion.div
+              className="empty-icon"
+              aria-hidden
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ type: "spring", stiffness: 260, damping: 16 }}
+            >
+              ⌕
+            </motion.div>
+            <h3>Pick a doctor first</h3>
+            <p>Search live availability, then choose a time that suits you.</p>
+            <motion.button
+              className="btn btn-primary"
+              onClick={() => navigate("/")}
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.96 }}
+            >
+              Find care
+            </motion.button>
           </div>
-          <h3>Pick a doctor first</h3>
-          <p>Search live availability, then choose a time that suits you.</p>
-          <button className="btn btn-primary" onClick={() => navigate("/")}>
-            Find care
-          </button>
         </div>
-      </div>
+      </Page>
     );
   }
 
@@ -138,23 +153,55 @@ export default function Book({ patientId }: { patientId: string }) {
   const activeType = types.find((t) => t.id === typeId);
 
   return (
-    <>
-      <div className="card">
+    <Page>
+      <motion.div
+        className="card"
+        layout
+        transition={{ duration: 0.3, ease: EASE }}
+      >
         <p className="muted" style={{ marginTop: 0 }}>
           {doctor.specialty ?? "General"} · {doctor.hospital_name}
         </p>
         <h2 style={{ marginTop: 0 }}>Book with {doctor.name}</h2>
         <div className="steps" aria-label="Booking progress">
-          <span className={`step ${step > 1 ? "done" : step === 1 ? "active" : ""}`}>
-            {step > 1 ? "✓" : "1"} · Visit type
-          </span>
-          <span className={`step ${step > 2 ? "done" : step === 2 ? "active" : ""}`}>
-            {step > 2 ? "✓" : "2"} · Time
-          </span>
-          <span className={`step ${step === 3 ? "active" : ""}`}>3 · Confirm</span>
+          {(["Visit type", "Time", "Confirm"] as const).map((label, i) => {
+            const n = i + 1;
+            const cls =
+              step > n ? "step done" : step === n ? "step active" : "step";
+            return (
+              <motion.span
+                key={label}
+                className={cls}
+                animate={step === n ? { scale: [1, 1.08, 1] } : { scale: 1 }}
+                transition={{ duration: 0.3 }}
+              >
+                {step > n ? "✓" : n} · {label}
+              </motion.span>
+            );
+          })}
         </div>
-        {error && <p className="error">{error}</p>}
-        {notice && <p className="notice">{notice}</p>}
+        <AnimatePresence>
+          {error && (
+            <motion.p
+              className="error"
+              initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+              animate={{ opacity: 1, height: "auto", marginBottom: "1rem" }}
+              exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+            >
+              {error}
+            </motion.p>
+          )}
+          {notice && (
+            <motion.p
+              className="notice"
+              initial={{ opacity: 0, scale: 0.97 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              {notice}
+            </motion.p>
+          )}
+        </AnimatePresence>
         <div className="field" style={{ maxWidth: 420 }}>
           <label htmlFor="visit-type">Visit type</label>
           <select
@@ -172,20 +219,22 @@ export default function Book({ patientId }: { patientId: string }) {
           </select>
         </div>
         <div className="toolbar">
-          <button
+          <motion.button
             className="btn btn-sm"
             onClick={() => setWeekOffset((w) => Math.max(0, w - 1))}
             disabled={weekOffset === 0 || loadingSlots}
+            whileTap={{ scale: 0.95 }}
           >
             ← Prev week
-          </button>
-          <button
+          </motion.button>
+          <motion.button
             className="btn btn-sm"
             onClick={() => setWeekOffset((w) => Math.min(8, w + 1))}
             disabled={loadingSlots}
+            whileTap={{ scale: 0.95 }}
           >
             Next week →
-          </button>
+          </motion.button>
           <span className="spacer" />
           {loadingSlots && (
             <span className="muted">
@@ -193,79 +242,128 @@ export default function Book({ patientId }: { patientId: string }) {
             </span>
           )}
         </div>
-        {loadingSlots ? (
-          <div className="slot-grid" aria-live="polite">
-            {[0, 1, 2, 3].map((i) => (
-              <div className="slot-day" key={i}>
-                <div className="skeleton" style={{ width: "60%", marginBottom: 10 }} />
-                <div className="skeleton" style={{ height: 34, marginBottom: 8 }} />
-                <div className="skeleton" style={{ height: 34, marginBottom: 8 }} />
-                <div className="skeleton" style={{ height: 34 }} />
+        <AnimatePresence mode="wait">
+          {loadingSlots ? (
+            <motion.div
+              className="slot-grid"
+              key={`loading-${weekOffset}`}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              aria-live="polite"
+            >
+              {[0, 1, 2, 3].map((i) => (
+                <div className="slot-day" key={i}>
+                  <div className="skeleton" style={{ width: "60%", marginBottom: 10 }} />
+                  <div className="skeleton" style={{ height: 34, marginBottom: 8 }} />
+                  <div className="skeleton" style={{ height: 34, marginBottom: 8 }} />
+                  <div className="skeleton" style={{ height: 34 }} />
+                </div>
+              ))}
+            </motion.div>
+          ) : byDay.size > 0 ? (
+            <motion.div
+              className="slot-grid"
+              key={`slots-${weekOffset}-${typeId}`}
+              initial="hidden"
+              animate="show"
+              exit={{ opacity: 0 }}
+              variants={{
+                hidden: {},
+                show: { transition: { staggerChildren: 0.04 } },
+              }}
+            >
+              {[...byDay.entries()].map(([day, list]) => (
+                <motion.div
+                  className="slot-day"
+                  key={day}
+                  variants={{
+                    hidden: { opacity: 0, y: 14 },
+                    show: { opacity: 1, y: 0, transition: { duration: 0.3, ease: EASE } },
+                  }}
+                >
+                  <h4>{dayLabel(day)}</h4>
+                  {list.map((s) => (
+                    <motion.button
+                      key={s.start}
+                      className={`slot${selected?.start === s.start ? " selected" : ""}`}
+                      onClick={() => setSelected(s)}
+                      aria-pressed={selected?.start === s.start}
+                      whileHover={{ scale: 1.04 }}
+                      whileTap={{ scale: 0.94 }}
+                    >
+                      {slotLabel(s.start)}
+                    </motion.button>
+                  ))}
+                </motion.div>
+              ))}
+            </motion.div>
+          ) : (
+            <motion.div
+              key="empty"
+              className="empty"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+            >
+              <div className="empty-icon" aria-hidden>
+                ◷
               </div>
-            ))}
-          </div>
-        ) : byDay.size > 0 ? (
-          <div className="slot-grid">
-            {[...byDay.entries()].map(([day, list]) => (
-              <div className="slot-day" key={day}>
-                <h4>{dayLabel(day)}</h4>
-                {list.map((s) => (
-                  <button
-                    key={s.start}
-                    className={`slot${selected?.start === s.start ? " selected" : ""}`}
-                    onClick={() => setSelected(s)}
-                    aria-pressed={selected?.start === s.start}
-                  >
-                    {slotLabel(s.start)}
-                  </button>
-                ))}
+              <h3>No open slots this week</h3>
+              <p>Try the next week — new availability opens regularly.</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
+      <AnimatePresence>
+        {selected && (
+          <motion.div
+            className="card"
+            variants={popVariants}
+            initial="hidden"
+            animate="show"
+            exit="exit"
+          >
+            <h3>Confirm your visit</h3>
+            <div className="row-item">
+              <div className="grow">
+                <p className="title">
+                  {new Date(selected.start).toLocaleString(undefined, {
+                    weekday: "long",
+                    month: "long",
+                    day: "numeric",
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
+                </p>
+                <p className="sub">
+                  {doctor.name} · {activeType?.name} · ends{" "}
+                  {new Date(selected.end).toLocaleTimeString(undefined, {
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
+                </p>
               </div>
-            ))}
-          </div>
-        ) : (
-          <div className="empty">
-            <div className="empty-icon" aria-hidden>
-              ◷
+              <motion.button
+                className="btn btn-primary btn-lg"
+                onClick={() => void confirm()}
+                disabled={busy}
+                whileHover={busy ? undefined : { scale: 1.03 }}
+                whileTap={busy ? undefined : { scale: 0.97 }}
+              >
+                {busy ? (
+                  <>
+                    <span className="spinner" aria-hidden /> Booking…
+                  </>
+                ) : (
+                  "Confirm booking"
+                )}
+              </motion.button>
             </div>
-            <h3>No open slots this week</h3>
-            <p>Try the next week — new availability opens regularly.</p>
-          </div>
+          </motion.div>
         )}
-      </div>
-      {selected && (
-        <div className="card">
-          <h3>Confirm your visit</h3>
-          <div className="row-item">
-            <div className="grow">
-              <p className="title">
-                {new Date(selected.start).toLocaleString(undefined, {
-                  weekday: "long",
-                  month: "long",
-                  day: "numeric",
-                  hour: "numeric",
-                  minute: "2-digit",
-                })}
-              </p>
-              <p className="sub">
-                {doctor.name} · {activeType?.name} · ends{" "}
-                {new Date(selected.end).toLocaleTimeString(undefined, {
-                  hour: "numeric",
-                  minute: "2-digit",
-                })}
-              </p>
-            </div>
-            <button className="btn btn-primary btn-lg" onClick={() => void confirm()} disabled={busy}>
-              {busy ? (
-                <>
-                  <span className="spinner" aria-hidden /> Booking…
-                </>
-              ) : (
-                "Confirm booking"
-              )}
-            </button>
-          </div>
-        </div>
-      )}
-    </>
+      </AnimatePresence>
+    </Page>
   );
 }

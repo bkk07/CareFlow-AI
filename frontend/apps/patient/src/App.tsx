@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, NavLink, Route, BrowserRouter as Router, Routes } from "react-router-dom";
+import { AnimatePresence, MotionConfig, motion } from "framer-motion";
+import {
+  Link,
+  NavLink,
+  Route,
+  BrowserRouter as Router,
+  Routes,
+  useLocation,
+} from "react-router-dom";
 import { api, me, restoreAccessToken, setAccessToken, type CurrentUser } from "./api";
+import { EASE } from "./motion";
 import Book from "./pages/Book";
 import ChatDebug from "./pages/ChatDebug";
 import Home from "./pages/Home";
@@ -10,6 +19,35 @@ import Preferences from "./pages/Preferences";
 import Profile from "./pages/Profile";
 import Visits from "./pages/Visits";
 import VoiceChat from "./pages/VoiceChat";
+
+const LINKS = [
+  { to: "/", label: "Find care", end: true },
+  { to: "/visits", label: "My visits", end: false },
+  { to: "/inbox", label: "Inbox", end: false },
+  { to: "/chat", label: "Assistant", end: false },
+  { to: "/voice", label: "Voice", end: false },
+  { to: "/preferences", label: "Preferences", end: false },
+  { to: "/profile", label: "Profile", end: false },
+];
+
+function AnimatedRoutes({ user }: { user: CurrentUser }) {
+  const location = useLocation();
+  return (
+    <AnimatePresence mode="wait">
+      <Routes location={location} key={location.pathname}>
+        <Route path="/" element={<Home />} />
+        <Route path="/book" element={<Book patientId={user.id} />} />
+        <Route path="/visits" element={<Visits />} />
+        <Route path="/inbox" element={<Inbox />} />
+        <Route path="/chat" element={<ChatDebug />} />
+        <Route path="/chat-debug" element={<ChatDebug />} />
+        <Route path="/voice" element={<VoiceChat />} />
+        <Route path="/preferences" element={<Preferences />} />
+        <Route path="/profile" element={<Profile />} />
+      </Routes>
+    </AnimatePresence>
+  );
+}
 
 function Shell({ user, onLogout }: { user: CurrentUser; onLogout: () => void }) {
   const [unread, setUnread] = useState(0);
@@ -31,55 +69,53 @@ function Shell({ user, onLogout }: { user: CurrentUser; onLogout: () => void }) 
 
   return (
     <>
-      <header className="topbar">
+      <motion.header
+        className="topbar"
+        initial={{ y: -56, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.45, ease: EASE }}
+      >
         <div className="topbar-inner">
           <Link className="brand" to="/">
-            <span className="brand-badge" aria-hidden>
+            <motion.span
+              className="brand-badge"
+              aria-hidden
+              whileHover={{ rotate: 90 }}
+              transition={{ type: "spring", stiffness: 300, damping: 18 }}
+            >
               +
-            </span>
+            </motion.span>
             CareFlow <span>AI</span>
           </Link>
           <nav className="nav">
-            <NavLink to="/" end className={({ isActive }) => (isActive ? "active" : "")}>
-              Find care
-            </NavLink>
-            <NavLink to="/visits" className={({ isActive }) => (isActive ? "active" : "")}>
-              My visits
-            </NavLink>
-            <NavLink to="/inbox" className={({ isActive }) => (isActive ? "active" : "")}>
-              Inbox{unread > 0 ? ` (${unread})` : ""}
-            </NavLink>
-            <NavLink to="/chat" className={({ isActive }) => (isActive ? "active" : "")}>
-              Assistant
-            </NavLink>
-            <NavLink to="/voice" className={({ isActive }) => (isActive ? "active" : "")}>
-              Voice
-            </NavLink>
-            <NavLink to="/preferences" className={({ isActive }) => (isActive ? "active" : "")}>
-              Preferences
-            </NavLink>
-            <NavLink to="/profile" className={({ isActive }) => (isActive ? "active" : "")}>
-              Profile
-            </NavLink>
+            {LINKS.map((l) => (
+              <NavLink
+                key={l.to}
+                to={l.to}
+                end={l.end}
+                className={({ isActive }) => (isActive ? "active" : "")}
+              >
+                {l.label}
+                {l.to === "/inbox" && unread > 0 ? ` (${unread})` : ""}
+              </NavLink>
+            ))}
           </nav>
           <div className="topbar-spacer" />
           <span className="user-chip">
-            {user.email} <button className="btn" onClick={onLogout}>Log out</button>
+            {user.email}{" "}
+            <motion.button
+              className="btn btn-sm"
+              onClick={onLogout}
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.96 }}
+            >
+              Log out
+            </motion.button>
           </span>
         </div>
-      </header>
+      </motion.header>
       <main className="container">
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/book" element={<Book patientId={user.id} />} />
-          <Route path="/visits" element={<Visits />} />
-          <Route path="/inbox" element={<Inbox />} />
-          <Route path="/chat" element={<ChatDebug />} />
-          <Route path="/chat-debug" element={<ChatDebug />} />
-          <Route path="/voice" element={<VoiceChat />} />
-          <Route path="/preferences" element={<Preferences />} />
-          <Route path="/profile" element={<Profile />} />
-        </Routes>
+        <AnimatedRoutes user={user} />
       </main>
       <footer className="footer">
         <div className="footer-inner">
@@ -122,17 +158,17 @@ export default function App() {
     setToken(null);
   }
 
-  if (!token || !user) {
-    return (
-      <Router>
-        <Login onDone={() => setToken(restoreAccessToken())} />
-      </Router>
-    );
-  }
-
   return (
-    <Router>
-      <Shell user={user} onLogout={logout} />
-    </Router>
+    <MotionConfig reducedMotion="user">
+      <Router>
+        {!token || !user ? (
+          <AnimatePresence mode="wait">
+            <Login key="login" onDone={() => setToken(restoreAccessToken())} />
+          </AnimatePresence>
+        ) : (
+          <Shell user={user} onLogout={logout} />
+        )}
+      </Router>
+    </MotionConfig>
   );
 }

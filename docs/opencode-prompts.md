@@ -552,3 +552,27 @@ agenda SaaS on the other side. Rebuilt toward exactly that:
   split-card login.
 - Verification: tsc+vite builds x3 green, dist asset integrity +
   new-system CSS/hero copy confirmed in all bundles.
+
+## Framer Motion UI redo (all apps)
+
+> use framer motion and do once again whole UI
+
+- Installed `framer-motion` in patient, hospital-admin, doctor.
+- New mirrored `src/motion.tsx` per app: shared easing, page /
+  list / item / pop variants, <Page> screen wrapper, <Stagger> /
+  <Item> lists, <Press> tappable cards; <MotionConfig
+  reducedMotion="user"> in every root.
+- Patient redone: animated topbar entrance + spinning badge hover,
+  AnimatePresence route transitions, staggered hero + search card,
+  staggered doctor cards with animated next-slot swap, booking step
+  pulse + animated slot grid per week + spring confirm card, visits
+  rows/detail/history stagger with expanding reschedule form,
+  inbox stagger + spinning refresh, chat bubbles + typing indicator
+  with auto-scroll, voice mic swap + pulsing live state, staggered
+  preferences, profile edit crossfade, split-login choreography.
+- Admin: sliding sidebar, hovering nav buttons, animated tab
+  transitions, spring detail panels, motion login + resolve /
+  escalate actions. Doctor: same shell treatment + animated detail
+  panel and login.
+- Verification: builds x3 green, preview serves 200 with bundle
+  intact, whileTap/reducedMotion props confirmed in all bundles.
