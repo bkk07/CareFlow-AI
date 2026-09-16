@@ -1,8 +1,30 @@
+import { Link, Route, BrowserRouter as Router, Routes } from "react-router-dom";
+import Home from "./pages/Home";
+import Preferences from "./pages/Preferences";
+import Profile from "./pages/Profile";
+
+const linkStyle: React.CSSProperties = { marginRight: "1rem" };
+
 export default function App() {
   return (
-    <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem" }}>
-      <h1>CareFlow AI — Patient</h1>
-      <p>Phase 0 scaffolding: blank page. Booking UI arrives in later phases.</p>
-    </main>
+    <Router>
+      <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem" }}>
+        <h1>CareFlow AI — Patient</h1>
+        <nav style={{ marginBottom: "1rem" }}>
+          <Link style={linkStyle} to="/">
+            Home
+          </Link>
+          <Link style={linkStyle} to="/profile">
+            Profile
+          </Link>
+          <Link to="/preferences">Preferences</Link>
+        </nav>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/preferences" element={<Preferences />} />
+        </Routes>
+      </main>
+    </Router>
   );
 }

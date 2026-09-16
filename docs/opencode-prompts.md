@@ -139,3 +139,23 @@ Notes on execution (calendar & availability):
   entirely in one window; touching boundaries are not overlaps; all
   timestamps UTC, naive inputs rejected at the edges.
 - No Phase 5+ code (patients, EHR, appointments) was added.
+
+## Patient Management
+
+> Next Phase 5
+
+Notes on execution (patient management):
+
+- Scope implemented exactly per `build-plan-deep-dive.md` Phase 5:
+  `UserPreferences` model (nullable doctor/hospital/type refs plus
+  time-of-day and consultation-mode enums), service layer, and router
+  with `GET/PUT /patients/me` and `GET/PUT /patients/me/preferences`.
+- All four endpoints are self-scoped by caller id and restricted to the
+  patient role; nothing is filtered by hospital, keeping patient
+  identity hospital-agnostic. Fresh patients get null-default
+  preferences (auto-provisioned), never errors; reference ids are
+  existence-checked on write (422 on unknown).
+- Patient frontend gained routed `Home` / `Profile` / `Preferences`
+  empty-state shells (react-router-dom); pages show sign-in, loading,
+  and empty states gracefully.
+- No Phase 6+ code (EHR, appointments, reliability) was added.
