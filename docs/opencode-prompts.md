@@ -179,3 +179,18 @@ Notes on execution (mock EHR + integration layer):
   tests. `create_but_no_response` persists then answers 504 so recovery
   must go through idempotency-key lookup, never blind retry.
 - No Phase 7+ code (appointments, reliability, agent) was added.
+
+## Cross-cutting audit (all work to date)
+
+> check are you implemented as it is upto the phase 6 any missing or not if missing fix
+
+Notes on execution (audit):
+
+- Audited every file, field, endpoint, rule, and test item against the
+  phase plan and the architecture rules; ran the full suite plus
+  migration, compose, and frontend build checks.
+- Findings fixed: `reserve_slot` now takes the doctor calendar row lock
+  (`FOR UPDATE` on supporting dialects) alongside the UNIQUE backstop,
+  `get_or_create_calendar` handles creation races, and the env-example
+  key test covers every current settings key.
+- Everything else matched the plan; no scope was added or removed.

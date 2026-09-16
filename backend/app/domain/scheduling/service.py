@@ -2,10 +2,11 @@
 
 `get_available_slots` is the single function everything later calls
 (booking in Phase 7, `check_availability` in Phase 9). `reserve_slot` is
-the double-booking guard booking calls inside its transaction: overlap is
-re-checked against current rows first, and the UNIQUE constraint on
-(doctor_id, start, end) is the backstop that collapses concurrent racers
-to exactly one winner.
+the double-booking guard booking calls inside its transaction: the
+doctor's calendar row is locked first (row lock), overlap is re-checked
+against current rows, then the block is inserted — and the UNIQUE
+constraint on (doctor_id, start, end) is the backstop that collapses any
+remaining concurrent racers to exactly one winner.
 """
 
 import uuid
@@ -59,8 +60,18 @@ def get_or_create_calendar(session: Session, doctor_id: uuid.UUID) -> Calendar:
     if calendar is None:
         calendar = Calendar(doctor_id=doctor_id, is_active=True)
         session.add(calendar)
-        session.commit()
-        session.refresh(calendar)
+        try:
+            session.commit()
+        except IntegrityError:
+            # Lost a creation race — the winner's row is the calendar.
+            session.rollback()
+            calendar = (
+                session.query(Calendar)
+                .filter(Calendar.doctor_id == doctor_id)
+                .one()
+            )
+        else:
+            session.refresh(calendar)
     return calendar
 
 
@@ -161,6 +172,23 @@ def _overlapping_block(
     )
 
 
+def _lock_doctor_calendar(session: Session, doctor_id: uuid.UUID) -> None:
+    """Take a row lock on the doctor's calendar to serialize reservations.
+
+    SQLite serializes writers on its own (and rejects FOR UPDATE syntax),
+    so this is a no-op there — the UNIQUE backstop still decides races.
+    """
+    bind = session.get_bind()
+    if bind is None or bind.dialect.name == "sqlite":
+        return
+    (
+        session.query(Calendar)
+        .filter(Calendar.doctor_id == doctor_id)
+        .with_for_update()
+        .first()
+    )
+
+
 def reserve_slot(
     session: Session,
     doctor_id: uuid.UUID,
@@ -168,14 +196,17 @@ def reserve_slot(
     end: datetime,
     reason: BlockedReason = BlockedReason.appointment,
 ) -> BlockedSlot:
-    """Hold a slot: re-checks overlap against current rows, then inserts.
+    """Hold a slot: lock the calendar row, re-check overlap, then insert.
 
-    Safe under concurrency — two racers for the same discrete slot collapse
-    to one winner via the UNIQUE(doctor_id, start, end) constraint.
+    Safe under concurrency — the row lock serializes per-doctor
+    reservations, and two racers for the same discrete slot collapse to
+    one winner via the UNIQUE(doctor_id, start, end) constraint.
     Raises SlotConflictError when the slot is taken.
     """
     if end <= start:
         raise SlotConflictError("end must be after start")
+    get_or_create_calendar(session, doctor_id)
+    _lock_doctor_calendar(session, doctor_id)
     if _overlapping_block(session, doctor_id, start, end) is not None:
         raise SlotConflictError("Slot overlaps an existing block")
     block = BlockedSlot(

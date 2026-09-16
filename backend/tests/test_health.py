@@ -40,11 +40,21 @@ def test_env_example_has_every_required_key():
     ).read_text()
     for key in (
         "DATABASE_URL",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+        "POSTGRES_DB",
         "REDIS_URL",
         "JWT_SECRET",
+        "JWT_ALGORITHM",
+        "ACCESS_TOKEN_EXPIRE_MINUTES",
+        "REFRESH_TOKEN_EXPIRE_DAYS",
+        "EHR_MOCK_BASE_URL",
+        "EHR_HTTP_TIMEOUT_S",
         "LLM_API_KEY",
         "TWILIO_ACCOUNT_SID",
         "TWILIO_AUTH_TOKEN",
         "TWILIO_PHONE_NUMBER",
+        "BACKEND_CORS_ORIGINS",
+        "VITE_API_URL",
     ):
         assert key in text, f"missing {key} in infra/.env.example"
