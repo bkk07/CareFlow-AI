@@ -2,6 +2,7 @@ import { Link, Route, BrowserRouter as Router, Routes } from "react-router-dom";
 import Appointments from "./pages/Appointments";
 import ChatDebug from "./pages/ChatDebug";
 import Home from "./pages/Home";
+import VoiceChat from "./pages/VoiceChat";
 import Preferences from "./pages/Preferences";
 import Profile from "./pages/Profile";
 
@@ -25,7 +26,10 @@ export default function App() {
           <Link style={linkStyle} to="/preferences">
             Preferences
           </Link>
-          <Link to="/chat-debug">Chat (debug)</Link>
+          <Link style={linkStyle} to="/chat-debug">
+            Chat (debug)
+          </Link>
+          <Link to="/voice">Voice (dev)</Link>
         </nav>
         <Routes>
           <Route path="/" element={<Home />} />
@@ -33,6 +37,7 @@ export default function App() {
           <Route path="/appointments" element={<Appointments />} />
           <Route path="/preferences" element={<Preferences />} />
           <Route path="/chat-debug" element={<ChatDebug />} />
+          <Route path="/voice" element={<VoiceChat />} />
         </Routes>
       </main>
     </Router>

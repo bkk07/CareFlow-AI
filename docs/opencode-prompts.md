@@ -403,3 +403,41 @@ Notes on execution (Phase 11 — Pre-Visit Questionnaire):
   errors, flag escalation, doctor view, conversational completion).
   Live smoke on postgres: resolve -> submit -> completed + flagged
   escalation. No frontend, no compose changes, no Phase 12+ code.
+
+## Web Voice
+
+> next phase
+
+Notes on execution (Phase 12 — Web Voice):
+
+- New `app/voice/`: energy-VAD over PCM16 (`vad.py`, no native deps —
+  the gate matters because Whisper hallucinates on silence),
+  STT/TTS provider pairs with test hooks, session manager bridging
+  WS connections to Phase 9 AIContext, and `web_voice/ws_handler.py`
+  serving `/voice/ws` (JSON frames: audio/partial/final/agent_text/
+  audio_out/interrupt/state/ended).
+- STT verified live on GROQ Whisper (`whisper-large-v3-turbo`, 200).
+  TTS cannot go live: `playai-tts` is decommissioned and the current
+  `canopylabs/orpheus-v1-english` needs org terms acceptance
+  (400 verified). `GroqTTS` targets the documented endpoint so it
+  works once accepted; stub stays default, failures surface as
+  `error` frames, never silence.
+- Plan edge cases, enforced in code: partials are display-only and
+  never reach the orchestrator (no writes off guesses); barge-in is
+  real — the turn runs as a task while the loop keeps pumping, so
+  the interrupt flag aborts both the LLM loop (`should_stop`, new)
+  and the per-sentence TTS stream (a queued-until-done design failed
+  its own test and was replaced); silence re-prompts once, then
+  ends with a human `Escalation`.
+- Frontend: `useWebRTCAudio` hook (AudioWorklet capture, WAV
+  playback queue, interrupt kills local audio AND signals server)
+  plus a dev `VoiceChat` page. Deviation: the hook lives in the
+  patient app, not `frontend/shared/voice` — no workspace root
+  exists, so the shared path resolves neither `react` for tsc nor
+  the bundle, and the app-only Docker context would break the
+  image. Reverted the `fs.allow` tweak with it.
+- Verification: 174/174 tests (9 new: VAD, auth, partials-run-
+  nothing, full booking by voice, mid-turn barge-in with blocked
+  TTS, silence->escalation, orchestrator stop). Live smoke over a
+  real socket: ready -> reprompt spoken -> stub-TTS error frame ->
+  ended(silence) with escalation id. No migration, no Phase 13+ code.

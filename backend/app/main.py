@@ -18,6 +18,7 @@ from app.ai.router import router as chat_router
 from app.mcp_server.server import router as mcp_router
 from app.notification.router import router as notification_router
 from app.reliability.router import router as reliability_router
+from app.voice.router import router as voice_router
 
 app = FastAPI(title="CareFlow AI", version="0.1.0")
 
@@ -43,6 +44,7 @@ app.include_router(mcp_router)
 app.include_router(chat_router)
 app.include_router(notification_router)
 app.include_router(reliability_router)
+app.include_router(voice_router)
 
 
 @app.get("/")

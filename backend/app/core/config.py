@@ -49,6 +49,17 @@ class Settings(BaseSettings):
     smtp_port: int = Field(default=1025, alias="SMTP_PORT")
     smtp_from: str = Field(default="careflow@example.com", alias="SMTP_FROM")
     task_eager: bool = Field(default=False, alias="TASK_EAGER")
+    # Phase 12 voice: providers are "stub" (no-op) or "groq".
+    # TTS needs extra terms acceptance on the GROQ org; until then the
+    # GroqTTS class is correct but unusable — stub stays the default.
+    stt_provider: str = Field(default="stub", alias="STT_PROVIDER")
+    stt_model: str = Field(default="whisper-large-v3-turbo", alias="STT_MODEL")
+    tts_provider: str = Field(default="stub", alias="TTS_PROVIDER")
+    tts_model: str = Field(
+        default="canopylabs/orpheus-v1-english", alias="TTS_MODEL"
+    )
+    tts_voice: str = Field(default="troy", alias="TTS_VOICE")
+    voice_silence_s: float = Field(default=20.0, alias="VOICE_SILENCE_S")
     twilio_account_sid: str = Field(default="", alias="TWILIO_ACCOUNT_SID")
     twilio_auth_token: str = Field(default="", alias="TWILIO_AUTH_TOKEN")
     twilio_phone_number: str = Field(default="", alias="TWILIO_PHONE_NUMBER")

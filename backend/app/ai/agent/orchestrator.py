@@ -85,6 +85,8 @@ LOOP_EXHAUSTED = (
     "human review — someone from the care team will follow up."
 )
 
+STOPPED = "Okay, I've stopped — what would you like to do instead?"
+
 
 def is_clinical_request(text: str) -> bool:
     """A purely clinical message: clinical signals, no scheduling intent."""
@@ -175,6 +177,7 @@ def run_conversation(
     user_message: str,
     complete: CompleteFn | None = None,
     max_iterations: int = MAX_ITERATIONS,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """One chat turn: guard, tool loop, reply. Never raises for tool faults."""
     cid = (conversation_id or "").strip() or str(uuid.uuid4())
@@ -211,7 +214,11 @@ def run_conversation(
     escalated = False
     iterations = 0
     reply: str | None = None
+    stopped = False
     while iterations < max_iterations:
+        if should_stop is not None and should_stop():
+            stopped = True
+            break
         iterations += 1
         step = complete_fn(messages, client.specs())
         for call in step.get("tool_calls") or []:
@@ -237,7 +244,7 @@ def run_conversation(
             break
 
     if reply is None:
-        reply = LOOP_EXHAUSTED
+        reply = STOPPED if stopped else LOOP_EXHAUSTED
         messages.append({"role": "assistant", "content": reply})
     context.remember_turn("assistant", reply)
     save_ai_context(context)
@@ -246,6 +253,7 @@ def run_conversation(
         "reply": reply,
         "iterations": iterations,
         "escalated": escalated,
+        "stopped": stopped,
     }
 
 

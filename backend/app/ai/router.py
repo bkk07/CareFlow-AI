@@ -25,6 +25,7 @@ class ChatOut(BaseModel):
     reply: str
     iterations: int
     escalated: bool
+    stopped: bool = False
 
 
 @router.post("/chat", response_model=ChatOut)
