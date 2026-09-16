@@ -376,3 +376,30 @@ Notes on execution (Phase 10 — Workflow Engine + Notifications):
   stack: booking produced a worker-delivered `booking_confirmation`
   (`handle_event succeeded` in worker logs).
 - No frontend this phase; no Phase 11+ logic added.
+
+## Pre-Visit Questionnaire
+
+> next phase
+
+Notes on execution (Phase 11 — Pre-Visit Questionnaire):
+
+- New `app/domain/questionnaire/` (models/service/router/schemas):
+  sets scoped to hospital/specialty/doctor/appointment_type with
+  doctor > type > specialty > hospital precedence, ordered typed
+  questions (choice kinds must carry options), responses as drafts
+  until all required are answered. Migration `0011_questionnaire`.
+- Validation splits hard errors (unknown keys, wrong types -> 422)
+  from missing-required (draft, `completed=false`), so partial saves
+  work and the agent can iterate. The concern flag is a keyword rule
+  over free text (`FLAG_PHRASES`) that opens an `Escalation` — no
+  medical interpretation anywhere.
+- `get/submit_questionnaire` tools are live with the completion and
+  flag protocol; the doctor role can view responses (dashboard stub
+  for Phase 13). Agent guard in three places: system prompt section,
+  full tool description (the registry now ships whole docstrings to
+  the model, not first lines), and `completed`/`missing_required`
+  gating in the tool result.
+- Verification: 165/165 tests (11 new: precedence, drafts, type
+  errors, flag escalation, doctor view, conversational completion).
+  Live smoke on postgres: resolve -> submit -> completed + flagged
+  escalation. No frontend, no compose changes, no Phase 12+ code.

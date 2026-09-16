@@ -94,9 +94,10 @@ def mcp_tool(
             "requires_idempotency": requires_idempotency,
             "allowed_roles": allowed_roles,
             "input_model": fn.__annotations__.get("input"),
-            "description": (fn.__doc__ or "").strip().splitlines()[0]
-            if fn.__doc__
-            else name,
+            # Full docstring: the model reads the whole instruction,
+            # not just the first line (this is where per-tool AGENT
+            # RULEs live, e.g. the questionnaire guard).
+            "description": (fn.__doc__ or "").strip() or name,
         }
         return wrapper
 

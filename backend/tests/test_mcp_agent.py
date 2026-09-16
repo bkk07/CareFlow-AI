@@ -487,22 +487,19 @@ def test_tool_booking_is_idempotent(client, tool_factory, fake_connector):
     assert fake_connector.creates == 1
 
 
-def test_phase11_tools_are_honest_stubs(client, tool_factory):
+def test_phase11_tools_are_live_not_stubs(client, tool_factory):
+    """Questionnaires went live in Phase 11 (tested in test_questionnaire)."""
     setup = seed_setup(client, tag="stubs")
-    appt_id = str(uuid.uuid4())
-    cases = [
-        ("get_questionnaire", {"appointment_id": appt_id}, setup["patient"]["headers"]),
-        (
-            "submit_questionnaire",
-            {"appointment_id": appt_id, "answers": {}},
-            setup["patient"]["headers"],
-        ),
-    ]
-    for tool, payload, headers in cases:
-        resp = client.post(
-            "/mcp/call", json={"tool": tool, "input": payload}, headers=headers
-        )
-        assert resp.status_code == 501, tool
+    resp = client.post(
+        "/mcp/call",
+        json={
+            "tool": "get_questionnaire",
+            "input": {"appointment_id": str(uuid.uuid4())},
+        },
+        headers=setup["patient"]["headers"],
+    )
+    # Unknown appointment -> 404 from the shared lookup, never 501.
+    assert resp.status_code == 404
 
 
 def test_update_preferences_persists_to_postgres_model(client, db, tool_factory):

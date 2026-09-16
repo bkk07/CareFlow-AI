@@ -15,6 +15,7 @@ from app.reliability import models as reliability_models  # noqa: F401
 from app.domain.doctor import models as doctor_models  # noqa: F401
 from app.domain.hospital import models as hospital_models  # noqa: F401
 from app.domain.hospital_config import models as config_models  # noqa: F401
+from app.domain.questionnaire import models as questionnaire_models  # noqa: F401
 from app.integration.mock_ehr import models as mock_ehr_models  # noqa: F401
 from app.integration.mapping import models as mapping_models  # noqa: F401
 from app.mcp_server import models as mcp_models  # noqa: F401

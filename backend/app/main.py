@@ -11,6 +11,7 @@ from app.domain.doctor.router import router as doctor_router
 from app.domain.hospital.router import router as hospital_router
 from app.domain.hospital_config.router import router as hospital_config_router
 from app.domain.patient.router import router as patient_router
+from app.domain.questionnaire.router import router as questionnaire_router
 from app.domain.scheduling.router import router as scheduling_router
 from app.integration.mock_ehr.router import router as mock_ehr_router
 from app.ai.router import router as chat_router
@@ -35,6 +36,7 @@ app.include_router(hospital_router)
 app.include_router(hospital_config_router)
 app.include_router(doctor_router)
 app.include_router(patient_router)
+app.include_router(questionnaire_router)
 app.include_router(scheduling_router)
 app.include_router(mock_ehr_router)
 app.include_router(mcp_router)
