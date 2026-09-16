@@ -344,3 +344,35 @@ Remaining findings and fixes:
 - Added a tool reschedule/cancel/synchronize round-trip test over
   `/mcp/call` — the last untested tool paths.
 - No TODO/FIXME markers anywhere; unused-import scan clean.
+
+## Workflow Engine + Notifications
+
+> next phase
+
+Notes on execution (Phase 10 — Workflow Engine + Notifications):
+
+- New `app/workflow/` (Celery app on the existing Redis, `event_bus.publish_event`,
+  one `handle_event` task with a handler registry, `acks_late` so a killed
+  worker redelivers) plus `app/notification/` (real SMTP `send_email`,
+  idempotent `create_in_app`/`deliver_email` on a unique `dedupe_key`).
+  Migration `0010_workflow`. Compose gains `worker` + `beat` services;
+  beat fires an hourly `sweep_tick` (reminders ~24h out, recovery sweep).
+- Appointment service publishes `appointment.booked/rescheduled/cancelled`
+  only on corroborated outcomes — parked/failed bookings notify nobody.
+  Publish never breaks booking: enqueue failure marks the execution
+  failed instead of raising.
+- Recovery moves to Celery as the classifier comment foresaw: each sweep
+  activation re-drives an open record once (`force=True`), capped at 10
+  automatic attempts before it rests open for the operator. The operator
+  retry endpoint stays synchronous `force=True` (unchanged responses).
+  The vendor-consistency check moved from the router into
+  `reconcile_service.consistency_note` for shared use.
+- `send_notification`/`start_workflow` MCP tools are live (Phase 9 stub
+  test narrowed to the questionnaire tools); `GET /notifications`
+  serves the patient inbox.
+- Verification: 154/154 tests (9 new: async notify via API and chat,
+  redelivery dedupe, visible failed executions, email-failure rows,
+  reminder + recovery sweeps, live tools). Live smoke on a 7-container
+  stack: booking produced a worker-delivered `booking_confirmation`
+  (`handle_event succeeded` in worker logs).
+- No frontend this phase; no Phase 11+ logic added.

@@ -34,6 +34,7 @@ class Settings(BaseSettings):
         default="http://localhost:8000", alias="EHR_MOCK_BASE_URL"
     )
     ehr_http_timeout_s: float = Field(default=10.0, alias="EHR_HTTP_TIMEOUT_S")
+
     llm_api_key: str = Field(
         default="", validation_alias=AliasChoices("LLM_API_KEY", "GROQ_API_KEY")
     )
@@ -43,6 +44,11 @@ class Settings(BaseSettings):
     )
     # AIContext (Phase 9) Redis TTL, e.g. 2h of conversation memory.
     ai_context_ttl_s: int = Field(default=7200, alias="AI_CONTEXT_TTL_S")
+    # Phase 10 workflow/notifications.
+    smtp_host: str = Field(default="localhost", alias="SMTP_HOST")
+    smtp_port: int = Field(default=1025, alias="SMTP_PORT")
+    smtp_from: str = Field(default="careflow@example.com", alias="SMTP_FROM")
+    task_eager: bool = Field(default=False, alias="TASK_EAGER")
     twilio_account_sid: str = Field(default="", alias="TWILIO_ACCOUNT_SID")
     twilio_auth_token: str = Field(default="", alias="TWILIO_AUTH_TOKEN")
     twilio_phone_number: str = Field(default="", alias="TWILIO_PHONE_NUMBER")

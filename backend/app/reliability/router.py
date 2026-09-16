@@ -17,7 +17,6 @@ from app.domain.appointment.models import Appointment, AppointmentState
 from app.domain.appointment.router import get_integration_service
 from app.domain.appointment.service import get_appointment_or_404
 from app.domain.auth.models import Role
-from app.integration.connector_interface import EHRConnectorError
 from app.integration.integration_service import IntegrationService
 from app.reliability import operations
 from app.reliability.models import (
@@ -33,7 +32,7 @@ from app.reliability.schemas import (
     RecordDetailOut,
     ResolveIn,
 )
-from app.reliability.synchronization import service as sync_service
+
 
 router = APIRouter(tags=["reconciliation"])
 
@@ -145,28 +144,7 @@ def _consistency_note(
     db: Session, appointment: Appointment, integration: IntegrationService
 ) -> str | None:
     """Non-None when vendor and internal agree again (safe to auto-close)."""
-    if appointment.external_id is None:
-        return None
-    try:
-        external = integration.get_appointment(appointment.external_id)
-    except EHRConnectorError:
-        return None
-    if appointment.state == AppointmentState.cancelled:
-        return (
-            "Auto-resolved by retry: vendor confirms cancellation"
-            if external.status == "cancelled"
-            else None
-        )
-    if appointment.state in (
-        AppointmentState.confirmed,
-        AppointmentState.rescheduled,
-    ):
-        return (
-            "Auto-resolved by retry: vendor matches internal state"
-            if not sync_service.diff_appointment(db, appointment, external)
-            else None
-        )
-    return None
+    return reconcile_service.consistency_note(db, appointment, integration)
 
 
 @router.post(

@@ -487,7 +487,7 @@ def test_tool_booking_is_idempotent(client, tool_factory, fake_connector):
     assert fake_connector.creates == 1
 
 
-def test_phase11_and_phase10_tools_are_honest_stubs(client, tool_factory):
+def test_phase11_tools_are_honest_stubs(client, tool_factory):
     setup = seed_setup(client, tag="stubs")
     appt_id = str(uuid.uuid4())
     cases = [
@@ -496,20 +496,6 @@ def test_phase11_and_phase10_tools_are_honest_stubs(client, tool_factory):
             "submit_questionnaire",
             {"appointment_id": appt_id, "answers": {}},
             setup["patient"]["headers"],
-        ),
-        (
-            "send_notification",
-            {
-                "recipient_user_id": setup["patient"]["id"],
-                "channel": "in_app",
-                "message": "hello",
-            },
-            setup["hosp"]["owner"],
-        ),
-        (
-            "start_workflow",
-            {"event_type": "appointment.booked", "payload": {}},
-            setup["hosp"]["owner"],
         ),
     ]
     for tool, payload, headers in cases:

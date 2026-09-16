@@ -649,7 +649,36 @@ def resolve_record(
     return record
 
 
+def consistency_note(
+    session: Session, appointment: Appointment, integration: IntegrationService
+) -> str | None:
+    """Non-None when vendor and internal agree again (safe to auto-close)."""
+    if appointment.external_id is None:
+        return None
+    try:
+        external = integration.get_appointment(appointment.external_id)
+    except EHRConnectorError:
+        return None
+    if appointment.state == AppointmentState.cancelled:
+        return (
+            "Auto-resolved by retry: vendor confirms cancellation"
+            if external.status == "cancelled"
+            else None
+        )
+    if appointment.state in (
+        AppointmentState.confirmed,
+        AppointmentState.rescheduled,
+    ):
+        return (
+            "Auto-resolved by retry: vendor matches internal state"
+            if not sync_service.diff_appointment(session, appointment, external)
+            else None
+        )
+    return None
+
+
 __all__ = [
+    "consistency_note",
     "drive_recovery",
     "handle_cancel_failure",
     "handle_create_failure",

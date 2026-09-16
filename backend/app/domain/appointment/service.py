@@ -302,6 +302,19 @@ def create_appointment(
         )
     session.commit()
     session.refresh(appointment)
+    if appointment.state == AppointmentState.confirmed:
+        # Booked AND vendor-corroborated: tell the workflow engine so the
+        # patient is notified. Parked/failed outcomes notify nobody yet.
+        # (This tail is only reached for fresh bookings; replays and the
+        # failure path return earlier.)
+        from app.workflow import event_bus
+
+        event_bus.publish_event(
+            session,
+            "appointment.booked",
+            {"appointment_id": str(appointment.id)},
+            correlation_id=appointment.correlation_id,
+        )
     return appointment, True
 
 
@@ -410,6 +423,15 @@ def reschedule_appointment(
         )
     session.commit()
     session.refresh(appointment)
+    if appointment.state == AppointmentState.rescheduled:
+        from app.workflow import event_bus
+
+        event_bus.publish_event(
+            session,
+            "appointment.rescheduled",
+            {"appointment_id": str(appointment.id)},
+            correlation_id=appointment.correlation_id,
+        )
     return appointment
 
 
@@ -501,6 +523,15 @@ def cancel_appointment(
         )
     session.commit()
     session.refresh(appointment)
+    if appointment.state == AppointmentState.cancelled:
+        from app.workflow import event_bus
+
+        event_bus.publish_event(
+            session,
+            "appointment.cancelled",
+            {"appointment_id": str(appointment.id)},
+            correlation_id=appointment.correlation_id,
+        )
     return appointment
 
 

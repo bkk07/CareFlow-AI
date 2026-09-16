@@ -18,6 +18,8 @@ from app.domain.hospital_config import models as config_models  # noqa: F401
 from app.integration.mock_ehr import models as mock_ehr_models  # noqa: F401
 from app.integration.mapping import models as mapping_models  # noqa: F401
 from app.mcp_server import models as mcp_models  # noqa: F401
+from app.notification import models as notification_models  # noqa: F401
+from app.workflow import models as workflow_models  # noqa: F401
 from app.core import audit as audit_module  # noqa: F401
 from app.main import app
 
