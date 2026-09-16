@@ -21,6 +21,9 @@ class VoiceSession:
     user_id: uuid.UUID
     role: str
     hospital_id: uuid.UUID | None
+    # Phase 15: the call's correlation id — every tool the caller's turns
+    # run shares it, so the voice booking lands in one trace.
+    correlation_id: uuid.UUID = field(default_factory=uuid.uuid4)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_voice_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     silence_prompts: int = 0
@@ -34,6 +37,7 @@ def new_session(
     role: str,
     hospital_id: uuid.UUID | None,
     conversation_id: str | None = None,
+    correlation_id: uuid.UUID | None = None,
 ) -> VoiceSession:
     session = VoiceSession(
         id=str(uuid.uuid4()),
@@ -41,6 +45,7 @@ def new_session(
         user_id=user_id,
         role=role,
         hospital_id=hospital_id,
+        correlation_id=correlation_id or uuid.uuid4(),
     )
     SESSIONS[session.id] = session
     return session

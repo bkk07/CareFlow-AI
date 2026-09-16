@@ -25,6 +25,7 @@ def on_appointment_booked(
         type="booking_confirmation",
         detail=f"Your appointment is confirmed for {slot}.",
         dedupe_key=f"booked:{appointment.id}:in_app",
+        correlation_id=execution.correlation_id,
     )
     note(
         execution,

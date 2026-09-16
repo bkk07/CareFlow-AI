@@ -24,6 +24,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.db import get_db
+from app.core.audit import write_audit_event
+from app.observability.correlation import for_conversation
 from app.voice.telephony import identity
 
 logger = logging.getLogger(__name__)
@@ -88,6 +90,22 @@ async def inbound(request: Request, db: Session = Depends(get_db)) -> Response:
     patient = identity.find_patient_by_phone(db, caller)
     patient_id = str(patient.id) if patient is not None else ""
     conversation_id = uuid.uuid4().hex
+    # The call's trace starts here: the media stream derives the same
+    # id from the conversation, so webhook + turns + booking line up.
+    correlation_id = for_conversation(conversation_id)
+    write_audit_event(
+        db,
+        action="telephony.inbound",
+        entity_type="telephony.call",
+        entity_id=uuid.uuid5(uuid.NAMESPACE_URL, f"careflow:call:{call_sid or conversation_id}"),
+        correlation_id=correlation_id,
+        metadata={
+            "caller": caller,
+            "patient_id": patient_id or None,
+            "conversation_id": conversation_id,
+        },
+    )
+    db.commit()
     logger.info(
         "inbound call sid=%s caller=%s patient=%s",
         call_sid,

@@ -25,6 +25,7 @@ def on_appointment_rescheduled(
         type="reschedule",
         detail=f"Your appointment moved to {slot}.",
         dedupe_key=f"rescheduled:{appointment.id}:{slot}:in_app",
+        correlation_id=execution.correlation_id,
     )
     note(
         execution,

@@ -38,7 +38,7 @@ def run(
     integration: IntegrationService,
 ) -> dict:
     """Queue an email or in-app notification for a user."""
-    del ctx, integration
+    del integration
     if not input.message.strip():
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -57,6 +57,7 @@ def run(
             body=input.message,
             type=input.type,
             dedupe_key=key,
+            correlation_id=ctx.correlation_id,
         )
     elif input.channel == "in_app":
         row, created = notification_service.create_in_app(
@@ -65,6 +66,7 @@ def run(
             type=input.type,
             detail=input.message,
             dedupe_key=key,
+            correlation_id=ctx.correlation_id,
         )
     else:
         raise HTTPException(

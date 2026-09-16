@@ -20,6 +20,8 @@ from app.integration.mock_ehr.router import router as mock_ehr_router
 from app.ai.router import router as chat_router
 from app.mcp_server.server import router as mcp_router
 from app.notification.router import router as notification_router
+from app.observability.correlation import CorrelationIdMiddleware
+from app.observability.router import router as observability_router
 from app.reliability.router import router as reliability_router
 from app.voice.router import router as voice_router
 from app.voice.telephony.twilio_webhook import router as telephony_router
@@ -33,6 +35,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Added after CORS so it runs first: every request enters with its
+# correlation id already pinned (and every response echoes it back).
+app.add_middleware(CorrelationIdMiddleware)
 
 app.include_router(health_router)
 app.include_router(auth_router)
@@ -50,6 +55,7 @@ app.include_router(mock_ehr_router)
 app.include_router(mcp_router)
 app.include_router(chat_router)
 app.include_router(notification_router)
+app.include_router(observability_router)
 app.include_router(reliability_router)
 app.include_router(voice_router)
 app.include_router(telephony_router)

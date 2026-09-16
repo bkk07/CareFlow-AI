@@ -39,6 +39,11 @@ from app.core.deps import RequestContext
 from app.domain.auth.models import Role, User
 from app.domain.patient.models import PatientProfile
 from app.mcp_server.models import Escalation, EscalationStatus
+from app.observability.correlation import (
+    for_conversation,
+    reset_correlation_id,
+    set_correlation_id,
+)
 from app.voice import stt_provider, tts_provider
 from app.voice.session_manager import VoiceSession, end_session, new_session
 from app.voice.telephony import audio as telephony_audio
@@ -162,6 +167,7 @@ async def _run_agent_turn(
             user_id=session.user_id,
             role=Role(session.role),
             hospital_id=session.hospital_id,
+            correlation_id=session.correlation_id,
         )
         result = await asyncio.to_thread(
             run_conversation,
@@ -364,7 +370,11 @@ async def handle_media_stream(
         role=Role.patient.value,
         hospital_id=None,
         conversation_id=conversation_id,
+        # Same derivation the webhook uses: the whole call — webhook,
+        # turns, booking — lands in one trace with no shared state.
+        correlation_id=for_conversation(conversation_id),
     )
+    _tel_token = set_correlation_id(session.correlation_id)
     tracker = UtteranceTracker()
     window = silence_window_s or settings.voice_silence_s
     greeting = (
@@ -406,6 +416,7 @@ async def handle_media_stream(
     except WebSocketDisconnect:
         pass
     finally:
+        reset_correlation_id(_tel_token)
         end_session(session.id)
 
 

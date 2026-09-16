@@ -7,7 +7,6 @@ JSON-serializable dict.
 """
 
 import time
-import uuid
 from functools import wraps
 from typing import Any, Callable
 
@@ -22,6 +21,7 @@ from app.mcp_server.middleware import auth as auth_mw
 from app.mcp_server.middleware import idempotency as idem_mw
 from app.mcp_server.middleware import retry_policy
 from app.mcp_server.models import ExecutionStatus
+from app.observability.correlation import get_correlation_id
 
 _integration_factory: Callable[[Session], IntegrationService] | None = None
 
@@ -55,7 +55,13 @@ def mcp_tool(
             input: BaseModel, ctx: RequestContext, db: Session
         ) -> dict[str, Any]:
             integration = build_integration(db)
-            correlation_id = uuid.uuid4()
+            # One turn, one id: the request/voice-call correlation flows
+            # through ctx into the execution row AND (stamped back on ctx)
+            # into every domain row the tool creates. A bare ctx with no
+            # id falls back to the ambient one instead of minting a fresh
+            # id per tool — that was the Phase 15 audit's main finding.
+            correlation_id = ctx.correlation_id or get_correlation_id()
+            ctx.correlation_id = correlation_id
             start = time.perf_counter()
             error: str | None = None
             try:

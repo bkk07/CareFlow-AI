@@ -40,6 +40,7 @@ from app.core.deps import RequestContext
 from app.core.security import TokenError, decode_token
 from app.domain.auth.models import Role, User
 from app.mcp_server.models import Escalation, EscalationStatus
+from app.observability.correlation import reset_correlation_id, set_correlation_id
 from app.voice import stt_provider, tts_provider
 from app.voice.session_manager import VoiceSession, end_session, new_session
 from app.voice.vad import UtteranceTracker
@@ -162,6 +163,7 @@ async def _run_agent_turn(
             user_id=session.user_id,
             role=Role(session.role),
             hospital_id=session.hospital_id,
+            correlation_id=session.correlation_id,
         )
         # The shared AIContext is keyed by conversation_id, so cross-turn
         # references ("that one") resolve exactly like in text chat.
@@ -272,6 +274,9 @@ async def handle_voice_socket(
         hospital_id=ctx.hospital_id,
         conversation_id=resume_conversation_id,
     )
+    # WebSockets skip the correlation middleware, so the call pins its
+    # own id here; agent turns below inherit it through the session.
+    _ws_token = set_correlation_id(session.correlation_id)
     tracker = vad or UtteranceTracker()
     window = silence_window_s or settings.voice_silence_s
     await _send(
@@ -330,6 +335,7 @@ async def handle_voice_socket(
     except WebSocketDisconnect:
         pass
     finally:
+        reset_correlation_id(_ws_token)
         end_session(session.id)
 
 

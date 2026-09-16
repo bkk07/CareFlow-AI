@@ -7,6 +7,7 @@ and the unique `dedupe_key` makes redelivered tasks no-ops.
 """
 
 import smtplib
+import uuid
 from datetime import datetime, timezone
 from email.message import EmailMessage
 
@@ -18,6 +19,7 @@ from app.notification.models import (
     NotificationChannel,
     NotificationStatus,
 )
+from app.observability.correlation import get_correlation_id
 
 
 def _utcnow() -> datetime:
@@ -42,6 +44,7 @@ def create_in_app(
     type: str,
     detail: str,
     dedupe_key: str,
+    correlation_id: uuid.UUID | None = None,
 ) -> tuple[Notification, bool]:
     """Store an in-app notification; returns (row, created).
 
@@ -64,6 +67,7 @@ def create_in_app(
         dedupe_key=dedupe_key,
         body=detail,
         sent_at=_utcnow(),
+        correlation_id=correlation_id or get_correlation_id(),
     )
     session.add(row)
     session.commit()
@@ -80,6 +84,7 @@ def deliver_email(
     body: str,
     type: str,
     dedupe_key: str,
+    correlation_id: uuid.UUID | None = None,
 ) -> tuple[Notification, bool]:
     """Queue-and-send one email; failures land visibly on the row."""
     existing = (
@@ -97,6 +102,7 @@ def deliver_email(
         dedupe_key=dedupe_key,
         subject=subject,
         body=body,
+        correlation_id=correlation_id or get_correlation_id(),
     )
     session.add(row)
     session.commit()

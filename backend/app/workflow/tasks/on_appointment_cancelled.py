@@ -24,6 +24,7 @@ def on_appointment_cancelled(
         type="cancellation",
         detail="Your appointment has been cancelled. Reply to rebook.",
         dedupe_key=f"cancelled:{appointment.id}:in_app",
+        correlation_id=execution.correlation_id,
     )
     note(
         execution,

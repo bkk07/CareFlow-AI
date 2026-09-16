@@ -621,3 +621,37 @@ doctor dev serves HTTP 200 on :5177 and compose config is valid.
   live postgres smoke (contact, TwiML match, fail-closed verify,
   18-tool registry, unknown caller) green. Added `python-multipart`
   (Twilio posts form-encoded; caught by the live smoke).
+
+## Phase 15 — Observability & Audit Polish
+
+> implement next phase (plan Phase 15, observability & audit polish)
+
+- New `app/observability/` package: `correlation.py` (contextvar +
+  `CorrelationIdMiddleware`: read/validate/echo `X-Correlation-ID` on
+  every request), `tracing.py` (`span()` records timed blocks as audit
+  rows under the ambient id — no collector, no new table),
+  `metrics.py` (booking success rate, reconciliation depth, chat-turn
+  p50/p95 + per-tool latency, workflow/notification/escalation health),
+  `router.py` (`GET /observability/trace/{id}` full timeline across
+  conversation -> AI decision -> scheduling -> EHR -> workflow ->
+  notification, with `?appointment_id=` pivot; `GET /metrics`).
+- Audit result: almost everything already carried `correlation_id`,
+  but the MCP wrapper minted a fresh one PER TOOL and
+  `start_workflow`/`create_appointment` minted their own — the
+  conversation->booking link was broken. Fixed: `RequestContext`
+  carries the id (middleware fills it), the wrapper reuses + stamps it
+  sticky, tools pass it into booking/workflow/notification rows.
+- Voice/websocket paths skip middleware, so web voice pins a fresh id
+  at connect and telephony derives it (`uuid5`) from the call's
+  conversation — the webhook writes a `telephony.inbound` audit row
+  with the same id, no shared state needed.
+- Notifications gain `correlation_id` (migration `0014_observability`);
+  workflow tasks stamp the execution's id; `/chat` wraps each turn in
+  a span (the AI-latency signal).
+- Verification: 220/209+11 tests (middleware echo/generate, header ->
+  execution row, full booking chain sharing one id incl. EHR ops,
+  workflow + chat-span + notification stamping, trace layers/order/
+  appointment pivot/404, metrics math, stable call correlation),
+  single alembic head, live postgres smoke (header echo on every
+  call, confirmed booking, trace layers incl. workflow row,
+  success_rate 1.0) green.

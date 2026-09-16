@@ -9,6 +9,7 @@ from app.ai.agent.orchestrator import AINotConfiguredError, run_conversation
 from app.core.db import get_db
 from app.core.deps import RequestContext, require_role
 from app.domain.auth.models import Role
+from app.observability.tracing import span
 
 router = APIRouter(tags=["chat"])
 
@@ -34,30 +35,38 @@ def chat(
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(_chatter),
 ) -> ChatOut:
-    try:
-        result = run_conversation(
-            db=db,
-            ctx=ctx,
-            conversation_id=body.conversation_id,
-            user_message=body.message,
-        )
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
-        ) from exc
-    except AINotConfiguredError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
-        ) from exc
-    except Exception as exc:
-        # Model-backend trouble (auth, network, bad response) is a vendor
-        # failure, not a crash: report 502 like the EHR path does.
-        if isinstance(exc, httpx.HTTPError):
+    # The turn span is the "AI latency" signal: one audit row per
+    # request carrying the turn's correlation, duration, and outcome.
+    with span(
+        db, "chat.turn", conversation_id=body.conversation_id
+    ) as info:
+        try:
+            result = run_conversation(
+                db=db,
+                ctx=ctx,
+                conversation_id=body.conversation_id,
+                user_message=body.message,
+            )
+        except ValueError as exc:
             raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Model backend error: {exc}",
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
             ) from exc
-        raise
+        except AINotConfiguredError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+            ) from exc
+        except Exception as exc:
+            # Model-backend trouble (auth, network, bad response) is a vendor
+            # failure, not a crash: report 502 like the EHR path does.
+            if isinstance(exc, httpx.HTTPError):
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Model backend error: {exc}",
+                ) from exc
+            raise
+        info["iterations"] = result.get("iterations")
+        info["escalated"] = result.get("escalated")
+        info["stopped"] = result.get("stopped")
     return ChatOut(**result)
 
 

@@ -57,6 +57,7 @@ def run(
         slot_end=input.slot_end,
         idempotency_key=input.idempotency_key.strip(),
         actor_user_id=ctx.user_id,
+        correlation_id=ctx.correlation_id,
         integration=integration,
     )
     if appointment.state == AppointmentState.failed:

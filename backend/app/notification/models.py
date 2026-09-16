@@ -47,6 +47,11 @@ class Notification(Base):
     dedupe_key: Mapped[str] = mapped_column(
         String(255), nullable=False, unique=True, index=True
     )
+    # Phase 15: which request/call caused this notification. Nullable so
+    # pre-Phase-15 rows stay valid; always stamped on new rows.
+    correlation_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, nullable=True, index=True
+    )
     subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
     body: Mapped[str | None] = mapped_column(String(4000), nullable=True)
     error: Mapped[str | None] = mapped_column(String(500), nullable=True)

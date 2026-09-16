@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import TokenError, decode_token
 from app.domain.auth.models import Role, User
+from app.observability.correlation import get_correlation_id
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
@@ -19,6 +20,10 @@ class RequestContext(BaseModel):
     user_id: uuid.UUID
     role: Role
     hospital_id: uuid.UUID | None
+    # Ambient correlation: the middleware pins one per HTTP request; the
+    # tool wrapper stamps it when unset so every capability in a turn
+    # shares the request's id instead of minting its own.
+    correlation_id: uuid.UUID | None = None
 
 
 def get_current_context(
@@ -45,7 +50,10 @@ def get_current_context(
         raise credentials_exc
     # Source of truth is the DB row, not the (possibly stale) JWT claims.
     return RequestContext(
-        user_id=user.id, role=user.role, hospital_id=user.hospital_id
+        user_id=user.id,
+        role=user.role,
+        hospital_id=user.hospital_id,
+        correlation_id=get_correlation_id(),
     )
 
 

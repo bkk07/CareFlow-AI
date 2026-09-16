@@ -49,6 +49,7 @@ def send_reminder(
                 f"{appointment.slot_start.isoformat()}."
             ),
             dedupe_key=f"reminder:{appointment.id}:in_app",
+            correlation_id=execution.correlation_id,
         )
         sent += 1 if created else 0
     note(execution, f"reminder sweep: {len(upcoming)} upcoming, {sent} sent")
