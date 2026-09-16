@@ -18,6 +18,12 @@ dist/
 dist-ssr/
 *.local
 
+# Playwright (Phase 16 E2E)
+test-results/
+playwright-report/
+playwright/.cache/
+.ms-playwright/
+
 # OS / editors
 .DS_Store
 Thumbs.db

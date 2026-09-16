@@ -655,3 +655,36 @@ doctor dev serves HTTP 200 on :5177 and compose config is valid.
   single alembic head, live postgres smoke (header echo on every
   call, confirmed booking, trace layers incl. workflow row,
   success_rate 1.0) green.
+
+## Phase 16 — Testing Pass
+
+> implement next phase (plan Phase 16, testing pass)
+
+- New layout, literal per plan: `tests/unit/` (availability,
+  slot_validation, state_transitions, context_resolution,
+  capability_validation, idempotency, reconciliation),
+  `tests/integration/` (ai_to_scheduling, scheduling_to_appointment,
+  appointment_to_ehr, ehr_to_verification, verification_to_sync,
+  booking_to_workflow, workflow_to_notification), `tests/ai/` (intent,
+  context, clarification, tool_selection, safety_boundary),
+  `tests/ehr/` (patient_mapping, provider_mapping, create,
+  reschedule, cancel, timeout, duplicate, unknown_outcome,
+  verification, reconciliation) — 29 files, 43 real tests, no stubs.
+  Shared `ehr_stub` fixture (deterministic StubConnector + REST
+  override) added to `tests/conftest.py`.
+- The pass caught real assumptions: bookings write verify-but-no-create
+  operation rows, verification rows accumulate (pipeline verifies at
+  booking AND on re-read), `db.get` needs UUID objects on sqlite,
+  AIContext needs explicit save, and the clinical classifier is
+  keyword-based — tests now assert the actual behavior.
+- E2E (`tests/e2e/`, Playwright + Chromium headless, own package.json):
+  `happy_path_spec` (sign in -> search -> book -> confirmed visit) and
+  `failure_recovery_spec` (fault-mode timeout -> visibly parked ->
+  heal -> operator retry -> confirmed) both pass headless (15s) against
+  a scratch postgres stack + patient vite dev. Debugging notes: port
+  5175 was taken by another project (moved to 5179), the compose CORS
+  var is BACKEND_CORS_ORIGINS, and `set VAR=x &&` in cmd leaves a
+  trailing space — all fixed in the scratch setup, seeds use
+  per-run-unique specialties so reruns never match stale rows.
+- Verification: 263/263 pytest green (220 existing + 43 new), both
+  Playwright specs green headless, scratch stack torn down.

@@ -9,6 +9,13 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.db import Base, get_db
+from app.domain.appointment.router import get_integration_service
+from app.integration.connector_interface import (
+    EHRConnectorError,
+    ExternalAppointment,
+)
+from app.integration.integration_service import IntegrationService
+from app.mcp_server.tools import _base as tool_base
 from app.domain.auth import models as auth_models  # noqa: F401 — register metadata
 from app.domain.appointment import models as appointment_models  # noqa: F401
 from app.reliability import models as reliability_models  # noqa: F401
@@ -67,6 +74,122 @@ def client(db):
 
 def make_hospital_id() -> str:
     return str(uuid.uuid4())
+
+
+class StubConnector:
+    """Deterministic vendor stand-in for the Phase 16 testing pass.
+
+    Mirrors the FakeConnector from test_mcp_agent: switchable create
+    failures, an inspectable record store, and call counters so mapping
+    tests can prove the second call never reaches the vendor.
+    """
+
+    def __init__(self) -> None:
+        self.fail_create = False
+        self.create_error: type[EHRConnectorError] = EHRConnectorError
+        self.creates = 0
+        self.ensure_patient_calls = 0
+        self.ensure_provider_calls = 0
+        self._records: dict[str, dict] = {}
+
+    def ensure_patient(self, **kwargs):
+        self.ensure_patient_calls += 1
+        return {"id": "ext-patient-1"}
+
+    def ensure_provider(self, **kwargs):
+        self.ensure_provider_calls += 1
+        return {"id": "ext-provider-1"}
+
+    def ensure_facility(self, **kwargs):
+        return {"id": "ext-facility-1"}
+
+    def create_appointment(self, request):
+        if self.fail_create:
+            raise self.create_error("vendor down")
+        self.creates += 1
+        external_id = f"vendor-{request.idempotency_key}"
+        self._records[external_id] = {
+            "status": "scheduled",
+            "start": request.start,
+            "end": request.end,
+        }
+        return ExternalAppointment(
+            external_id=external_id,
+            status="scheduled",
+            start=request.start,
+            end=request.end,
+        )
+
+    def update_appointment(self, external_id, request):
+        record = self._records.get(external_id)
+        if record is None:
+            from app.integration.connector_interface import EHRNotFoundError
+
+            raise EHRNotFoundError("no such vendor record")
+        record.update(
+            {"status": "scheduled", "start": request.start, "end": request.end}
+        )
+        return ExternalAppointment(
+            external_id=external_id,
+            status="scheduled",
+            start=request.start,
+            end=request.end,
+        )
+
+    def cancel_appointment(self, external_id):
+        record = self._records.get(external_id)
+        if record is None:
+            from app.integration.connector_interface import EHRNotFoundError
+
+            raise EHRNotFoundError("no such vendor record")
+        record["status"] = "cancelled"
+        return ExternalAppointment(
+            external_id=external_id,
+            status=record["status"],
+            start=record["start"],
+            end=record["end"],
+        )
+
+    def get_appointment(self, external_id):
+        record = self._records.get(external_id)
+        if record is None:
+            from app.integration.connector_interface import EHRNotFoundError
+
+            raise EHRNotFoundError("no such vendor record")
+        return ExternalAppointment(
+            external_id=external_id,
+            status=record["status"],
+            start=record["start"],
+            end=record["end"],
+        )
+
+    def find_appointment_by_idempotency_key(self, idempotency_key):
+        external_id = f"vendor-{idempotency_key}"
+        record = self._records.get(external_id)
+        if record is None:
+            return None
+        return ExternalAppointment(
+            external_id=external_id,
+            status=record["status"],
+            start=record["start"],
+            end=record["end"],
+        )
+
+
+@pytest.fixture()
+def ehr_stub(db):
+    """Stubbed vendor for tools AND the REST booking route."""
+    connector = StubConnector()
+    stub = lambda session: IntegrationService(  # noqa: E731
+        session=session, connector=connector
+    )
+    tool_base.set_integration_factory(stub)
+    app.dependency_overrides[get_integration_service] = (
+        lambda: IntegrationService(session=db, connector=connector)
+    )
+    yield connector
+    app.dependency_overrides.clear()
+    tool_base.set_integration_factory(None)
 
 
 def approved_hospital(client, tag="x"):
