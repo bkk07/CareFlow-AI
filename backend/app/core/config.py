@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = Field(
         default=7, alias="REFRESH_TOKEN_EXPIRE_DAYS"
     )
+    ehr_mock_base_url: str = Field(
+        default="http://localhost:8000", alias="EHR_MOCK_BASE_URL"
+    )
+    ehr_http_timeout_s: float = Field(default=10.0, alias="EHR_HTTP_TIMEOUT_S")
     llm_api_key: str = Field(default="", alias="LLM_API_KEY")
     twilio_account_sid: str = Field(default="", alias="TWILIO_ACCOUNT_SID")
     twilio_auth_token: str = Field(default="", alias="TWILIO_AUTH_TOKEN")

@@ -17,6 +17,8 @@ from app.core import audit as audit_module  # noqa: E402,F401 — register Audit
 from app.domain.doctor import models as doctor_models  # noqa: E402,F401 — register Doctor metadata
 from app.domain.hospital_config import models as config_models  # noqa: E402,F401 — register config metadata
 from app.domain.patient import models as patient_models  # noqa: E402,F401 — register patient metadata
+from app.integration.mock_ehr import models as mock_ehr_models  # noqa: E402,F401 — register mock EHR metadata
+from app.integration.mapping import models as mapping_models  # noqa: E402,F401 — register mapping metadata
 from app.domain.scheduling import models as scheduling_models  # noqa: E402,F401 — register scheduling metadata
 
 config = context.config

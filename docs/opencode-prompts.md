@@ -159,3 +159,23 @@ Notes on execution (patient management):
   empty-state shells (react-router-dom); pages show sign-in, loading,
   and empty states gracefully.
 - No Phase 6+ code (EHR, appointments, reliability) was added.
+
+## Mock EHR + Integration Layer
+
+> next phase
+
+Notes on execution (mock EHR + integration layer):
+
+- Scope implemented exactly per `build-plan-deep-dive.md` Phase 6:
+  `EHRConnector` protocol + typed errors in `connector_interface.py`;
+  mock vendor mini-app in `mock_ehr/` (models, vendor-shaped router with
+  patient/provider/facility lookup-or-create and appointment
+  create/retrieve/update/cancel plus idempotency-key lookup,
+  `fault_injection.py` with all six modes behind a demo-env-gated
+  `_debug` switch, HTTP `MockEHRConnector`); `ExternalIdentifierMapping`
+  + `get_or_create_mapping()`; and `IntegrationService` as the only
+  connector caller (vendor sync on first use, never hardcoded ids).
+- Transports are pluggable: real HTTP in production, in-process calls in
+  tests. `create_but_no_response` persists then answers 504 so recovery
+  must go through idempotency-key lookup, never blind retry.
+- No Phase 7+ code (appointments, reliability, agent) was added.

@@ -13,6 +13,8 @@ from app.domain.auth import models as auth_models  # noqa: F401 — register met
 from app.domain.doctor import models as doctor_models  # noqa: F401
 from app.domain.hospital import models as hospital_models  # noqa: F401
 from app.domain.hospital_config import models as config_models  # noqa: F401
+from app.integration.mock_ehr import models as mock_ehr_models  # noqa: F401
+from app.integration.mapping import models as mapping_models  # noqa: F401
 from app.core import audit as audit_module  # noqa: F401
 from app.main import app
 
