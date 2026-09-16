@@ -28,7 +28,7 @@ from app.domain.appointment.schemas import (
     RescheduleIn,
 )
 from app.domain.appointment.state_machine import InvalidTransition
-from app.domain.auth.models import Role, User
+from app.domain.auth.models import Role
 from app.domain.doctor.models import Doctor
 from app.domain.hospital.models import Hospital
 from app.domain.hospital.service import assert_hospital_approved, get_hospital_or_404

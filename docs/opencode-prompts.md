@@ -294,3 +294,35 @@ Notes on execution (Phase 9 — MCP Server + AI Agent):
   502 at `/chat`, mirroring the EHR path.
 - `ChatDebug.tsx` (patient app, dev-only label) posts to `/chat`.
   No Phase 10+ logic was added.
+
+## Cross-phase fix pass (Phases 0-9)
+
+> check upto phase any fixes need or not
+
+Findings and fixes (all verified, no new phases):
+
+- `POST /mcp/call` returned 500 for malformed tool input
+  (pydantic `ValidationError` escaped the registry) and for
+  tool-level `ValueError`s (e.g. blank `conversation_id`).
+  `execute_tool` now maps both to 422; regression tests added.
+- Hospital-admin UI (port 5174) had no CORS origin: preflight from
+  `:5174` failed while `:5173` passed. Default
+  `BACKEND_CORS_ORIGINS` and `infra/.env.example` now include
+  `http://localhost:5174`; preflight regression test added.
+- `backend/.env` (with a live GROQ key) was baked into images by
+  `COPY . .` — already fixed in Phase 9 with
+  `backend/.dockerignore`; re-verified `/code/.env` absent in a
+  rebuilt image.
+- Removed 7 dead imports across `appointment/router`,
+  `reconciliation/service`, `hospital_config/models`,
+  `scheduling/models`, `doctor/models`, `hospital/models`
+  (AST scan, suite-green after).
+- `transfer_to_human` rejected blank `conversation_id`/`reason`
+  with 422 instead of storing empty rows.
+- `AIContext` store now reuses one Redis client (dropped and
+  retried on ping failure) instead of connecting per call;
+  `ai/router.py` imports `httpx` at top level.
+- Left alone deliberately: untracked `backend/.env.example`
+  (key material, pre-existing decision), Phase 10/11 501 stubs,
+  patient-visible 200-with-outcome on tool booking (agent relays
+  it; REST keeps strict 201/202/502).

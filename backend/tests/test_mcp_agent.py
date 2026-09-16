@@ -920,3 +920,38 @@ def test_chat_endpoint_maps_model_failure_to_502(client, monkeypatch, tool_facto
         headers=setup["patient"]["headers"],
     )
     assert resp.status_code == 502
+
+
+def test_mcp_call_maps_bad_input_to_422(client, tool_factory):
+    setup = seed_setup(client, tag="badinput")
+    resp = client.post(
+        "/mcp/call",
+        json={"tool": "search_doctors", "input": {"hospital_id": "not-a-uuid"}},
+        headers=setup["patient"]["headers"],
+    )
+    assert resp.status_code == 422
+
+
+def test_mcp_call_maps_empty_conversation_to_422(client, tool_factory):
+    setup = seed_setup(client, tag="emptyconv")
+    resp = client.post(
+        "/mcp/call",
+        json={"tool": "get_context", "input": {"conversation_id": "  "}},
+        headers=setup["patient"]["headers"],
+    )
+    assert resp.status_code == 422
+
+
+def test_cors_allows_hospital_admin_origin():
+    from fastapi.testclient import TestClient
+
+    probe = TestClient(app)
+    resp = probe.options(
+        "/health",
+        headers={
+            "Origin": "http://localhost:5174",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert resp.status_code == 200
+    assert "access-control-allow-origin" in {k.lower() for k in resp.headers}

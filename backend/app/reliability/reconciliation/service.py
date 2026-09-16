@@ -40,7 +40,7 @@ from app.reliability.failure_classifier import (
     retry_allowed,
     retry_delay_s,
 )
-from app.reliability.models import IntegrationOperation, OperationStatus, OperationType
+from app.reliability.models import OperationStatus, OperationType
 from app.reliability.models import ReconciliationRecord, ResolutionStatus
 from app.reliability.synchronization import service as sync_service
 

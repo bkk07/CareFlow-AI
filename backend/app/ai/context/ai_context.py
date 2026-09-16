@@ -45,17 +45,31 @@ class AIContext(BaseModel):
         del self.history[: -_HISTORY_LIMIT]
 
 
+_fallback: dict[str, tuple[str, float]] = {}
+_client = None
+
+
 def _redis():
+    """Shared client; a failed ping drops it so the next call retries."""
+    global _client
+    if _client is None:
+        try:
+            import redis  # local import: optional at runtime, required in prod
+        except ImportError:
+            return None
+        candidate = redis.Redis.from_url(settings.redis_url, socket_timeout=2)
+        try:
+            candidate.ping()
+        except Exception:
+            return None
+        _client = candidate
+        return _client
     try:
-        import redis  # local import: optional at runtime, required in prod
-    except ImportError:
-        return None
-    try:
-        client = redis.Redis.from_url(settings.redis_url, socket_timeout=2)
-        client.ping()
-        return client
+        _client.ping()
     except Exception:
+        _client = None
         return None
+    return _client
 
 
 def _key(conversation_id: str) -> str:

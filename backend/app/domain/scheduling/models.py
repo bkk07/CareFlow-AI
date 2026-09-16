@@ -9,7 +9,7 @@ import enum
 import uuid
 from datetime import date, datetime, time
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, String, Time, UniqueConstraint, Uuid, func
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, Time, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base

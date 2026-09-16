@@ -6,11 +6,12 @@ is enforced inside the wrapper, so both paths share one policy.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
 from app.core.deps import RequestContext, get_current_context
+from app.mcp_server.errors import CapabilityValidationError
 from app.mcp_server.tools import (
     cancel_appointment,
     check_availability,
@@ -94,8 +95,18 @@ def execute_tool(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Unknown capability '{name}'",
         )
-    parsed = spec["input_model"](**input_data)
-    return spec["run"](parsed, ctx, db)
+    try:
+        parsed = spec["input_model"](**input_data)
+    except ValidationError as exc:
+        raise CapabilityValidationError(
+            f"Invalid input for '{name}': {exc.errors()}"
+        ) from exc
+    try:
+        return spec["run"](parsed, ctx, db)
+    except ValueError as exc:
+        # Tool-level input rejections (e.g. blank conversation id) are
+        # caller errors, not crashes.
+        raise CapabilityValidationError(str(exc)) from exc
 
 
 class CallIn(BaseModel):

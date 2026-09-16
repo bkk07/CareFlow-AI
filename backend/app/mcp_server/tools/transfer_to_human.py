@@ -39,10 +39,16 @@ def run(
 ) -> dict:
     """Open a human-review escalation for this conversation."""
     del integration
+    conversation_id = input.conversation_id.strip()
+    reason = input.reason.strip()
+    if not conversation_id:
+        raise ValueError("conversation_id must not be empty")
+    if not reason:
+        raise ValueError("reason must not be empty")
     row = Escalation(
-        conversation_id=input.conversation_id.strip(),
+        conversation_id=conversation_id,
         appointment_id=input.appointment_id,
-        reason=input.reason.strip(),
+        reason=reason,
         status=EscalationStatus.open,
         created_by_user_id=ctx.user_id,
         hospital_id=ctx.hospital_id,

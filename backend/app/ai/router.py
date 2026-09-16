@@ -1,5 +1,6 @@
 """Text chat endpoint (dev-facing in Phase 9; ChatDebug page calls this)."""
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -50,8 +51,6 @@ def chat(
     except Exception as exc:
         # Model-backend trouble (auth, network, bad response) is a vendor
         # failure, not a crash: report 502 like the EHR path does.
-        import httpx
-
         if isinstance(exc, httpx.HTTPError):
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
