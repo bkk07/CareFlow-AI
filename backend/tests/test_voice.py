@@ -130,6 +130,16 @@ def test_voice_rejects_bad_token(client, voice_env):
         assert "auth" in msg["reason"]
 
 
+def test_hospital_admin_may_use_voice(client, db, voice_env):
+    from tests.conftest import approved_hospital
+
+    hosp = approved_hospital(client, tag="vadmin")
+    token = hosp["owner"]["Authorization"].split(" ", 1)[1]
+    with client.websocket_connect(f"/voice/ws?token={token}") as ws:
+        msg, _ = read_until(ws, {"ready"})
+        assert "conversation_id" in msg
+
+
 # -- partials never run tools --------------------------------------------------------
 
 

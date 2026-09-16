@@ -441,3 +441,22 @@ Notes on execution (Phase 12 — Web Voice):
   TTS, silence->escalation, orchestrator stop). Live smoke over a
   real socket: ready -> reprompt spoken -> stub-TTS error frame ->
   ended(silence) with escalation id. No migration, no Phase 13+ code.
+
+## Cross-phase fix pass (Phases 0-12)
+
+> check is there you missed anything upto now
+
+Findings and fixes (suite 175/175, tree clean):
+
+- Removed 3 more dead imports (`AppointmentState` in the
+  reconciliation router, `struct` in the STT provider, `Any` in the
+  task base) — AST scan is otherwise clean.
+- `STOPPED` was missing from the orchestrator `__all__`; added.
+- Voice `_pump_turn` could orphan the agent task on client
+  disconnect (task keeps talking to a dead socket) — now cancelled
+  in a `finally`.
+- Covered two untested paths: submitting answers with no form
+  assigned (422) and hospital-admin voice access (allowed).
+- Verified clean and left alone: no tracked secrets (`gsk_` grep),
+  no TODO/console markers, history order, single migration head,
+  questionnaire-returns-null shape, partials/tools separation.

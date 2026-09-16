@@ -10,7 +10,6 @@ retry notifies nothing twice.
 
 import uuid
 from collections.abc import Callable
-from typing import Any
 
 from sqlalchemy.orm import Session
 

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db
 from app.core.deps import RequestContext, require_role
-from app.domain.appointment.models import Appointment, AppointmentState
+from app.domain.appointment.models import Appointment
 from app.domain.appointment.router import get_integration_service
 from app.domain.appointment.service import get_appointment_or_404
 from app.domain.auth.models import Role

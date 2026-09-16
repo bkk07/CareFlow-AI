@@ -262,6 +262,7 @@ __all__ = [
     "CLINICAL_DECLINE",
     "LOOP_EXHAUSTED",
     "MAX_ITERATIONS",
+    "STOPPED",
     "SYSTEM_PROMPT",
     "groq_complete",
     "is_clinical_request",

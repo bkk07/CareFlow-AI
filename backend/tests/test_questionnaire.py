@@ -204,6 +204,12 @@ def test_no_questionnaire_returns_null(client, stub_integration):
         headers=setup["patient"]["headers"],
     ).json()
     assert got is None
+    submit = client.post(
+        f"/appointments/{appt['id']}/questionnaire/responses",
+        json={"answers": {}},
+        headers=setup["patient"]["headers"],
+    )
+    assert submit.status_code == 422
 
 
 def test_other_patient_cannot_fetch(client, stub_integration):

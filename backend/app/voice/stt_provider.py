@@ -6,7 +6,6 @@ and posts it to the OpenAI-compatible transcriptions endpoint.
 """
 
 import io
-import struct
 import wave
 from dataclasses import dataclass
 

@@ -215,6 +215,11 @@ async def _pump_turn(ws: WebSocket, session: VoiceSession, text: str) -> None:
     except asyncio.CancelledError:
         turn.cancel()
         raise
+    finally:
+        # A disconnect mid-turn must not orphan the agent task talking
+        # to a dead socket.
+        if not turn.done():
+            turn.cancel()
 
 
 async def _on_silence(ws: WebSocket, session: VoiceSession) -> bool:
