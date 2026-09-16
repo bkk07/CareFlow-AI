@@ -46,6 +46,10 @@ class CapabilityExecution(Base):
     latency_ms: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     correlation_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
     actor_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    # Denormalized caller hospital for the Phase 13 AI Activity view.
+    hospital_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, nullable=True, index=True
+    )
     error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

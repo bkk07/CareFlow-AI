@@ -460,3 +460,40 @@ Findings and fixes (suite 175/175, tree clean):
 - Verified clean and left alone: no tracked secrets (`gsk_` grep),
   no TODO/console markers, history order, single migration head,
   questionnaire-returns-null shape, partials/tools separation.
+
+## Dashboards
+
+> next phase (Phase 13 — Dashboards per the plan)
+
+Notes on execution:
+
+- Backend: `/doctors/me/*` (profile, appointments today/upcoming,
+  calendar with rules/blocks/live, questionnaire responses) behind a
+  new `Doctor.user_id` link admins set on create/update (validated:
+  doctor-role login of the same hospital); hospital overview /
+  AI activity (new `capability_executions.hospital_id`) /
+  integration status / analytics aggregates; platform
+  cross-hospital doctors/patients/appointments (new state filter),
+  AI evaluation over the Phase 9 log, audit-event viewer.
+  Migration `0012_dashboards`.
+- HITL gap closed: `resolve` accepts `final_state`, moving the
+  booking through the state machine (invalid edges and
+  escalate+final_state rejected) — resolving from the UI now
+  changes real appointment state, as the plan demands. The
+  `/operations/*` paths were not duplicated; the Phase 8
+  `/reconciliation/records*` routes are that UI surface.
+- Scheduling endpoints now admit doctors scoped to their own
+  linked calendar (hospital scoping preserved; patients and
+  platform still 403) so the doctor Calendar editor works.
+- Frontend: new doctor app on :5176 (login, Today, Upcoming,
+  Calendar editor, detail + responses) + compose service; admin app
+  admits platform_admin with platform-only tabs and gains
+  Overview, AI Activity, Integration, Analytics, and Operations
+  (retry / resolve-with-transition / escalate) tabs. CORS += 5176.
+- Verification: 185/185 tests (10 new: link validation, ranges,
+  calendar scope, doctor response view, overview, AI-activity
+  scoping, platform views, AI eval aggregates, resolve-moves-
+  state). Live smoke on postgres: doctor upcoming/calendar,
+  overview counts, park -> resolve(cancelled) -> booking
+  cancelled, doctor UI 200.
+- No Phase 14+ code.

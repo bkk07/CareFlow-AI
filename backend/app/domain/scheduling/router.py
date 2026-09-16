@@ -10,8 +10,8 @@ from app.core.db import get_db
 from app.core.deps import RequestContext, require_role
 from app.domain.auth.models import Role
 from app.domain.doctor.models import Doctor
-from app.domain.hospital.deps import require_managed_hospital
 from app.domain.hospital.models import Hospital
+from app.domain.hospital.service import assert_hospital_approved, get_hospital_or_404
 from app.domain.scheduling import service
 from app.domain.scheduling.models import (
     AvailabilityRule,
@@ -30,14 +30,41 @@ from app.domain.scheduling.schemas import (
 
 router = APIRouter(tags=["scheduling"])
 
-_admin = require_role(Role.hospital_admin)
+_editor = require_role(Role.hospital_admin, Role.doctor)
+
+
+def _managed_hospital(
+    hospital_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_editor),
+) -> Hospital:
+    """The caller's own live hospital — admins and doctors alike."""
+    hospital = get_hospital_or_404(db, hospital_id)
+    if ctx.hospital_id != hospital.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not allowed to manage this hospital",
+        )
+    return assert_hospital_approved(hospital)
 
 
 def _hospital_doctor(
     doctor_id: uuid.UUID,
-    hospital: Hospital = Depends(require_managed_hospital),
+    hospital: Hospital = Depends(_managed_hospital),
     db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_editor),
 ) -> Doctor:
+    if ctx.role == Role.doctor:
+        # Doctors manage only their own linked calendar.
+        from app.domain.doctor import dashboard as doctor_dashboard
+
+        linked = doctor_dashboard.get_linked_doctor(db, ctx)
+        if linked.id != doctor_id or linked.hospital_id != hospital.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Doctors can only manage their own calendar",
+            )
+        return linked
     return service.get_hospital_doctor(db, hospital, doctor_id)
 
 
@@ -48,7 +75,7 @@ def _hospital_doctor(
 def get_calendar(
     doctor: Doctor = Depends(_hospital_doctor),
     db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(_admin),
+    ctx: RequestContext = Depends(_editor),
 ) -> CalendarOut:
     del ctx
     return service.get_or_create_calendar(db, doctor.id)
@@ -62,7 +89,7 @@ def update_calendar(
     body: CalendarUpdateIn,
     doctor: Doctor = Depends(_hospital_doctor),
     db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(_admin),
+    ctx: RequestContext = Depends(_editor),
 ) -> CalendarOut:
     del ctx
     calendar = service.get_or_create_calendar(db, doctor.id)
@@ -79,7 +106,7 @@ def update_calendar(
 def list_rules(
     doctor: Doctor = Depends(_hospital_doctor),
     db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(_admin),
+    ctx: RequestContext = Depends(_editor),
 ) -> list:
     del ctx
     return (
@@ -99,7 +126,7 @@ def create_rule(
     body: AvailabilityRuleCreateIn,
     doctor: Doctor = Depends(_hospital_doctor),
     db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(_admin),
+    ctx: RequestContext = Depends(_editor),
 ) -> AvailabilityRule:
     del ctx
     service.validate_rule_input(
@@ -133,7 +160,7 @@ def delete_rule(
     rule_id: uuid.UUID,
     doctor: Doctor = Depends(_hospital_doctor),
     db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(_admin),
+    ctx: RequestContext = Depends(_editor),
 ) -> None:
     del ctx
     rule = (
@@ -161,7 +188,7 @@ def delete_rule(
 def list_blocks(
     doctor: Doctor = Depends(_hospital_doctor),
     db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(_admin),
+    ctx: RequestContext = Depends(_editor),
 ) -> list:
     del ctx
     return (
@@ -181,7 +208,7 @@ def create_block(
     body: BlockedSlotCreateIn,
     doctor: Doctor = Depends(_hospital_doctor),
     db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(_admin),
+    ctx: RequestContext = Depends(_editor),
 ) -> BlockedSlot:
     del ctx
     start = service._to_utc(body.start_datetime)
@@ -211,7 +238,7 @@ def delete_block(
     block_id: uuid.UUID,
     doctor: Doctor = Depends(_hospital_doctor),
     db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(_admin),
+    ctx: RequestContext = Depends(_editor),
 ) -> None:
     del ctx
     block = (
@@ -241,7 +268,7 @@ def read_slots(
     appointment_type_id: uuid.UUID,
     doctor: Doctor = Depends(_hospital_doctor),
     db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(_admin),
+    ctx: RequestContext = Depends(_editor),
 ) -> list[SlotOut]:
     del ctx
     windows = service.get_available_slots(

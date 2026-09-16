@@ -21,7 +21,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.domain.appointment.models import Appointment, AppointmentState
-from app.domain.appointment.state_machine import transition
+from app.domain.appointment.state_machine import InvalidTransition, transition
 from app.domain.doctor.models import Doctor
 from app.domain.hospital.models import Hospital
 from app.domain.hospital_config.models import AppointmentType
@@ -625,9 +625,14 @@ def resolve_record(
     resolution: ResolutionStatus,
     note: str | None,
     actor_user_id: uuid.UUID,
+    final_state: AppointmentState | None = None,
 ) -> ReconciliationRecord:
-    """Manually close an operator work item. Resolved/escalated only, with a note."""
-    del actor_user_id
+    """Manually close an operator work item. Resolved/escalated only, with a note.
+
+    `final_state` moves the appointment itself through the state machine
+    first, so HITL resolution changes real booking state — not just the
+    work item. Only valid together with `resolved`.
+    """
     if record.resolution_status == ResolutionStatus.resolved:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -643,6 +648,31 @@ def resolve_record(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="A note is required to close a record",
         )
+    if final_state is not None and resolution != ResolutionStatus.resolved:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="final_state is only valid with resolution 'resolved'",
+        )
+    if final_state is not None:
+        appointment = session.get(Appointment, record.appointment_id)
+        if appointment is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Appointment for this record no longer exists",
+            )
+        try:
+            transition(
+                session,
+                appointment,
+                final_state,
+                actor_user_id=actor_user_id,
+                reason=note.strip(),
+                correlation_id=appointment.correlation_id,
+            )
+        except InvalidTransition as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+            ) from exc
     operations.set_resolution(session, record, resolution, note=note.strip())
     session.commit()
     session.refresh(record)

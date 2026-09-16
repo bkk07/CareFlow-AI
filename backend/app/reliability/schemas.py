@@ -5,6 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.domain.appointment.models import AppointmentState
 from app.reliability.models import OperationStatus, OperationType, ResolutionStatus
 
 
@@ -52,3 +53,7 @@ class RecordDetailOut(ReconciliationRecordOut):
 class ResolveIn(BaseModel):
     resolution: ResolutionStatus
     note: str | None = Field(default=None, max_length=500)
+    # Optional real state change applied to the appointment itself, so
+    # resolving from the HITL UI actually moves the booking (validated
+    # against the state machine; rejected for escalations).
+    final_state: AppointmentState | None = None

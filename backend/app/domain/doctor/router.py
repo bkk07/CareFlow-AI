@@ -1,19 +1,27 @@
 """Doctor CRUD + activation endpoints (hospital-admin, managed hospital)."""
 
 import uuid
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
 from app.core.deps import RequestContext, require_role
 from app.core.tenant import hospital_scoped_query
+from app.domain.appointment.schemas import AppointmentOut
 from app.domain.auth.models import Role
-from app.domain.doctor import service
+from app.domain.doctor import dashboard, service
 from app.domain.doctor.models import Doctor
-from app.domain.doctor.schemas import DoctorCreateIn, DoctorOut, DoctorUpdateIn
+from app.domain.doctor.schemas import (
+    DoctorCalendarOut,
+    DoctorCreateIn,
+    DoctorOut,
+    DoctorUpdateIn,
+)
 from app.domain.hospital.deps import require_managed_hospital
 from app.domain.hospital.models import Hospital
+from app.domain.questionnaire.schemas import ResponseOut
 
 router = APIRouter(tags=["doctors"])
 
@@ -99,3 +107,85 @@ def deactivate_doctor(
 ):
     doctor = service.get_doctor_or_404(db, hospital, doctor_id)
     return service.deactivate(db, doctor)
+
+
+_doctor = require_role(Role.doctor)
+
+
+@router.get("/doctors/me", response_model=DoctorOut)
+def get_my_profile(
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_doctor),
+) -> Doctor:
+    return dashboard.get_linked_doctor(db, ctx)
+
+
+@router.get("/doctors/me/appointments", response_model=list[AppointmentOut])
+def get_my_appointments(
+    range: str = "upcoming",
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_doctor),
+) -> list:
+    if range not in ("today", "upcoming"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="range must be 'today' or 'upcoming'",
+        )
+    doctor = dashboard.get_linked_doctor(db, ctx)
+    today, upcoming = dashboard.appointments_for(
+        db, doctor, day=datetime.now(timezone.utc)
+    )
+    return today if range == "today" else upcoming
+
+
+@router.get("/doctors/me/calendar", response_model=DoctorCalendarOut)
+def get_my_calendar(
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_doctor),
+) -> dict:
+    doctor = dashboard.get_linked_doctor(db, ctx)
+    data = dashboard.calendar_for(db, doctor)
+    return {
+        "calendar": data["calendar"],
+        "rules": data["rules"],
+        "blocks": data["blocks"],
+        "live_appointments": data["live"],
+    }
+
+
+@router.get(
+    "/doctors/me/questionnaire-responses/{appointment_id}",
+    response_model=list[ResponseOut],
+)
+def get_my_questionnaire_responses(
+    appointment_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_doctor),
+) -> list:
+    from app.domain.appointment.service import get_appointment_or_404
+    from app.domain.questionnaire.models import QuestionnaireResponse
+
+    doctor = dashboard.get_linked_doctor(db, ctx)
+    appointment = get_appointment_or_404(db, appointment_id)
+    if appointment.doctor_id != doctor.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not your appointment",
+        )
+    rows = (
+        db.query(QuestionnaireResponse)
+        .filter(QuestionnaireResponse.appointment_id == appointment.id)
+        .order_by(QuestionnaireResponse.created_at)
+        .all()
+    )
+    return [
+        ResponseOut(
+            id=row.id,
+            appointment_id=row.appointment_id,
+            questionnaire_id=row.questionnaire_id,
+            answers=row.answers,
+            completed=row.completed_at is not None,
+            completed_at=row.completed_at,
+        )
+        for row in rows
+    ]

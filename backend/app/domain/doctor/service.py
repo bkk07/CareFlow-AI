@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.domain.doctor.models import Doctor, DoctorStatus
 from app.domain.doctor.schemas import DoctorCreateIn, DoctorUpdateIn
+from app.domain.auth.models import Role, User
 from app.domain.hospital.models import Hospital
 from app.domain.hospital_config.models import (
     AppointmentType,
@@ -60,6 +61,18 @@ def get_doctor_or_404(session: Session, hospital: Hospital, doctor_id: uuid.UUID
     return doctor
 
 
+def _resolve_login(
+    session: Session, hospital: Hospital, user_id: uuid.UUID | None
+) -> uuid.UUID | None:
+    """Validate a doctor-role login of this hospital for profile linking."""
+    if user_id is None:
+        return None
+    user = session.get(User, user_id)
+    if user is None or user.role != Role.doctor or user.hospital_id != hospital.id:
+        raise _unprocessable("user_id must be a doctor login of this hospital")
+    return user.id
+
+
 def create_doctor(
     session: Session, hospital: Hospital, body: DoctorCreateIn
 ) -> Doctor:
@@ -77,6 +90,7 @@ def create_doctor(
         consultation_types=body.consultation_types,
         default_duration_minutes=body.default_duration_minutes,
         external_provider_id=body.external_provider_id,
+        user_id=_resolve_login(session, hospital, body.user_id),
         status=DoctorStatus.invited,
     )
     session.add(doctor)
@@ -85,7 +99,7 @@ def create_doctor(
     except IntegrityError:
         session.rollback()
         raise _conflict(
-            "external_provider_id is already assigned in this hospital"
+            "external_provider_id or user link is already assigned in this hospital"
         ) from None
     session.refresh(doctor)
     return doctor
@@ -103,6 +117,8 @@ def update_doctor(
         _resolve_ref(
             session, hospital, Department, data["department_id"], "department_id"
         )
+    if "user_id" in data:
+        data["user_id"] = _resolve_login(session, hospital, data["user_id"])
     for field, value in data.items():
         setattr(doctor, field, value)
     try:
@@ -110,7 +126,7 @@ def update_doctor(
     except IntegrityError:
         session.rollback()
         raise _conflict(
-            "external_provider_id is already assigned in this hospital"
+            "external_provider_id or user link is already assigned in this hospital"
         ) from None
     session.refresh(doctor)
     return doctor

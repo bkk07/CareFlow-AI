@@ -162,6 +162,7 @@ def list_appointments(
     patient_id: uuid.UUID | None = None,
     doctor_id: uuid.UUID | None = None,
     hospital_id: uuid.UUID | None = None,
+    state: AppointmentState | None = None,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(_reader),
 ) -> list:
@@ -187,7 +188,11 @@ def list_appointments(
                     detail="Doctor not found in this hospital",
                 )
     return service.list_appointments(
-        db, hospital_id=hospital_id, patient_id=patient_id, doctor_id=doctor_id
+        db,
+        hospital_id=hospital_id,
+        patient_id=patient_id,
+        doctor_id=doctor_id,
+        state=state,
     )
 
 

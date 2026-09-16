@@ -206,6 +206,7 @@ def resolve_record(
         resolution=body.resolution,
         note=body.note,
         actor_user_id=ctx.user_id,
+        final_state=body.final_state,
     )
     return _detail_out(db, record)
 

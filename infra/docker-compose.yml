@@ -93,6 +93,25 @@ services:
       retries: 10
       start_period: 30s
 
+  doctor:
+    build: ../frontend/apps/doctor
+    ports:
+      - "5176:5176"
+    environment:
+      VITE_API_URL: http://localhost:8000
+    depends_on:
+      - backend
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://localhost:5176').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
   worker:
     build: ../backend
     env_file:

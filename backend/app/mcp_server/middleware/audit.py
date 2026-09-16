@@ -31,6 +31,7 @@ def record_execution(
         latency_ms=latency_ms,
         correlation_id=correlation_id,
         actor_user_id=actor.user_id,
+        hospital_id=actor.hospital_id,
         error=(error or "")[:500] or None,
     )
     db.add(row)

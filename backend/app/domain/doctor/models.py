@@ -29,6 +29,11 @@ class Doctor(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     hospital_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    # Login that owns this profile (powers /doctors/me/*). Set by a
+    # hospital admin; at most one profile per user.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, unique=True
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     photo_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     specialty_id: Mapped[uuid.UUID | None] = mapped_column(

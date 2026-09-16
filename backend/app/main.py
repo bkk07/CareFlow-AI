@@ -9,6 +9,8 @@ from app.domain.auth.router import router as auth_router
 from app.domain.appointment.router import router as appointment_router
 from app.domain.doctor.router import router as doctor_router
 from app.domain.hospital.router import router as hospital_router
+from app.domain.hospital.dashboard import router as hospital_dashboard_router
+from app.domain.hospital.platform import router as platform_router
 from app.domain.hospital_config.router import router as hospital_config_router
 from app.domain.patient.router import router as patient_router
 from app.domain.questionnaire.router import router as questionnaire_router
@@ -34,6 +36,8 @@ app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(appointment_router)
 app.include_router(hospital_router)
+app.include_router(hospital_dashboard_router)
+app.include_router(platform_router)
 app.include_router(hospital_config_router)
 app.include_router(doctor_router)
 app.include_router(patient_router)

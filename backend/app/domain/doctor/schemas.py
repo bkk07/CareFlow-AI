@@ -6,7 +6,13 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.domain.appointment.schemas import AppointmentOut
 from app.domain.doctor.models import DoctorStatus
+from app.domain.scheduling.schemas import (
+    AvailabilityRuleOut,
+    BlockedSlotOut,
+    CalendarOut,
+)
 
 
 class DoctorCreateIn(BaseModel):
@@ -20,6 +26,7 @@ class DoctorCreateIn(BaseModel):
     consultation_types: list[str] = Field(default_factory=list)
     default_duration_minutes: int = Field(default=30, gt=0)
     external_provider_id: str | None = Field(default=None, max_length=255)
+    user_id: uuid.UUID | None = None
 
 
 class DoctorUpdateIn(BaseModel):
@@ -33,6 +40,7 @@ class DoctorUpdateIn(BaseModel):
     consultation_types: list[str] | None = None
     default_duration_minutes: int | None = Field(default=None, gt=0)
     external_provider_id: str | None = Field(default=None, max_length=255)
+    user_id: uuid.UUID | None = None
 
 
 class DoctorOut(BaseModel):
@@ -48,6 +56,14 @@ class DoctorOut(BaseModel):
     consultation_types: list[str]
     default_duration_minutes: int
     external_provider_id: str | None
+    user_id: uuid.UUID | None
     status: DoctorStatus
     created_at: datetime
     updated_at: datetime
+
+
+class DoctorCalendarOut(BaseModel):
+    calendar: CalendarOut
+    rules: list[AvailabilityRuleOut]
+    blocks: list[BlockedSlotOut]
+    live_appointments: list[AppointmentOut]
