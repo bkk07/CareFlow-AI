@@ -1,74 +1,70 @@
-import { useEffect, useState } from "react";
-import axios from "axios";
-
-const API_BASE =
-  (import.meta.env.VITE_API_URL as string | undefined) ??
-  "http://localhost:8000";
-
-interface PatientMe {
-  id: string;
-  email: string;
-  role: string;
-  hospital_id: string | null;
-  is_active: boolean;
-  created_at: string;
-}
-
-function storedToken(): string | null {
-  return localStorage.getItem("careflow_patient_token");
-}
+import { useCallback, useEffect, useState } from "react";
+import { api, apiError, type CurrentUser } from "../api";
 
 export default function Profile() {
-  const [profile, setProfile] = useState<PatientMe | null>(null);
+  const [profile, setProfile] = useState<CurrentUser | null>(null);
+  const [email, setEmail] = useState("");
+  const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  useEffect(() => {
-    const token = storedToken();
-    if (!token) return;
-    axios
-      .get<PatientMe>(`${API_BASE}/patients/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      .then((res) => setProfile(res.data))
-      .catch(() => setError("Could not load your profile."));
+  const refresh = useCallback(async () => {
+    try {
+      const { data } = await api.get<CurrentUser>("/patients/me");
+      setProfile(data);
+      setEmail(data.email);
+    } catch {
+      setError("Could not load your profile.");
+    }
   }, []);
 
-  if (!storedToken()) {
-    return (
-      <section>
-        <h2>Profile</h2>
-        <p>Sign in to view your profile.</p>
-      </section>
-    );
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  async function save() {
+    setError(null);
+    setNotice(null);
+    try {
+      await api.put("/patients/me", { email });
+      setEditing(false);
+      setNotice("Email updated.");
+      await refresh();
+    } catch (e) {
+      setError(apiError(e));
+    }
   }
 
-  if (error) {
-    return (
-      <section>
-        <h2>Profile</h2>
-        <p>{error}</p>
-      </section>
-    );
-  }
-
-  if (!profile) {
-    return (
-      <section>
-        <h2>Profile</h2>
-        <p>Loading…</p>
-      </section>
-    );
-  }
+  if (error && !profile) return <p className="error">{error}</p>;
+  if (!profile) return <p className="muted">Loading…</p>;
 
   return (
-    <section>
+    <div className="card">
       <h2>Profile</h2>
-      <dl>
-        <dt>Email</dt>
-        <dd>{profile.email}</dd>
-        <dt>Member since</dt>
-        <dd>{new Date(profile.created_at).toLocaleDateString()}</dd>
-      </dl>
-    </section>
+      {error && <p className="error">{error}</p>}
+      {notice && <p className="notice">{notice}</p>}
+      {editing ? (
+        <div className="field">
+          <label>Email</label>
+          <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <p>
+            <button className="btn btn-primary" onClick={() => void save()}>
+              Save
+            </button>{" "}
+            <button className="btn" onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+          </p>
+        </div>
+      ) : (
+        <p>
+          {profile.email} <span className="pill">{profile.role}</span>{" "}
+          <button className="btn" onClick={() => setEditing(true)}>
+            Edit email
+          </button>
+        </p>
+      )}
+      <p className="muted">Member since {new Date(profile.created_at).toLocaleDateString()}</p>
+    </div>
   );
 }

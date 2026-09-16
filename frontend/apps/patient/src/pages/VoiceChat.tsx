@@ -1,13 +1,10 @@
 import { useState } from "react";
 import { useWebRTCAudio } from "../voice/useWebRTCAudio";
+import { restoreAccessToken } from "../api";
 
 const API_BASE =
   (import.meta.env.VITE_API_URL as string | undefined) ??
   "http://localhost:8000";
-
-function storedToken(): string | null {
-  return localStorage.getItem("careflow_patient_token");
-}
 
 /** Voice booking surface (dev). Needs mic access + a served backend. */
 export default function VoiceChat() {
@@ -15,18 +12,9 @@ export default function VoiceChat() {
     useWebRTCAudio(API_BASE);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  if (!storedToken()) {
-    return (
-      <section>
-        <h2>Voice (dev)</h2>
-        <p>Sign in to talk with the scheduling assistant.</p>
-      </section>
-    );
-  }
-
   async function start() {
     setAuthError(null);
-    const token = storedToken();
+    const token = restoreAccessToken();
     if (!token) {
       setAuthError("No token found.");
       return;
@@ -37,57 +25,43 @@ export default function VoiceChat() {
   const finals = events.filter((e) => e.kind === "final" || e.kind === "agent_text");
 
   return (
-    <section>
-      <h2>Voice (dev)</h2>
-      <p style={{ color: "#666" }}>
-        Talk to book — the assistant hears you through the same scheduling
-        tools as text chat. Say &ldquo;stop&rdquo; or press Interrupt to cut
-        it off mid-reply.
+    <div className="card">
+      <h2>Talk to book</h2>
+      <p className="muted">
+        The assistant hears you through the same scheduling tools as text chat.
+        Say “stop” or press Interrupt to cut it off mid-reply.
       </p>
       <p>
-        Status: <strong>{state}</strong>
+        Status: <span className="pill">{state.replace("_", " ")}</span>
       </p>
-      {(error ?? authError) && (
-        <p style={{ color: "red" }}>{error ?? authError}</p>
-      )}
+      {(error ?? authError) && <p className="error">{error ?? authError}</p>}
       <div style={{ marginBottom: "1rem" }}>
         {state === "idle" || state === "ended" ? (
-          <button type="button" onClick={() => void start()}>
+          <button className="btn btn-primary" type="button" onClick={() => void start()}>
             Start talking
           </button>
         ) : (
           <>
-            <button
-              type="button"
-              onClick={interrupt}
-              style={{ marginRight: "0.5rem" }}
-            >
+            <button className="btn" type="button" onClick={interrupt}>
               Interrupt
-            </button>
-            <button type="button" onClick={disconnect}>
+            </button>{" "}
+            <button className="btn" type="button" onClick={disconnect}>
               Hang up
             </button>
           </>
         )}
       </div>
-      <div
-        style={{
-          border: "1px solid #ccc",
-          borderRadius: "4px",
-          padding: "1rem",
-          minHeight: "8rem",
-        }}
-      >
-        {finals.length === 0 && (
-          <p style={{ color: "#999" }}>Nothing said yet.</p>
-        )}
+      <div className="chat-log">
+        {finals.length === 0 && <p className="muted">Nothing said yet.</p>}
         {finals.map((event, i) => (
-          <p key={i}>
-            <strong>{event.kind === "final" ? "You" : "Assistant"}:</strong>{" "}
+          <div
+            key={i}
+            className={`chat-bubble ${event.kind === "final" ? "me" : "agent"}`}
+          >
             {event.text}
-          </p>
+          </div>
         ))}
       </div>
-    </section>
+    </div>
   );
 }

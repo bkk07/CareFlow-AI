@@ -1321,36 +1321,55 @@ export default function App() {
 
   if (!token || !user) {
     return (
-      <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem" }}>
-        <h1>CareFlow AI — Hospital Admin</h1>
-        <ErrorNote error={error} />
-        <div>
-          <input
-            style={inputStyle}
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <input
-            style={inputStyle}
-            placeholder="Password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          <button onClick={() => void doLogin()}>Log in</button>
+      <div className="container">
+        <div className="login-wrap">
+          <div className="card">
+            <h1 className="brand" style={{ fontSize: "1.4rem" }}>
+              CareFlow <span>AI</span> — Admin
+            </h1>
+            <ErrorNote error={error} />
+            <div className="field">
+              <label>Email</label>
+              <input
+                className="input"
+                style={{ width: "100%" }}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label>Password</label>
+              <input
+                className="input"
+                style={{ width: "100%" }}
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void doLogin();
+                }}
+              />
+            </div>
+            <button className="btn btn-primary" onClick={() => void doLogin()}>
+              Log in
+            </button>
+          </div>
         </div>
-      </main>
+      </div>
     );
   }
 
   if (user.role !== "hospital_admin" && user.role !== "platform_admin") {
     return (
-      <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem" }}>
-        <h1>CareFlow AI — Hospital Admin</h1>
-        <p>Signed in as {user.email}, but this app requires an admin login.</p>
-        <button onClick={logout}>Log out</button>
-      </main>
+      <div className="container">
+        <div className="card">
+          <h2>Signed in as {user.email}</h2>
+          <p className="muted">This app requires an admin login.</p>
+          <button className="btn" onClick={logout}>
+            Log out
+          </button>
+        </div>
+      </div>
     );
   }
 
@@ -1381,23 +1400,27 @@ export default function App() {
   const activeTab = visibleTabs.includes(tab) ? tab : visibleTabs[0];
 
   return (
-    <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem" }}>
-      <h1>CareFlow AI — Hospital Admin</h1>
-      <p>
-        {user.email} ·{" "}
-        <button onClick={logout}>Log out</button>
-      </p>
-      <nav style={{ marginBottom: "1rem" }}>
+    <div className="layout">
+      <aside className="sidebar">
+        <div className="brand">
+          CareFlow <span style={{ color: "#9fd9d8" }}>AI</span>
+        </div>
+        <div className="who">
+          {isPlatform ? "Platform" : "Hospital"} · {user.email}
+        </div>
         {visibleTabs.map((t) => (
           <button
             key={t}
-            style={{ ...inputStyle, fontWeight: activeTab === t ? "bold" : "normal" }}
+            className={activeTab === t ? "active" : ""}
             onClick={() => setTab(t)}
           >
             {t}
           </button>
         ))}
-      </nav>
+        <div className="spacer" />
+        <button onClick={logout}>Log out</button>
+      </aside>
+      <main className="content">
       {activeTab === "overview" && <OverviewTab hospitalId={hospitalId} />}
       {activeTab === "departments" && (
         <NamedManager
@@ -1434,6 +1457,7 @@ export default function App() {
       {activeTab === "platform-appointments" && <PlatformAppointmentsTab />}
       {activeTab === "platform-ai" && <PlatformAITab />}
       {activeTab === "platform-audit" && <PlatformAuditTab />}
-    </main>
+      </main>
+    </div>
   );
 }

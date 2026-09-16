@@ -497,3 +497,32 @@ Notes on execution:
   overview counts, park -> resolve(cancelled) -> booking
   cancelled, doctor UI 200.
 - No Phase 14+ code.
+
+## Frontend UX rebuild (all apps)
+
+> research similar applications, rebuild frontend like that, best styles, better UX
+
+Research (Zocdoc pattern, verified via Wikipedia when the live sites
+bot-walled): search by specialty/doctor + location first, doctor cards
+with photos/specialty/office info, visible free slots per doctor,
+one-tap booking for a specific time, online pre-visit forms, provider
+agenda SaaS on the other side. Rebuilt toward exactly that:
+
+- Mirrored design system (`src/theme.css` in each app — per-app
+  Docker contexts and missing workspace root forbid a real shared
+  import): clinical teal + slate, cards, status pills, slot grids,
+  step wizard, sidebar shells for staff apps.
+- Patient: login page (none existed — tokens were manual), hero
+  search with next-available hints, doctor cards with Book buttons,
+  3-step booking wizard (type -> week slot grid -> confirm),
+  upcoming/past visits with history + reschedule/cancel, inline
+  pre-visit questionnaire answering, notifications inbox, profile
+  email editing, and a real preferences editor (was read-only).
+- New `GET /directory/specialties|appointment-types` (approved
+  hospitals only, all signed-in roles) so the UI never asks for raw
+  ids; tests in `test_directory.py`.
+- Admin + doctor apps: sidebar layout, login cards, themed tables;
+  admin keeps every manager, gains nothing removed.
+- Verification: 187/187 tests, all three apps `tsc + vite build`
+  green, live wizard-chain smoke on postgres (search -> directory
+  -> 16 slots -> book confirmed -> visits/inbox/preferences).
