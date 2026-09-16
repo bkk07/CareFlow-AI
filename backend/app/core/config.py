@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     twilio_phone_number: str = Field(default="", alias="TWILIO_PHONE_NUMBER")
 
     backend_cors_origins: str = Field(
-        default="http://localhost:5173,http://localhost:5174,http://localhost:5176,http://localhost:3000",
+        default="http://localhost:5173,http://localhost:5174,http://localhost:5177,http://localhost:3000",
         alias="BACKEND_CORS_ORIGINS",
     )
 

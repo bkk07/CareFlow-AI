@@ -576,3 +576,13 @@ agenda SaaS on the other side. Rebuilt toward exactly that:
   panel and login.
 - Verification: builds x3 green, preview serves 200 with bundle
   intact, whileTap/reducedMotion props confirmed in all bundles.
+
+## Dev port allocation
+
+> patient 5173, doctor 5177, hospital-admin 5174
+
+Patient (5173) and hospital-admin (5174) already matched; moved the
+doctor app 5176 -> 5177 everywhere it was pinned: vite.config.ts
+(server + preview), Dockerfile (EXPOSE + CMD), compose ports +
+healthcheck, backend default CORS origins, .env.example. Verified
+doctor dev serves HTTP 200 on :5177 and compose config is valid.

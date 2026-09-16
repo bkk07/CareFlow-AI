@@ -96,7 +96,7 @@ services:
   doctor:
     build: ../frontend/apps/doctor
     ports:
-      - "5176:5176"
+      - "5177:5177"
     environment:
       VITE_API_URL: http://localhost:8000
     depends_on:
@@ -105,7 +105,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "node -e \"fetch('http://localhost:5176').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\"",
+          "node -e \"fetch('http://localhost:5177').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\"",
         ]
       interval: 10s
       timeout: 5s
