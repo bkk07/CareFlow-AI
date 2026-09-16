@@ -118,3 +118,24 @@ Notes on execution (hospital configuration + doctor management):
   table+form screens for all four entities) builds cleanly; compose stack
   left untouched.
 - No Phase 4+ code (scheduling, patients, EHR) was added.
+
+## Calendar & Availability
+
+> OKAY implemenet phase 4
+
+Notes on execution (calendar & availability):
+
+- Scope implemented exactly per `build-plan-deep-dive.md` Phase 4:
+  `Calendar` / `AvailabilityRule` / `BlockedSlot` models, pure engine in
+  `availability.py`, orchestration + locking in `service.py`, and router
+  with calendar, rules, blocks, and slot lookup endpoints.
+- `get_available_slots()` follows the specified five steps (active doctor
+  + active calendar, rule expansion, blocked subtraction, booked
+  subtraction via a `booked` parameter Phase 7 will feed, compatibility
+  + duration filtering); `reserve_slot()` re-checks overlap then inserts,
+  with UNIQUE(doctor_id, start, end) collapsing racers to one winner.
+- Precedence documented in code: per date, covering one_off rules win
+  over weekly rules; windows union within the tier; slots must fit
+  entirely in one window; touching boundaries are not overlaps; all
+  timestamps UTC, naive inputs rejected at the edges.
+- No Phase 5+ code (patients, EHR, appointments) was added.
