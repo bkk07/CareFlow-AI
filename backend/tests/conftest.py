@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.db import Base, get_db
 from app.domain.auth import models as auth_models  # noqa: F401 — register metadata
+from app.domain.appointment import models as appointment_models  # noqa: F401
 from app.domain.doctor import models as doctor_models  # noqa: F401
 from app.domain.hospital import models as hospital_models  # noqa: F401
 from app.domain.hospital_config import models as config_models  # noqa: F401

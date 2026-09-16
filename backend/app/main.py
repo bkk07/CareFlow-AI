@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.health import router as health_router
 from app.core.config import settings
 from app.domain.auth.router import router as auth_router
+from app.domain.appointment.router import router as appointment_router
 from app.domain.doctor.router import router as doctor_router
 from app.domain.hospital.router import router as hospital_router
 from app.domain.hospital_config.router import router as hospital_config_router
@@ -25,6 +26,7 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(appointment_router)
 app.include_router(hospital_router)
 app.include_router(hospital_config_router)
 app.include_router(doctor_router)

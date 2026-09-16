@@ -54,6 +54,34 @@ export interface Doctor {
   status: string;
 }
 
+export interface Appointment {
+  id: string;
+  hospital_id: string;
+  patient_id: string;
+  doctor_id: string;
+  appointment_type_id: string;
+  slot_start: string;
+  slot_end: string;
+  state: string;
+  external_id: string | null;
+  idempotency_key: string;
+  correlation_id: string;
+}
+
+export interface AppointmentHistoryEntry {
+  id: string;
+  from_state: string;
+  to_state: string;
+  actor_user_id: string | null;
+  actor_system: string | null;
+  reason: string | null;
+  created_at: string;
+}
+
+export interface AppointmentDetail extends Appointment {
+  history: AppointmentHistoryEntry[];
+}
+
 export async function login(email: string, password: string): Promise<void> {
   const { data } = await api.post("/auth/login", { email, password });
   setAccessToken(data.access_token);

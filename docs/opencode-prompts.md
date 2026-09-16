@@ -194,3 +194,35 @@ Notes on execution (audit):
   `get_or_create_calendar` handles creation races, and the env-example
   key test covers every current settings key.
 - Everything else matched the plan; no scope was added or removed.
+
+## Appointment Core
+
+> okay now impleemnt next phase
+
+Notes on execution (Phase 7 — Appointment Core):
+
+- Implemented the plan's data model verbatim (`Appointment` with all ten
+  states plus `external_id`/`idempotency_key`/`correlation_id`, and
+  append-only `AppointmentHistory`), the explicit `ALLOWED_TRANSITIONS`
+  map with `InvalidTransition` on any other write, and the
+  create/reschedule/cancel service on top of the Phase 4 lock+reserve
+  pattern and the Phase 6 `IntegrationService` (the only connector
+  caller — no vendor calls from the booking code).
+- Booking flow per plan: availability re-check (rules minus blocks minus
+  live appointments) -> reserve -> `pending` row -> vendor create ->
+  `confirmed`, else release the held slot and mark `failed`. Reschedule
+  reserves the new slot first and releases the old one only after the
+  vendor confirms; cancel releases the slot with the booking.
+- Endpoints are exactly the plan's five (`POST /appointments`, `POST
+  .../reschedule`, `POST .../cancel`, `GET .../{id}` with history,
+  `GET /appointments` with `patient_id`/`doctor_id`/`hospital_id`
+  filters), open to the owning patient and the hospital_admin of the
+  appointment's hospital (+ platform_admin read-only). Idempotent replay
+  answers 200 with the existing row; a fresh booking answers 201.
+- One deployment fix outside the phase files: the backend image never
+  ran migrations, so a fresh `compose up` served 500s on every DB
+  write — `backend/Dockerfile` now runs `alembic upgrade head` before
+  uvicorn (found via live smoke, verified with a from-scratch stack).
+- No Phase 8+ code (verification loop, reconciliation sweeps, MCP/AI)
+  was added; `requested`/`sync_pending`/`reconciliation_required` exist
+  as states with transitions so Phase 8 can drive them.

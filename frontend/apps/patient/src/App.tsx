@@ -1,4 +1,5 @@
 import { Link, Route, BrowserRouter as Router, Routes } from "react-router-dom";
+import Appointments from "./pages/Appointments";
 import Home from "./pages/Home";
 import Preferences from "./pages/Preferences";
 import Profile from "./pages/Profile";
@@ -17,11 +18,15 @@ export default function App() {
           <Link style={linkStyle} to="/profile">
             Profile
           </Link>
+          <Link style={linkStyle} to="/appointments">
+            Appointments
+          </Link>
           <Link to="/preferences">Preferences</Link>
         </nav>
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/profile" element={<Profile />} />
+          <Route path="/appointments" element={<Appointments />} />
           <Route path="/preferences" element={<Preferences />} />
         </Routes>
       </main>

@@ -5,6 +5,8 @@ import {
   me,
   restoreAccessToken,
   setAccessToken,
+  type Appointment,
+  type AppointmentDetail,
   type AppointmentType,
   type CurrentUser,
   type Doctor,
@@ -479,7 +481,141 @@ function DoctorManager({
   );
 }
 
-type Tab = "departments" | "specialties" | "types" | "doctors";
+type Tab = "departments" | "specialties" | "types" | "doctors" | "appointments";
+
+function AppointmentManager({ hospitalId }: { hospitalId: string }) {
+  const [items, setItems] = useState<Appointment[]>([]);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [doctorFilter, setDoctorFilter] = useState("");
+  const [detail, setDetail] = useState<AppointmentDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const params = doctorFilter ? { doctor_id: doctorFilter } : {};
+      const [a, d] = await Promise.all([
+        api.get<Appointment[]>("/appointments", {
+          params: { hospital_id: hospitalId, ...params },
+        }),
+        api.get<Doctor[]>(`/hospitals/${hospitalId}/doctors`),
+      ]);
+      setItems(a.data);
+      setDoctors(d.data);
+    } catch (e) {
+      setError(apiError(e));
+    }
+  }, [hospitalId, doctorFilter]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  function doctorName(id: string): string {
+    return doctors.find((d) => d.id === id)?.name ?? id.slice(0, 8);
+  }
+
+  async function showDetail(id: string) {
+    setError(null);
+    try {
+      const { data } = await api.get<AppointmentDetail>(`/appointments/${id}`);
+      setDetail(data);
+    } catch (e) {
+      setError(apiError(e));
+    }
+  }
+
+  async function cancel(id: string) {
+    setError(null);
+    try {
+      await api.post(`/appointments/${id}/cancel`, {});
+      setDetail(null);
+      await refresh();
+    } catch (e) {
+      setError(apiError(e));
+    }
+  }
+
+  return (
+    <section>
+      <h2>Appointments</h2>
+      <ErrorNote error={error} />
+      <div>
+        <label>
+          Doctor{" "}
+          <select
+            style={inputStyle}
+            value={doctorFilter}
+            onChange={(e) => setDoctorFilter(e.target.value)}
+          >
+            <option value="">All doctors</option>
+            {doctors.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <table style={tableStyle}>
+        <thead>
+          <tr>
+            <th style={cellStyle}>Slot start (UTC)</th>
+            <th style={cellStyle}>Doctor</th>
+            <th style={cellStyle}>State</th>
+            <th style={cellStyle}>External ID</th>
+            <th style={cellStyle}>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <tr key={item.id}>
+              <td style={cellStyle}>
+                {new Date(item.slot_start).toLocaleString()}
+              </td>
+              <td style={cellStyle}>{doctorName(item.doctor_id)}</td>
+              <td style={cellStyle}>{item.state}</td>
+              <td style={cellStyle}>{item.external_id ?? "—"}</td>
+              <td style={cellStyle}>
+                <button onClick={() => void showDetail(item.id)}>Detail</button>{" "}
+                {(item.state === "confirmed" ||
+                  item.state === "rescheduled") && (
+                  <button onClick={() => void cancel(item.id)}>Cancel</button>
+                )}
+              </td>
+            </tr>
+          ))}
+          {items.length === 0 && (
+            <tr>
+              <td style={cellStyle} colSpan={5}>
+                None yet.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+      {detail && (
+        <div style={{ marginTop: "1rem" }}>
+          <h3>Appointment detail</h3>
+          <p>
+            {detail.id} · patient {detail.patient_id.slice(0, 8)} · type{" "}
+            {detail.appointment_type_id.slice(0, 8)}
+          </p>
+          <ul>
+            {detail.history.map((h) => (
+              <li key={h.id}>
+                {h.from_state} → {h.to_state}
+                {h.reason ? ` (${h.reason})` : ""} ·{" "}
+                {new Date(h.created_at).toLocaleString()}
+              </li>
+            ))}
+            {detail.history.length === 0 && <li>No transitions recorded.</li>}
+          </ul>
+          <button onClick={() => setDetail(null)}>Close</button>
+        </div>
+      )}
+    </section>
+  );
+}
 
 export default function App() {
   const [token, setToken] = useState<string | null>(() => restoreAccessToken());
@@ -564,7 +700,7 @@ export default function App() {
         <button onClick={logout}>Log out</button>
       </p>
       <nav style={{ marginBottom: "1rem" }}>
-        {(["departments", "specialties", "types", "doctors"] as Tab[]).map((t) => (
+        {(["departments", "specialties", "types", "doctors", "appointments"] as Tab[]).map((t) => (
           <button
             key={t}
             style={{ ...inputStyle, fontWeight: tab === t ? "bold" : "normal" }}
@@ -599,6 +735,7 @@ export default function App() {
       {tab === "doctors" && (
         <DoctorManager hospitalId={hospitalId} specialtiesVersion={refVersion} />
       )}
+      {tab === "appointments" && <AppointmentManager hospitalId={hospitalId} />}
     </main>
   );
 }
