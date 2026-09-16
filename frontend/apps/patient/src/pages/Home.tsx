@@ -22,6 +22,16 @@ function initials(name: string): string {
     .toUpperCase();
 }
 
+function fmt(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export default function Home() {
   const navigate = useNavigate();
   const [specialty, setSpecialty] = useState("");
@@ -32,6 +42,7 @@ export default function Home() {
   const [nextSlots, setNextSlots] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [searched, setSearched] = useState(false);
 
   const refreshUpcoming = useCallback(async () => {
     try {
@@ -58,6 +69,7 @@ export default function Home() {
   async function search() {
     setError(null);
     setBusy(true);
+    setSearched(true);
     try {
       const doctors = await searchDoctors({
         hospital_id: hospitalId || undefined,
@@ -97,10 +109,21 @@ export default function Home() {
     <>
       <div className="hero">
         <h1>Find the right doctor, book in minutes</h1>
-        <p>Real availability from live hospital schedules — no phone tag.</p>
-        <div className="searchbar">
+        <p>Real availability from live hospital schedules — no phone tag, no waiting rooms.</p>
+        <div className="hero-trust">
+          <span>
+            <strong>{hospitals.length}</strong>&nbsp;partner hospitals
+          </span>
+          <span>Live availability</span>
+          <span>Free to use</span>
+        </div>
+      </div>
+
+      <div className="search-card">
+        <div className="searchbar" role="search">
           <input
             className="input"
+            aria-label="Specialty"
             placeholder="Specialty, e.g. Cardiology"
             value={specialty}
             onChange={(e) => setSpecialty(e.target.value)}
@@ -110,6 +133,7 @@ export default function Home() {
           />
           <select
             className="select"
+            aria-label="Hospital"
             value={hospitalId}
             onChange={(e) => setHospitalId(e.target.value)}
           >
@@ -120,8 +144,14 @@ export default function Home() {
               </option>
             ))}
           </select>
-          <button className="btn btn-primary" onClick={() => void search()} disabled={busy}>
-            {busy ? "Searching…" : "Search"}
+          <button className="btn btn-primary btn-lg" onClick={() => void search()} disabled={busy}>
+            {busy ? (
+              <>
+                <span className="spinner" aria-hidden /> Searching…
+              </>
+            ) : (
+              "Search"
+            )}
           </button>
         </div>
       </div>
@@ -131,51 +161,85 @@ export default function Home() {
       {upcoming.length > 0 && (
         <div className="card">
           <h3>Your upcoming visits</h3>
-          {upcoming.map((a) => (
-            <p key={a.id}>
-              <span className={`pill pill-${a.state}`}>{a.state.replace("_", " ")}</span>{" "}
-              {new Date(a.slot_start).toLocaleString()}{" "}
-              <Link to="/visits">Manage</Link>
-            </p>
+          <div className="row-list">
+            {upcoming.map((a) => (
+              <div className="row-item" key={a.id}>
+                <span className={`pill pill-${a.state}`}>{a.state.replace(/_/g, " ")}</span>
+                <div className="grow">
+                  <p className="title">{fmt(a.slot_start)}</p>
+                </div>
+                <Link className="btn btn-sm" to="/visits">
+                  Manage
+                </Link>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {busy && results === null && searched && (
+        <div className="card" aria-live="polite">
+          {[0, 1, 2].map((i) => (
+            <div className="skeleton-row" key={i}>
+              <div className="avatar skeleton" style={{ width: 54, height: 54, borderRadius: "50%" }} />
+              <div style={{ flex: 1 }}>
+                <div className="skeleton" style={{ width: "45%", marginBottom: 8 }} />
+                <div className="skeleton" style={{ width: "70%" }} />
+              </div>
+            </div>
           ))}
         </div>
       )}
 
-      {results !== null && (
+      {results !== null && !busy && (
         <>
-          <h2>
-            {results.length} doctor{results.length === 1 ? "" : "s"} found
-          </h2>
-          <div className="grid-cards">
-            {results.map((d) => (
-              <div className="card doctor-card" key={d.id}>
-                <div className="avatar">{initials(d.name)}</div>
-                <div>
-                  <h3>{d.name}</h3>
-                  <p className="sub">
-                    {d.specialty ?? "General"} · {d.hospital_name}
-                  </p>
-                  <p className="sub">
-                    {nextSlots[d.id]
-                      ? `Next available: ${new Date(nextSlots[d.id]).toLocaleString()}`
-                      : "Checking availability…"}
-                  </p>
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => navigate("/book", { state: { doctor: d } })}
-                  >
-                    Book
-                  </button>
-                </div>
-              </div>
-            ))}
+          <div className="section-head">
+            <h2>
+              {results.length} doctor{results.length === 1 ? "" : "s"} found
+            </h2>
+            {specialty.trim() && <span className="muted">for “{specialty.trim()}”</span>}
           </div>
-          {results.length === 0 && (
+          {results.length > 0 ? (
+            <div className="grid-cards">
+              {results.map((d) => (
+                <div className="card doctor-card" key={d.id}>
+                  <div className="avatar" aria-hidden>
+                    {initials(d.name)}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <h3>{d.name}</h3>
+                    <p className="sub">
+                      {d.specialty ?? "General"} · {d.hospital_name}
+                    </p>
+                    {nextSlots[d.id] ? (
+                      <span className="next-slot">Next: {fmt(nextSlots[d.id])}</span>
+                    ) : (
+                      <span className="next-slot checking">Checking availability…</span>
+                    )}
+                    <div>
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => navigate("/book", { state: { doctor: d } })}
+                      >
+                        Book visit
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
             <div className="card">
-              <p className="muted">
-                No doctors match. Try a different specialty, or{" "}
-                <Link to="/chat">ask the assistant</Link>.
-              </p>
+              <div className="empty">
+                <div className="empty-icon" aria-hidden>
+                  ⌕
+                </div>
+                <h3>No doctors match your search</h3>
+                <p>Try a different specialty or hospital — or ask the assistant for help.</p>
+                <Link className="btn btn-primary" to="/chat">
+                  Ask the assistant
+                </Link>
+              </div>
             </div>
           )}
         </>

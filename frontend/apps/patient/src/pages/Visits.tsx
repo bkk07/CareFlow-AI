@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   api,
   apiError,
@@ -10,8 +11,14 @@ import {
 
 const LIVE = ["confirmed", "rescheduled", "sync_pending", "reconciliation_required"];
 
-function statePill(state: string): string {
-  return `pill pill-${state}`;
+function fmt(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 export default function Visits() {
@@ -26,6 +33,7 @@ export default function Visits() {
   const [newEnd, setNewEnd] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     try {
@@ -33,6 +41,8 @@ export default function Visits() {
       setItems(data.sort((a, b) => b.slot_start.localeCompare(a.slot_start)));
     } catch (e) {
       setError(apiError(e));
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -135,81 +145,140 @@ export default function Visits() {
   const upcoming = items.filter((a) => LIVE.includes(a.state));
   const past = items.filter((a) => !LIVE.includes(a.state));
 
+  function visitRow(a: Appointment, action: string) {
+    return (
+      <div className="row-item" key={a.id}>
+        <span className={`pill pill-${a.state}`}>{a.state.replace(/_/g, " ")}</span>
+        <div className="grow">
+          <p className="title">{fmt(a.slot_start)}</p>
+        </div>
+        <button className="btn btn-sm" onClick={() => void showDetail(a.id)}>
+          {action}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <>
       {error && <p className="error">{error}</p>}
       {notice && <p className="notice">{notice}</p>}
       <div className="card">
-        <h2>Upcoming visits ({upcoming.length})</h2>
-        {upcoming.map((a) => (
-          <p key={a.id}>
-            <span className={statePill(a.state)}>{a.state.replace(/_/g, " ")}</span>{" "}
-            {new Date(a.slot_start).toLocaleString()}{" "}
-            <button className="btn" onClick={() => void showDetail(a.id)}>
-              Manage
-            </button>
-          </p>
-        ))}
-        {upcoming.length === 0 && <p className="muted">Nothing scheduled.</p>}
+        <div className="section-head" style={{ marginTop: 0 }}>
+          <h2>Upcoming visits ({loading ? "…" : upcoming.length})</h2>
+          <Link className="btn btn-sm btn-primary" to="/">
+            + Book a visit
+          </Link>
+        </div>
+        {loading ? (
+          <div aria-live="polite">
+            {[0, 1].map((i) => (
+              <div className="skeleton-row" key={i}>
+                <div className="skeleton" style={{ width: 90, height: 24, borderRadius: 999 }} />
+                <div className="skeleton" style={{ flex: 1 }} />
+              </div>
+            ))}
+          </div>
+        ) : upcoming.length > 0 ? (
+          <div className="row-list">{upcoming.map((a) => visitRow(a, "Manage"))}</div>
+        ) : (
+          <div className="empty">
+            <div className="empty-icon" aria-hidden>
+              ◷
+            </div>
+            <h3>Nothing scheduled</h3>
+            <p>Book your next visit in under a minute.</p>
+            <Link className="btn btn-primary" to="/">
+              Find care
+            </Link>
+          </div>
+        )}
       </div>
 
       {detail && (
         <div className="card">
-          <h3>Visit details</h3>
+          <div className="section-head" style={{ marginTop: 0 }}>
+            <h3>Visit details</h3>
+            <button className="btn btn-sm btn-ghost" onClick={() => setDetail(null)}>
+              Close ✕
+            </button>
+          </div>
           <p>
-            <span className={statePill(detail.state)}>{detail.state.replace(/_/g, " ")}</span>{" "}
-            {new Date(detail.slot_start).toLocaleString()} –{" "}
-            {new Date(detail.slot_end).toLocaleTimeString()}
+            <span className={`pill pill-${detail.state}`}>{detail.state.replace(/_/g, " ")}</span>{" "}
+            <strong>{fmt(detail.slot_start)}</strong> –{" "}
+            {new Date(detail.slot_end).toLocaleTimeString(undefined, {
+              hour: "numeric",
+              minute: "2-digit",
+            })}
           </p>
           {(detail.state === "confirmed" || detail.state === "rescheduled") && (
-            <p>
-              <button className="btn btn-danger" onClick={() => void cancel(detail.id)}>
+            <div className="toolbar">
+              <button className="btn btn-danger btn-sm" onClick={() => void cancel(detail.id)}>
                 Cancel visit
-              </button>{" "}
-              <button className="btn" onClick={() => setRescheduling((v) => !v)}>
-                Reschedule
               </button>
-            </p>
-          )}
-          {rescheduling && (
-            <div>
-              <input
-                className="input"
-                type="datetime-local"
-                value={newStart}
-                onChange={(e) => setNewStart(e.target.value)}
-              />
-              <input
-                className="input"
-                type="datetime-local"
-                value={newEnd}
-                onChange={(e) => setNewEnd(e.target.value)}
-              />
-              <button
-                className="btn btn-primary"
-                onClick={() => void reschedule(detail.id)}
-                disabled={!newStart || !newEnd}
-              >
-                Move visit
+              <button className="btn btn-sm" onClick={() => setRescheduling((v) => !v)}>
+                Reschedule
               </button>
             </div>
           )}
+          {rescheduling && (
+            <div className="form-row" style={{ maxWidth: 640 }}>
+              <div className="field">
+                <label>New start</label>
+                <input
+                  className="input"
+                  type="datetime-local"
+                  value={newStart}
+                  onChange={(e) => setNewStart(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label>New end</label>
+                <input
+                  className="input"
+                  type="datetime-local"
+                  value={newEnd}
+                  onChange={(e) => setNewEnd(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <button
+                  className="btn btn-primary"
+                  onClick={() => void reschedule(detail.id)}
+                  disabled={!newStart || !newEnd}
+                >
+                  Move visit
+                </button>
+              </div>
+            </div>
+          )}
           <h4>History</h4>
-          <ul>
-            {detail.history.map((h) => (
-              <li key={h.id}>
-                {h.from_state} → {h.to_state}
-                {h.reason ? ` (${h.reason})` : ""} · {new Date(h.created_at).toLocaleString()}
-              </li>
-            ))}
-            {detail.history.length === 0 && <li>No transitions recorded.</li>}
-          </ul>
+          {detail.history.length > 0 ? (
+            <div className="row-list">
+              {detail.history.map((h) => (
+                <div className="row-item" key={h.id}>
+                  <span className={`pill pill-${h.to_state}`}>{h.to_state.replace(/_/g, " ")}</span>
+                  <div className="grow">
+                    <p className="sub">
+                      {h.from_state.replace(/_/g, " ")} → {h.to_state.replace(/_/g, " ")}
+                      {h.reason ? ` · ${h.reason}` : ""}
+                    </p>
+                  </div>
+                  <span className="muted" style={{ fontSize: "0.83rem" }}>
+                    {new Date(h.created_at).toLocaleString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">No transitions recorded.</p>
+          )}
 
           {formState === "ready" && form && (
             <>
               <h4>Pre-visit questions — {form.name}</h4>
               {form.questions.map((q) => (
-                <div className="field" key={q.id}>
+                <div className="field" key={q.id} style={{ maxWidth: 560 }}>
                   <label>
                     {q.prompt} {q.required ? "" : "(optional)"}
                   </label>
@@ -239,7 +308,7 @@ export default function Visits() {
                   )}
                   {q.type === "multi_choice" &&
                     (q.options ?? []).map((o) => (
-                      <label key={o} style={{ marginRight: "0.75rem" }}>
+                      <label key={o} style={{ marginRight: "0.75rem", fontWeight: 400 }}>
                         <input
                           type="checkbox"
                           checked={((answers[q.id] as string[]) ?? []).includes(o)}
@@ -276,6 +345,7 @@ export default function Visits() {
                     (q.type === "short_text" ? (
                       <input
                         className="input"
+                        style={{ width: "100%" }}
                         value={String(answers[q.id] ?? "")}
                         onChange={(e) => setAnswer(q.id, e.target.value)}
                       />
@@ -283,7 +353,6 @@ export default function Visits() {
                       <textarea
                         className="input"
                         rows={3}
-                        style={{ width: "100%" }}
                         value={String(answers[q.id] ?? "")}
                         onChange={(e) => setAnswer(q.id, e.target.value)}
                       />
@@ -306,26 +375,16 @@ export default function Visits() {
               )}
             </>
           )}
-          <p>
-            <button className="btn" onClick={() => setDetail(null)}>
-              Close
-            </button>
-          </p>
         </div>
       )}
 
       <div className="card">
         <h2>Past visits ({past.length})</h2>
-        {past.map((a) => (
-          <p key={a.id}>
-            <span className={statePill(a.state)}>{a.state.replace(/_/g, " ")}</span>{" "}
-            {new Date(a.slot_start).toLocaleString()}{" "}
-            <button className="btn" onClick={() => void showDetail(a.id)}>
-              View
-            </button>
-          </p>
-        ))}
-        {past.length === 0 && <p className="muted">No past visits.</p>}
+        {past.length > 0 ? (
+          <div className="row-list">{past.map((a) => visitRow(a, "View"))}</div>
+        ) : (
+          <p className="muted">No past visits yet.</p>
+        )}
       </div>
     </>
   );

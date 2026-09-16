@@ -30,7 +30,7 @@ function slotLabel(iso: string): string {
   });
 }
 
-/** Guided booking: doctor -> visit type -> day -> slot -> confirm. */
+/** Guided booking: visit type -> week slot grid -> confirm. */
 export default function Book({ patientId }: { patientId: string }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -45,6 +45,7 @@ export default function Book({ patientId }: { patientId: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadingSlots, setLoadingSlots] = useState(false);
 
   useEffect(() => {
     if (!doctor) return;
@@ -60,7 +61,7 @@ export default function Book({ patientId }: { patientId: string }) {
     if (!doctor || !typeId) return;
     const from = new Date(Date.now() + weekOffset * 7 * 864e5);
     const to = new Date(from.getTime() + 6 * 864e5);
-    setBusy(true);
+    setLoadingSlots(true);
     checkAvailability({
       doctor_id: doctor.id,
       appointment_type_id: typeId,
@@ -72,16 +73,22 @@ export default function Book({ patientId }: { patientId: string }) {
         setSelected(null);
       })
       .catch((e) => setError(apiError(e)))
-      .finally(() => setBusy(false));
+      .finally(() => setLoadingSlots(false));
   }, [doctor, typeId, weekOffset]);
 
   if (!doctor) {
     return (
       <div className="card">
-        <h2>Book a visit</h2>
-        <p className="muted">
-          Pick a doctor first — <button className="btn" onClick={() => navigate("/")}>find care</button>
-        </p>
+        <div className="empty">
+          <div className="empty-icon" aria-hidden>
+            ⌕
+          </div>
+          <h3>Pick a doctor first</h3>
+          <p>Search live availability, then choose a time that suits you.</p>
+          <button className="btn btn-primary" onClick={() => navigate("/")}>
+            Find care
+          </button>
+        </div>
       </div>
     );
   }
@@ -128,23 +135,35 @@ export default function Book({ patientId }: { patientId: string }) {
   }
 
   const step = !typeId ? 1 : !selected ? 2 : 3;
+  const activeType = types.find((t) => t.id === typeId);
 
   return (
     <>
       <div className="card">
-        <h2>
-          Book with {doctor.name} <span className="muted">· {doctor.hospital_name}</span>
-        </h2>
-        <div className="steps">
-          <span className={`step ${step > 1 ? "done" : step === 1 ? "active" : ""}`}>1 · Visit type</span>
-          <span className={`step ${step > 2 ? "done" : step === 2 ? "active" : ""}`}>2 · Time</span>
+        <p className="muted" style={{ marginTop: 0 }}>
+          {doctor.specialty ?? "General"} · {doctor.hospital_name}
+        </p>
+        <h2 style={{ marginTop: 0 }}>Book with {doctor.name}</h2>
+        <div className="steps" aria-label="Booking progress">
+          <span className={`step ${step > 1 ? "done" : step === 1 ? "active" : ""}`}>
+            {step > 1 ? "✓" : "1"} · Visit type
+          </span>
+          <span className={`step ${step > 2 ? "done" : step === 2 ? "active" : ""}`}>
+            {step > 2 ? "✓" : "2"} · Time
+          </span>
           <span className={`step ${step === 3 ? "active" : ""}`}>3 · Confirm</span>
         </div>
         {error && <p className="error">{error}</p>}
         {notice && <p className="notice">{notice}</p>}
-        <div className="field">
-          <label>Visit type</label>
-          <select className="select" value={typeId} onChange={(e) => setTypeId(e.target.value)}>
+        <div className="field" style={{ maxWidth: 420 }}>
+          <label htmlFor="visit-type">Visit type</label>
+          <select
+            id="visit-type"
+            className="select"
+            style={{ width: "100%" }}
+            value={typeId}
+            onChange={(e) => setTypeId(e.target.value)}
+          >
             {types.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name} · {t.duration_minutes} min
@@ -152,45 +171,99 @@ export default function Book({ patientId }: { patientId: string }) {
             ))}
           </select>
         </div>
-        <div>
-          <button className="btn" onClick={() => setWeekOffset((w) => Math.max(0, w - 1))} disabled={weekOffset === 0 || busy}>
+        <div className="toolbar">
+          <button
+            className="btn btn-sm"
+            onClick={() => setWeekOffset((w) => Math.max(0, w - 1))}
+            disabled={weekOffset === 0 || loadingSlots}
+          >
             ← Prev week
           </button>
-          <button className="btn" onClick={() => setWeekOffset((w) => Math.min(8, w + 1))} disabled={busy}>
+          <button
+            className="btn btn-sm"
+            onClick={() => setWeekOffset((w) => Math.min(8, w + 1))}
+            disabled={loadingSlots}
+          >
             Next week →
           </button>
+          <span className="spacer" />
+          {loadingSlots && (
+            <span className="muted">
+              <span className="spinner" aria-hidden /> Loading real availability…
+            </span>
+          )}
         </div>
-        {busy && <p className="muted">Loading real availability…</p>}
-        <div className="slot-grid">
-          {[...byDay.entries()].map(([day, list]) => (
-            <div className="slot-day" key={day}>
-              <h4>{dayLabel(day)}</h4>
-              {list.map((s) => (
-                <button
-                  key={s.start}
-                  className={`slot${selected?.start === s.start ? " selected" : ""}`}
-                  onClick={() => setSelected(s)}
-                >
-                  {slotLabel(s.start)}
-                </button>
-              ))}
+        {loadingSlots ? (
+          <div className="slot-grid" aria-live="polite">
+            {[0, 1, 2, 3].map((i) => (
+              <div className="slot-day" key={i}>
+                <div className="skeleton" style={{ width: "60%", marginBottom: 10 }} />
+                <div className="skeleton" style={{ height: 34, marginBottom: 8 }} />
+                <div className="skeleton" style={{ height: 34, marginBottom: 8 }} />
+                <div className="skeleton" style={{ height: 34 }} />
+              </div>
+            ))}
+          </div>
+        ) : byDay.size > 0 ? (
+          <div className="slot-grid">
+            {[...byDay.entries()].map(([day, list]) => (
+              <div className="slot-day" key={day}>
+                <h4>{dayLabel(day)}</h4>
+                {list.map((s) => (
+                  <button
+                    key={s.start}
+                    className={`slot${selected?.start === s.start ? " selected" : ""}`}
+                    onClick={() => setSelected(s)}
+                    aria-pressed={selected?.start === s.start}
+                  >
+                    {slotLabel(s.start)}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="empty">
+            <div className="empty-icon" aria-hidden>
+              ◷
             </div>
-          ))}
-        </div>
-        {byDay.size === 0 && !busy && (
-          <p className="muted">No open slots this week — try the next one.</p>
+            <h3>No open slots this week</h3>
+            <p>Try the next week — new availability opens regularly.</p>
+          </div>
         )}
       </div>
       {selected && (
         <div className="card">
           <h3>Confirm your visit</h3>
-          <p>
-            {doctor.name} · {new Date(selected.start).toLocaleString()} –{" "}
-            {new Date(selected.end).toLocaleTimeString()}
-          </p>
-          <button className="btn btn-primary" onClick={() => void confirm()} disabled={busy}>
-            Confirm booking
-          </button>
+          <div className="row-item">
+            <div className="grow">
+              <p className="title">
+                {new Date(selected.start).toLocaleString(undefined, {
+                  weekday: "long",
+                  month: "long",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}
+              </p>
+              <p className="sub">
+                {doctor.name} · {activeType?.name} · ends{" "}
+                {new Date(selected.end).toLocaleTimeString(undefined, {
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}
+              </p>
+            </div>
+            <button className="btn btn-primary btn-lg" onClick={() => void confirm()} disabled={busy}>
+              {busy ? (
+                <>
+                  <span className="spinner" aria-hidden /> Booking…
+                </>
+              ) : (
+                "Confirm booking"
+              )}
+            </button>
+          </div>
         </div>
       )}
     </>

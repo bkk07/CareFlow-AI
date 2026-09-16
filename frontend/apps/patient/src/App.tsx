@@ -34,6 +34,9 @@ function Shell({ user, onLogout }: { user: CurrentUser; onLogout: () => void }) 
       <header className="topbar">
         <div className="topbar-inner">
           <Link className="brand" to="/">
+            <span className="brand-badge" aria-hidden>
+              +
+            </span>
             CareFlow <span>AI</span>
           </Link>
           <nav className="nav">
@@ -78,6 +81,14 @@ function Shell({ user, onLogout }: { user: CurrentUser; onLogout: () => void }) 
           <Route path="/profile" element={<Profile />} />
         </Routes>
       </main>
+      <footer className="footer">
+        <div className="footer-inner">
+          <span>
+            <strong>CareFlow AI</strong> · live hospital scheduling
+          </span>
+          <span>Need help? Ask the assistant any time.</span>
+        </div>
+      </footer>
     </>
   );
 }

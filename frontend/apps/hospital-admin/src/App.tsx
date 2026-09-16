@@ -22,23 +22,13 @@ import {
   type ReconciliationRecord,
 } from "./api";
 
-const inputStyle: React.CSSProperties = { marginRight: "0.5rem" };
-const tableStyle: React.CSSProperties = {
-  borderCollapse: "collapse",
-  marginTop: "0.75rem",
-};
-const cellStyle: React.CSSProperties = {
-  border: "1px solid #ccc",
-  padding: "0.25rem 0.5rem",
-};
-
 function useHospitalBase(hospitalId: string) {
   return `/hospitals/${hospitalId}`;
 }
 
 function ErrorNote({ error }: { error: string | null }) {
   if (!error) return null;
-  return <p style={{ color: "crimson" }}>{error}</p>;
+  return <p className="error">{error}</p>;
 }
 
 function apiError(e: unknown): string {
@@ -123,41 +113,41 @@ function NamedManager({
       <ErrorNote error={error} />
       <div>
         <input
-          style={inputStyle}
+          className="input"
           placeholder={`New ${title.slice(0, -1).toLowerCase()} name`}
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
-        <button onClick={() => void create()} disabled={!name.trim()}>
+        <button className="btn" onClick={() => void create()} disabled={!name.trim()}>
           Add
         </button>
       </div>
-      <table style={tableStyle}>
+      <table className="table">
         <thead>
           <tr>
-            <th style={cellStyle}>Name</th>
-            <th style={cellStyle}>Actions</th>
+            <th>Name</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           {items.map((item) => (
             <tr key={item.id}>
-              <td style={cellStyle}>
+              <td>
                 {renaming === item.id ? (
                   <>
                     <input
-                      style={inputStyle}
+                      className="input"
                       value={renameValue}
                       onChange={(e) => setRenameValue(e.target.value)}
                     />
-                    <button onClick={() => void rename(item.id)}>Save</button>{" "}
-                    <button onClick={() => setRenaming(null)}>Cancel</button>
+                    <button className="btn" onClick={() => void rename(item.id)}>Save</button>{" "}
+                    <button className="btn" onClick={() => setRenaming(null)}>Cancel</button>
                   </>
                 ) : (
                   item.name
                 )}
               </td>
-              <td style={cellStyle}>
+              <td>
                 <button
                   onClick={() => {
                     setRenaming(item.id);
@@ -166,13 +156,13 @@ function NamedManager({
                 >
                   Rename
                 </button>{" "}
-                <button onClick={() => void remove(item.id)}>Delete</button>
+                <button className="btn btn-danger" onClick={() => void remove(item.id)}>Delete</button>
               </td>
             </tr>
           ))}
           {items.length === 0 && (
             <tr>
-              <td style={cellStyle} colSpan={2}>
+              <td colSpan={2}>
                 None yet.
               </td>
             </tr>
@@ -258,19 +248,19 @@ function AppointmentTypeManager({
       <ErrorNote error={error} />
       <div>
         <input
-          style={inputStyle}
+          className="input"
           placeholder="Name"
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
         <input
-          style={inputStyle}
+          className="input"
           placeholder="Duration (min)"
           value={duration}
           inputMode="numeric"
           onChange={(e) => setDuration(e.target.value)}
         />
-        <button onClick={() => void create()} disabled={!name.trim()}>
+        <button className="btn" onClick={() => void create()} disabled={!name.trim()}>
           Add
         </button>
       </div>
@@ -287,33 +277,33 @@ function AppointmentTypeManager({
           </label>
         ))}
       </div>
-      <table style={tableStyle}>
+      <table className="table">
         <thead>
           <tr>
-            <th style={cellStyle}>Name</th>
-            <th style={cellStyle}>Duration</th>
-            <th style={cellStyle}>Compatible</th>
-            <th style={cellStyle}>Actions</th>
+            <th>Name</th>
+            <th>Duration</th>
+            <th>Compatible</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           {items.map((item) => (
             <tr key={item.id}>
-              <td style={cellStyle}>{item.name}</td>
-              <td style={cellStyle}>{item.duration_minutes} min</td>
-              <td style={cellStyle}>
+              <td>{item.name}</td>
+              <td>{item.duration_minutes} min</td>
+              <td>
                 {item.compatible_specialty_ids.length === 0
                   ? "all"
                   : item.compatible_specialty_ids.map(specialtyName).join(", ")}
               </td>
-              <td style={cellStyle}>
-                <button onClick={() => void remove(item.id)}>Delete</button>
+              <td>
+                <button className="btn btn-danger" onClick={() => void remove(item.id)}>Delete</button>
               </td>
             </tr>
           ))}
           {items.length === 0 && (
             <tr>
-              <td style={cellStyle} colSpan={4}>
+              <td colSpan={4}>
                 None yet.
               </td>
             </tr>
@@ -410,13 +400,13 @@ function DoctorManager({
       <ErrorNote error={error} />
       <div>
         <input
-          style={inputStyle}
+          className="input"
           placeholder="Name"
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
         <select
-          style={inputStyle}
+          className="input"
           value={specialtyId}
           onChange={(e) => setSpecialtyId(e.target.value)}
         >
@@ -428,7 +418,7 @@ function DoctorManager({
           ))}
         </select>
         <select
-          style={inputStyle}
+          className="input"
           value={departmentId}
           onChange={(e) => setDepartmentId(e.target.value)}
         >
@@ -440,46 +430,46 @@ function DoctorManager({
           ))}
         </select>
         <input
-          style={inputStyle}
+          className="input"
           placeholder="External provider ID (optional)"
           value={externalId}
           onChange={(e) => setExternalId(e.target.value)}
         />
-        <button onClick={() => void create()} disabled={!name.trim()}>
+        <button className="btn" onClick={() => void create()} disabled={!name.trim()}>
           Add
         </button>
       </div>
-      <table style={tableStyle}>
+      <table className="table">
         <thead>
           <tr>
-            <th style={cellStyle}>Name</th>
-            <th style={cellStyle}>Specialty</th>
-            <th style={cellStyle}>Department</th>
-            <th style={cellStyle}>Status</th>
-            <th style={cellStyle}>Actions</th>
+            <th>Name</th>
+            <th>Specialty</th>
+            <th>Department</th>
+            <th>Status</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           {items.map((item) => (
             <tr key={item.id}>
-              <td style={cellStyle}>{item.name}</td>
-              <td style={cellStyle}>{refName(specialties, item.specialty_id)}</td>
-              <td style={cellStyle}>{refName(departments, item.department_id)}</td>
-              <td style={cellStyle}>{item.status}</td>
-              <td style={cellStyle}>
-                <button onClick={() => void callAction(item.id, "activate")}>
+              <td>{item.name}</td>
+              <td>{refName(specialties, item.specialty_id)}</td>
+              <td>{refName(departments, item.department_id)}</td>
+              <td>{item.status}</td>
+              <td>
+                <button className="btn" onClick={() => void callAction(item.id, "activate")}>
                   Activate
                 </button>{" "}
-                <button onClick={() => void callAction(item.id, "deactivate")}>
+                <button className="btn" onClick={() => void callAction(item.id, "deactivate")}>
                   Deactivate
                 </button>{" "}
-                <button onClick={() => void remove(item.id)}>Delete</button>
+                <button className="btn btn-danger" onClick={() => void remove(item.id)}>Delete</button>
               </td>
             </tr>
           ))}
           {items.length === 0 && (
             <tr>
-              <td style={cellStyle} colSpan={5}>
+              <td colSpan={5}>
                 None yet.
               </td>
             </tr>
@@ -567,7 +557,7 @@ function AppointmentManager({ hospitalId }: { hospitalId: string }) {
         <label>
           Doctor{" "}
           <select
-            style={inputStyle}
+            className="input"
             value={doctorFilter}
             onChange={(e) => setDoctorFilter(e.target.value)}
           >
@@ -580,37 +570,37 @@ function AppointmentManager({ hospitalId }: { hospitalId: string }) {
           </select>
         </label>
       </div>
-      <table style={tableStyle}>
+      <table className="table">
         <thead>
           <tr>
-            <th style={cellStyle}>Slot start (UTC)</th>
-            <th style={cellStyle}>Doctor</th>
-            <th style={cellStyle}>State</th>
-            <th style={cellStyle}>External ID</th>
-            <th style={cellStyle}>Actions</th>
+            <th>Slot start (UTC)</th>
+            <th>Doctor</th>
+            <th>State</th>
+            <th>External ID</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           {items.map((item) => (
             <tr key={item.id}>
-              <td style={cellStyle}>
+              <td>
                 {new Date(item.slot_start).toLocaleString()}
               </td>
-              <td style={cellStyle}>{doctorName(item.doctor_id)}</td>
-              <td style={cellStyle}>{item.state}</td>
-              <td style={cellStyle}>{item.external_id ?? "—"}</td>
-              <td style={cellStyle}>
-                <button onClick={() => void showDetail(item.id)}>Detail</button>{" "}
+              <td>{doctorName(item.doctor_id)}</td>
+              <td>{item.state}</td>
+              <td>{item.external_id ?? "—"}</td>
+              <td>
+                <button className="btn" onClick={() => void showDetail(item.id)}>Detail</button>{" "}
                 {(item.state === "confirmed" ||
                   item.state === "rescheduled") && (
-                  <button onClick={() => void cancel(item.id)}>Cancel</button>
+                  <button className="btn btn-danger" onClick={() => void cancel(item.id)}>Cancel</button>
                 )}
               </td>
             </tr>
           ))}
           {items.length === 0 && (
             <tr>
-              <td style={cellStyle} colSpan={5}>
+              <td colSpan={5}>
                 None yet.
               </td>
             </tr>
@@ -634,7 +624,7 @@ function AppointmentManager({ hospitalId }: { hospitalId: string }) {
             ))}
             {detail.history.length === 0 && <li>No transitions recorded.</li>}
           </ul>
-          <button onClick={() => setDetail(null)}>Close</button>
+          <button className="btn" onClick={() => setDetail(null)}>Close</button>
         </div>
       )}
     </section>
@@ -657,7 +647,7 @@ function OverviewTab({ hospitalId }: { hospitalId: string }) {
       <h2>Overview</h2>
       <ErrorNote error={error} />
       {data && (
-        <table style={tableStyle}>
+        <table className="table">
           <tbody>
             {(
               [
@@ -668,8 +658,8 @@ function OverviewTab({ hospitalId }: { hospitalId: string }) {
               ] as [string, string | number][]
             ).map(([label, value]) => (
               <tr key={label}>
-                <td style={cellStyle}>{label}</td>
-                <td style={cellStyle}>{value}</td>
+                <td>{label}</td>
+                <td>{value}</td>
               </tr>
             ))}
           </tbody>
@@ -707,35 +697,35 @@ function AIActivityTab({ hospitalId }: { hospitalId: string }) {
       <ErrorNote error={error} />
       <div>
         <input
-          style={inputStyle}
+          className="input"
           placeholder="Filter by tool name"
           value={toolFilter}
           onChange={(e) => setToolFilter(e.target.value)}
         />
       </div>
-      <table style={tableStyle}>
+      <table className="table">
         <thead>
           <tr>
-            <th style={cellStyle}>Time</th>
-            <th style={cellStyle}>Tool</th>
-            <th style={cellStyle}>Status</th>
-            <th style={cellStyle}>Latency ms</th>
-            <th style={cellStyle}>Error</th>
+            <th>Time</th>
+            <th>Tool</th>
+            <th>Status</th>
+            <th>Latency ms</th>
+            <th>Error</th>
           </tr>
         </thead>
         <tbody>
           {items.map((item) => (
             <tr key={item.id}>
-              <td style={cellStyle}>{new Date(item.created_at).toLocaleString()}</td>
-              <td style={cellStyle}>{item.tool_name}</td>
-              <td style={cellStyle}>{item.status}</td>
-              <td style={cellStyle}>{item.latency_ms.toFixed(1)}</td>
-              <td style={cellStyle}>{item.error ?? "—"}</td>
+              <td>{new Date(item.created_at).toLocaleString()}</td>
+              <td>{item.tool_name}</td>
+              <td>{item.status}</td>
+              <td>{item.latency_ms.toFixed(1)}</td>
+              <td>{item.error ?? "—"}</td>
             </tr>
           ))}
           {items.length === 0 && (
             <tr>
-              <td style={cellStyle} colSpan={5}>
+              <td colSpan={5}>
                 No executions yet — use chat or the MCP tools first.
               </td>
             </tr>
@@ -769,27 +759,27 @@ function IntegrationTab({ hospitalId }: { hospitalId: string }) {
             {JSON.stringify(data.verifications_24h)}
           </p>
           <h3>Recent operations</h3>
-          <table style={tableStyle}>
+          <table className="table">
             <thead>
               <tr>
-                <th style={cellStyle}>Type</th>
-                <th style={cellStyle}>Status</th>
-                <th style={cellStyle}>Attempt</th>
-                <th style={cellStyle}>Error</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Attempt</th>
+                <th>Error</th>
               </tr>
             </thead>
             <tbody>
               {data.recent_operations.map((op) => (
                 <tr key={op.id}>
-                  <td style={cellStyle}>{op.operation_type}</td>
-                  <td style={cellStyle}>{op.status}</td>
-                  <td style={cellStyle}>{op.attempt_number}</td>
-                  <td style={cellStyle}>{op.error ?? "—"}</td>
+                  <td>{op.operation_type}</td>
+                  <td>{op.status}</td>
+                  <td>{op.attempt_number}</td>
+                  <td>{op.error ?? "—"}</td>
                 </tr>
               ))}
               {data.recent_operations.length === 0 && (
                 <tr>
-                  <td style={cellStyle} colSpan={4}>
+                  <td colSpan={4}>
                     No vendor operations yet.
                   </td>
                 </tr>
@@ -827,23 +817,23 @@ function AnalyticsTab({ hospitalId }: { hospitalId: string }) {
               : `${data.tool_success_avg_latency_ms.toFixed(1)} ms`}
           </p>
           <h3>By state</h3>
-          <table style={tableStyle}>
+          <table className="table">
             <tbody>
               {Object.entries(data.appointments_by_state).map(([state, count]) => (
                 <tr key={state}>
-                  <td style={cellStyle}>{state}</td>
-                  <td style={cellStyle}>{count}</td>
+                  <td>{state}</td>
+                  <td>{count}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           <h3>Bookings per day (30d)</h3>
-          <table style={tableStyle}>
+          <table className="table">
             <tbody>
               {Object.entries(data.bookings_per_day_30d).map(([day, count]) => (
                 <tr key={day}>
-                  <td style={cellStyle}>{day}</td>
-                  <td style={cellStyle}>
+                  <td>{day}</td>
+                  <td>
                     {"█".repeat(Math.min(count, 40))} {count}
                   </td>
                 </tr>
@@ -934,7 +924,7 @@ function OperationsTab() {
         <label>
           Status{" "}
           <select
-            style={inputStyle}
+            className="input"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
@@ -946,34 +936,34 @@ function OperationsTab() {
           </select>
         </label>
       </div>
-      <table style={tableStyle}>
+      <table className="table">
         <thead>
           <tr>
-            <th style={cellStyle}>Created</th>
-            <th style={cellStyle}>Internal</th>
-            <th style={cellStyle}>External</th>
-            <th style={cellStyle}>Attempts</th>
-            <th style={cellStyle}>Status</th>
-            <th style={cellStyle}>Actions</th>
+            <th>Created</th>
+            <th>Internal</th>
+            <th>External</th>
+            <th>Attempts</th>
+            <th>Status</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           {items.map((item) => (
             <tr key={item.id}>
-              <td style={cellStyle}>{new Date(item.created_at).toLocaleString()}</td>
-              <td style={cellStyle}>{item.internal_status}</td>
-              <td style={cellStyle}>{item.external_status ?? "—"}</td>
-              <td style={cellStyle}>{item.attempts}</td>
-              <td style={cellStyle}>{item.resolution_status}</td>
-              <td style={cellStyle}>
-                <button onClick={() => void showDetail(item.id)}>Detail</button>{" "}
-                <button onClick={() => void retry(item.id)}>Retry</button>
+              <td>{new Date(item.created_at).toLocaleString()}</td>
+              <td>{item.internal_status}</td>
+              <td>{item.external_status ?? "—"}</td>
+              <td>{item.attempts}</td>
+              <td>{item.resolution_status}</td>
+              <td>
+                <button className="btn" onClick={() => void showDetail(item.id)}>Detail</button>{" "}
+                <button className="btn" onClick={() => void retry(item.id)}>Retry</button>
               </td>
             </tr>
           ))}
           {items.length === 0 && (
             <tr>
-              <td style={cellStyle} colSpan={6}>
+              <td colSpan={6}>
                 Queue empty.
               </td>
             </tr>
@@ -1003,13 +993,13 @@ function OperationsTab() {
             detail.resolution_status === "retrying") && (
             <div>
               <input
-                style={inputStyle}
+                className="input"
                 placeholder="Resolution note (required)"
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
               />
               <select
-                style={inputStyle}
+                className="input"
                 value={finalState}
                 onChange={(e) => setFinalState(e.target.value)}
               >
@@ -1033,7 +1023,7 @@ function OperationsTab() {
               </button>
             </div>
           )}
-          <button onClick={() => setDetail(null)}>Close</button>
+          <button className="btn" onClick={() => setDetail(null)}>Close</button>
         </div>
       )}
     </section>
@@ -1055,20 +1045,20 @@ function PlatformDoctorsTab() {
     <section>
       <h2>Platform — doctors (all hospitals)</h2>
       <ErrorNote error={error} />
-      <table style={tableStyle}>
+      <table className="table">
         <thead>
           <tr>
-            <th style={cellStyle}>Name</th>
-            <th style={cellStyle}>Hospital</th>
-            <th style={cellStyle}>Status</th>
+            <th>Name</th>
+            <th>Hospital</th>
+            <th>Status</th>
           </tr>
         </thead>
         <tbody>
           {items.map((d) => (
             <tr key={d.id}>
-              <td style={cellStyle}>{d.name}</td>
-              <td style={cellStyle}>{d.hospital_id.slice(0, 8)}</td>
-              <td style={cellStyle}>{d.status}</td>
+              <td>{d.name}</td>
+              <td>{d.hospital_id.slice(0, 8)}</td>
+              <td>{d.status}</td>
             </tr>
           ))}
         </tbody>
@@ -1092,20 +1082,20 @@ function PlatformPatientsTab() {
     <section>
       <h2>Platform — patients</h2>
       <ErrorNote error={error} />
-      <table style={tableStyle}>
+      <table className="table">
         <thead>
           <tr>
-            <th style={cellStyle}>Email</th>
-            <th style={cellStyle}>Active</th>
-            <th style={cellStyle}>Created</th>
+            <th>Email</th>
+            <th>Active</th>
+            <th>Created</th>
           </tr>
         </thead>
         <tbody>
           {items.map((p) => (
             <tr key={p.id}>
-              <td style={cellStyle}>{p.email}</td>
-              <td style={cellStyle}>{p.is_active ? "yes" : "no"}</td>
-              <td style={cellStyle}>{new Date(p.created_at).toLocaleString()}</td>
+              <td>{p.email}</td>
+              <td>{p.is_active ? "yes" : "no"}</td>
+              <td>{new Date(p.created_at).toLocaleString()}</td>
             </tr>
           ))}
         </tbody>
@@ -1143,7 +1133,7 @@ function PlatformAppointmentsTab() {
         <label>
           State{" "}
           <select
-            style={inputStyle}
+            className="input"
             value={stateFilter}
             onChange={(e) => setStateFilter(e.target.value)}
           >
@@ -1163,20 +1153,20 @@ function PlatformAppointmentsTab() {
           </select>
         </label>
       </div>
-      <table style={tableStyle}>
+      <table className="table">
         <thead>
           <tr>
-            <th style={cellStyle}>Slot start (UTC)</th>
-            <th style={cellStyle}>Hospital</th>
-            <th style={cellStyle}>State</th>
+            <th>Slot start (UTC)</th>
+            <th>Hospital</th>
+            <th>State</th>
           </tr>
         </thead>
         <tbody>
           {items.map((a) => (
             <tr key={a.id}>
-              <td style={cellStyle}>{new Date(a.slot_start).toLocaleString()}</td>
-              <td style={cellStyle}>{a.hospital_id.slice(0, 8)}</td>
-              <td style={cellStyle}>{a.state}</td>
+              <td>{new Date(a.slot_start).toLocaleString()}</td>
+              <td>{a.hospital_id.slice(0, 8)}</td>
+              <td>{a.state}</td>
             </tr>
           ))}
         </tbody>
@@ -1206,22 +1196,22 @@ function PlatformAITab() {
             {data.executions_total} executions · {data.errors_total} errors (
             {(data.error_rate * 100).toFixed(1)}%)
           </p>
-          <table style={tableStyle}>
+          <table className="table">
             <thead>
               <tr>
-                <th style={cellStyle}>Tool</th>
-                <th style={cellStyle}>Calls</th>
-                <th style={cellStyle}>Errors</th>
-                <th style={cellStyle}>Avg latency ms</th>
+                <th>Tool</th>
+                <th>Calls</th>
+                <th>Errors</th>
+                <th>Avg latency ms</th>
               </tr>
             </thead>
             <tbody>
               {data.by_tool.map((t) => (
                 <tr key={t.tool_name}>
-                  <td style={cellStyle}>{t.tool_name}</td>
-                  <td style={cellStyle}>{t.calls}</td>
-                  <td style={cellStyle}>{t.errors}</td>
-                  <td style={cellStyle}>
+                  <td>{t.tool_name}</td>
+                  <td>{t.calls}</td>
+                  <td>{t.errors}</td>
+                  <td>
                     {t.avg_latency_ms === null ? "—" : t.avg_latency_ms.toFixed(1)}
                   </td>
                 </tr>
@@ -1249,29 +1239,29 @@ function PlatformAuditTab() {
     <section>
       <h2>Platform — audit log</h2>
       <ErrorNote error={error} />
-      <table style={tableStyle}>
+      <table className="table">
         <thead>
           <tr>
-            <th style={cellStyle}>Time</th>
-            <th style={cellStyle}>Action</th>
-            <th style={cellStyle}>Entity</th>
-            <th style={cellStyle}>Hospital</th>
+            <th>Time</th>
+            <th>Action</th>
+            <th>Entity</th>
+            <th>Hospital</th>
           </tr>
         </thead>
         <tbody>
           {items.map((e) => (
             <tr key={e.id}>
-              <td style={cellStyle}>{new Date(e.created_at).toLocaleString()}</td>
-              <td style={cellStyle}>{e.action}</td>
-              <td style={cellStyle}>
+              <td>{new Date(e.created_at).toLocaleString()}</td>
+              <td>{e.action}</td>
+              <td>
                 {e.entity_type}:{e.entity_id.slice(0, 8)}
               </td>
-              <td style={cellStyle}>{e.hospital_id?.slice(0, 8) ?? "—"}</td>
+              <td>{e.hospital_id?.slice(0, 8) ?? "—"}</td>
             </tr>
           ))}
           {items.length === 0 && (
             <tr>
-              <td style={cellStyle} colSpan={4}>
+              <td colSpan={4}>
                 No audit events yet.
               </td>
             </tr>
@@ -1323,36 +1313,48 @@ export default function App() {
     return (
       <div className="container">
         <div className="login-wrap">
-          <div className="card">
-            <h1 className="brand" style={{ fontSize: "1.4rem" }}>
-              CareFlow <span>AI</span> — Admin
-            </h1>
-            <ErrorNote error={error} />
-            <div className="field">
-              <label>Email</label>
-              <input
-                className="input"
-                style={{ width: "100%" }}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
+          <div className="card login-card">
+            <div className="login-brand">
+              <span className="brand">
+                <span className="brand-badge" aria-hidden>
+                  +
+                </span>
+                CareFlow <span>AI</span>
+              </span>
+              <h2>Hospital operations</h2>
+              <p>Catalogs, schedules, AI oversight, and integration health — one console.</p>
             </div>
-            <div className="field">
-              <label>Password</label>
-              <input
-                className="input"
+            <div className="login-form">
+              <h2>Admin sign in</h2>
+              <ErrorNote error={error} />
+              <div className="field">
+                <label>Email</label>
+                <input
+                  className="input"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label>Password</label>
+                <input
+                  className="input"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void doLogin();
+                  }}
+                />
+              </div>
+              <button
+                className="btn btn-primary btn-lg"
                 style={{ width: "100%" }}
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void doLogin();
-                }}
-              />
+                onClick={() => void doLogin()}
+              >
+                Log in
+              </button>
             </div>
-            <button className="btn btn-primary" onClick={() => void doLogin()}>
-              Log in
-            </button>
           </div>
         </div>
       </div>
@@ -1398,27 +1400,60 @@ export default function App() {
   ];
   const visibleTabs = isPlatform ? platformTabs : hospitalTabs;
   const activeTab = visibleTabs.includes(tab) ? tab : visibleTabs[0];
+  const TAB_LABELS: Record<Tab, string> = {
+    overview: "Overview",
+    departments: "Departments",
+    specialties: "Specialties",
+    types: "Visit types",
+    doctors: "Doctors",
+    appointments: "Appointments",
+    "ai-activity": "AI activity",
+    integration: "Integration",
+    analytics: "Analytics",
+    operations: "Operations",
+    "platform-doctors": "Doctors",
+    "platform-patients": "Patients",
+    "platform-appointments": "Appointments",
+    "platform-ai": "AI evaluation",
+    "platform-audit": "Audit log",
+  };
+  const TAB_GROUPS: { label: string; tabs: Tab[] }[] = isPlatform
+    ? [{ label: "Platform", tabs: platformTabs }]
+    : [
+        { label: "Workspace", tabs: ["overview"] },
+        { label: "Catalog", tabs: ["departments", "specialties", "types", "doctors"] },
+        { label: "Scheduling", tabs: ["appointments", "operations"] },
+        { label: "Insights", tabs: ["ai-activity", "integration", "analytics"] },
+      ];
 
   return (
     <div className="layout">
       <aside className="sidebar">
         <div className="brand">
-          CareFlow <span style={{ color: "#9fd9d8" }}>AI</span>
+          <span className="brand-badge" aria-hidden>
+            +
+          </span>
+          CareFlow <span>AI</span>
         </div>
         <div className="who">
           {isPlatform ? "Platform" : "Hospital"} · {user.email}
         </div>
-        {visibleTabs.map((t) => (
-          <button
-            key={t}
-            className={activeTab === t ? "active" : ""}
-            onClick={() => setTab(t)}
-          >
-            {t}
-          </button>
+        {TAB_GROUPS.map((g) => (
+          <div className="side-group" key={g.label}>
+            <div className="side-label">{g.label}</div>
+            {g.tabs.map((t) => (
+              <button
+                key={t}
+                className={activeTab === t ? "active" : ""}
+                onClick={() => setTab(t)}
+              >
+                {TAB_LABELS[t]}
+              </button>
+            ))}
+          </div>
         ))}
         <div className="spacer" />
-        <button onClick={logout}>Log out</button>
+        <button className="btn" onClick={logout}>Log out</button>
       </aside>
       <main className="content">
       {activeTab === "overview" && <OverviewTab hospitalId={hospitalId} />}

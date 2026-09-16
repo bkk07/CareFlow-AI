@@ -526,3 +526,29 @@ agenda SaaS on the other side. Rebuilt toward exactly that:
 - Verification: 187/187 tests, all three apps `tsc + vite build`
   green, live wizard-chain smoke on postgres (search -> directory
   -> 16 slots -> book confirmed -> visits/inbox/preferences).
+
+## Professional UI pass (all apps)
+
+> build professional UI for this
+
+- Design system v2 (`src/theme.css`, mirrored x3): token scale
+  (palette/shadows/radii/focus ring), focus-visible rings,
+  button sizes (sm/lg/ghost/danger) with press states, toolbar +
+  form-row layouts, row-list rows, skeleton shimmer + spinner +
+  typing/mic animations, empty states, banner variants, card tables
+  with row hover, dotted status pills, split-card login, floating
+  search card over a layered-gradient hero, sticky blur topbar,
+  footer, responsive breakpoints (sidebar collapses to top nav),
+  prefers-reduced-motion support.
+- Patient: hero trust row, search card, skeleton results, upcoming
+  rows with Manage links, next-available badges, guided booking
+  with skeleton slot grid + sticky confirm summary, visits with
+  skeleton/empty states + history timeline rows, inbox with refresh
+  + row layout, branded split login, app footer.
+- Admin: 142 inline styles -> design-system classes, grouped
+  sidebar (Workspace/Catalog/Scheduling/Insights + Platform) with
+  human labels, split-card login, danger styling on destructive
+  actions. Doctor: same conversion, labeled Schedule sidebar,
+  split-card login.
+- Verification: tsc+vite builds x3 green, dist asset integrity +
+  new-system CSS/hero copy confirmed in all bundles.

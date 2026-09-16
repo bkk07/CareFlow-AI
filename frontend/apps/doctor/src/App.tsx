@@ -14,21 +14,11 @@ import {
   type QuestionnaireResponse,
 } from "./api";
 
-const inputStyle: React.CSSProperties = { marginRight: "0.5rem" };
-const tableStyle: React.CSSProperties = {
-  borderCollapse: "collapse",
-  marginTop: "0.75rem",
-};
-const cellStyle: React.CSSProperties = {
-  border: "1px solid #ccc",
-  padding: "0.25rem 0.5rem",
-};
-
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 function ErrorNote({ error }: { error: string | null }) {
   if (!error) return null;
-  return <p style={{ color: "crimson" }}>{error}</p>;
+  return <p className="error">{error}</p>;
 }
 
 function apiError(e: unknown): string {
@@ -50,31 +40,31 @@ function AppointmentTable({
   hideActions?: boolean;
 }) {
   return (
-    <table style={tableStyle}>
+    <table className="table">
       <thead>
         <tr>
-          <th style={cellStyle}>Slot start (UTC)</th>
-          <th style={cellStyle}>Slot end (UTC)</th>
-          <th style={cellStyle}>State</th>
-          {!hideActions && <th style={cellStyle}>Actions</th>}
+          <th>Slot start (UTC)</th>
+          <th>Slot end (UTC)</th>
+          <th>State</th>
+          {!hideActions && <th>Actions</th>}
         </tr>
       </thead>
       <tbody>
         {items.map((item) => (
           <tr key={item.id}>
-            <td style={cellStyle}>{new Date(item.slot_start).toLocaleString()}</td>
-            <td style={cellStyle}>{new Date(item.slot_end).toLocaleString()}</td>
-            <td style={cellStyle}>{item.state}</td>
+            <td>{new Date(item.slot_start).toLocaleString()}</td>
+            <td>{new Date(item.slot_end).toLocaleString()}</td>
+            <td>{item.state}</td>
             {!hideActions && (
-              <td style={cellStyle}>
-                <button onClick={() => onDetail(item.id)}>Detail</button>
+              <td>
+                <button className="btn" onClick={() => onDetail(item.id)}>Detail</button>
               </td>
             )}
           </tr>
         ))}
         {items.length === 0 && (
           <tr>
-            <td style={cellStyle} colSpan={hideActions ? 3 : 4}>
+            <td colSpan={hideActions ? 3 : 4}>
               None yet.
             </td>
           </tr>
@@ -142,7 +132,7 @@ function AppointmentList({ range }: { range: "today" | "upcoming" }) {
             </div>
           ))}
           {responses.length === 0 && <p>No responses submitted.</p>}
-          <button onClick={() => setDetail(null)}>Close</button>
+          <button className="btn" onClick={() => setDetail(null)}>Close</button>
         </div>
       )}
     </section>
@@ -252,14 +242,14 @@ function CalendarEditor({ profile }: { profile: DoctorProfile }) {
         <>
           <p>
             Calendar {data.calendar.is_active ? "active" : "paused"}{" "}
-            <button onClick={() => void toggleCalendar()}>
+            <button className="btn" onClick={() => void toggleCalendar()}>
               {data.calendar.is_active ? "Pause" : "Activate"}
             </button>
           </p>
           <h3>Availability rules</h3>
           <div>
             <select
-              style={inputStyle}
+              className="input"
               value={day}
               onChange={(e) => setDay(e.target.value)}
             >
@@ -270,30 +260,30 @@ function CalendarEditor({ profile }: { profile: DoctorProfile }) {
               ))}
             </select>
             <input
-              style={inputStyle}
+              className="input"
               value={start}
               onChange={(e) => setStart(e.target.value)}
             />
             <input
-              style={inputStyle}
+              className="input"
               value={end}
               onChange={(e) => setEnd(e.target.value)}
             />
-            <button onClick={() => void addRule()}>Add rule</button>
+            <button className="btn" onClick={() => void addRule()}>Add rule</button>
           </div>
-          <table style={tableStyle}>
+          <table className="table">
             <tbody>
               {data.rules.map((rule) => (
                 <tr key={rule.id}>
-                  <td style={cellStyle}>{ruleLabel(rule)}</td>
-                  <td style={cellStyle}>
-                    <button onClick={() => void deleteRule(rule.id)}>Delete</button>
+                  <td>{ruleLabel(rule)}</td>
+                  <td>
+                    <button className="btn btn-danger" onClick={() => void deleteRule(rule.id)}>Delete</button>
                   </td>
                 </tr>
               ))}
               {data.rules.length === 0 && (
                 <tr>
-                  <td style={cellStyle}>No rules yet.</td>
+                  <td>No rules yet.</td>
                 </tr>
               )}
             </tbody>
@@ -301,19 +291,19 @@ function CalendarEditor({ profile }: { profile: DoctorProfile }) {
           <h3>Blocked time</h3>
           <div>
             <input
-              style={inputStyle}
+              className="input"
               type="datetime-local"
               value={blockStart}
               onChange={(e) => setBlockStart(e.target.value)}
             />
             <input
-              style={inputStyle}
+              className="input"
               type="datetime-local"
               value={blockEnd}
               onChange={(e) => setBlockEnd(e.target.value)}
             />
             <select
-              style={inputStyle}
+              className="input"
               value={blockReason}
               onChange={(e) => setBlockReason(e.target.value)}
             >
@@ -323,26 +313,26 @@ function CalendarEditor({ profile }: { profile: DoctorProfile }) {
                 </option>
               ))}
             </select>
-            <button onClick={() => void addBlock()} disabled={!blockStart || !blockEnd}>
+            <button className="btn" onClick={() => void addBlock()} disabled={!blockStart || !blockEnd}>
               Block
             </button>
           </div>
-          <table style={tableStyle}>
+          <table className="table">
             <tbody>
               {data.blocks.map((block: BlockedSlot) => (
                 <tr key={block.id}>
-                  <td style={cellStyle}>
+                  <td>
                     {new Date(block.start_datetime).toLocaleString()} →{" "}
                     {new Date(block.end_datetime).toLocaleString()} ({block.reason})
                   </td>
-                  <td style={cellStyle}>
-                    <button onClick={() => void deleteBlock(block.id)}>Delete</button>
+                  <td>
+                    <button className="btn btn-danger" onClick={() => void deleteBlock(block.id)}>Delete</button>
                   </td>
                 </tr>
               ))}
               {data.blocks.length === 0 && (
                 <tr>
-                  <td style={cellStyle}>Nothing blocked.</td>
+                  <td>Nothing blocked.</td>
                 </tr>
               )}
             </tbody>
@@ -408,36 +398,48 @@ export default function App() {
     return (
       <div className="container">
         <div className="login-wrap">
-          <div className="card">
-            <h1 className="brand" style={{ fontSize: "1.4rem" }}>
-              CareFlow <span>AI</span> — Doctor
-            </h1>
-            <ErrorNote error={error} />
-            <div className="field">
-              <label>Email</label>
-              <input
-                className="input"
-                style={{ width: "100%" }}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
+          <div className="card login-card">
+            <div className="login-brand">
+              <span className="brand">
+                <span className="brand-badge" aria-hidden>
+                  +
+                </span>
+                CareFlow <span>AI</span>
+              </span>
+              <h2>Your practice, organized</h2>
+              <p>Today's agenda, upcoming visits, and your availability calendar.</p>
             </div>
-            <div className="field">
-              <label>Password</label>
-              <input
-                className="input"
+            <div className="login-form">
+              <h2>Doctor sign in</h2>
+              <ErrorNote error={error} />
+              <div className="field">
+                <label>Email</label>
+                <input
+                  className="input"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label>Password</label>
+                <input
+                  className="input"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void doLogin();
+                  }}
+                />
+              </div>
+              <button
+                className="btn btn-primary btn-lg"
                 style={{ width: "100%" }}
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void doLogin();
-                }}
-              />
+                onClick={() => void doLogin()}
+              >
+                Log in
+              </button>
             </div>
-            <button className="btn btn-primary" onClick={() => void doLogin()}>
-              Log in
-            </button>
           </div>
         </div>
       </div>
@@ -477,20 +479,24 @@ export default function App() {
     <div className="layout">
       <aside className="sidebar">
         <div className="brand">
-          CareFlow <span style={{ color: "#9fd9d8" }}>AI</span>
+          <span className="brand-badge" aria-hidden>
+            +
+          </span>
+          CareFlow <span>AI</span>
         </div>
         <div className="who">{profile?.name}</div>
+        <div className="side-label">Schedule</div>
         {(["today", "upcoming", "calendar"] as Tab[]).map((t) => (
           <button
             key={t}
             className={tab === t ? "active" : ""}
             onClick={() => setTab(t)}
           >
-            {t}
+            {t === "today" ? "Today" : t === "upcoming" ? "Upcoming" : "Calendar"}
           </button>
         ))}
         <div className="spacer" />
-        <button onClick={logout}>Log out</button>
+        <button className="btn" onClick={logout}>Log out</button>
       </aside>
       <main className="content">
         {tab === "today" && <AppointmentList range="today" />}
