@@ -19,6 +19,8 @@ from app.domain.hospital.models import Hospital
 from app.domain.hospital_config.models import AppointmentType
 from app.integration.connector_interface import (
     EHRConnectorError,
+    EHRNotFoundError,
+    EHRValidationError,
     ExternalAppointment,
 )
 from app.integration.integration_service import IntegrationService
@@ -41,13 +43,21 @@ def iso(dt):
 
 
 class FakeConnector:
-    """Deterministic stand-in for the vendor connector."""
+    """Deterministic stand-in for the vendor connector.
+
+    Keeps vendor-side records so the trust-but-verify reads see what a
+    real vendor would: creates/updates/cancels mutate the record, reads
+    return it, unknown ids 404 like the vendor.
+    """
 
     def __init__(self) -> None:
         self.fail_create = False
         self.fail_update = False
         self.fail_cancel = False
+        self.fail_get = False
+        self.create_error: type[EHRConnectorError] = EHRConnectorError
         self.creates = 0
+        self._records: dict[str, dict] = {}
 
     def ensure_patient(self, **kwargs):
         return {"id": "ext-patient-1"}
@@ -60,10 +70,16 @@ class FakeConnector:
 
     def create_appointment(self, request):
         if self.fail_create:
-            raise EHRConnectorError("vendor down")
+            raise self.create_error("vendor down")
         self.creates += 1
+        external_id = f"vendor-{request.idempotency_key}"
+        self._records[external_id] = {
+            "status": "scheduled",
+            "start": request.start,
+            "end": request.end,
+        }
         return ExternalAppointment(
-            external_id=f"vendor-{request.idempotency_key}",
+            external_id=external_id,
             status="scheduled",
             start=request.start,
             end=request.end,
@@ -72,6 +88,12 @@ class FakeConnector:
     def update_appointment(self, external_id, request):
         if self.fail_update:
             raise EHRConnectorError("vendor down")
+        record = self._records.get(external_id)
+        if record is None:
+            raise EHRNotFoundError("no such vendor record")
+        record.update(
+            {"status": "scheduled", "start": request.start, "end": request.end}
+        )
         return ExternalAppointment(
             external_id=external_id,
             status="scheduled",
@@ -82,17 +104,41 @@ class FakeConnector:
     def cancel_appointment(self, external_id):
         if self.fail_cancel:
             raise EHRConnectorError("vendor down")
+        record = self._records.get(external_id)
+        if record is None:
+            raise EHRNotFoundError("no such vendor record")
+        record["status"] = "cancelled"
         return ExternalAppointment(
-            external_id=external_id, status="cancelled", start=None, end=None
+            external_id=external_id,
+            status="cancelled",
+            start=record["start"],
+            end=record["end"],
         )
 
     def get_appointment(self, external_id):
+        if self.fail_get:
+            raise EHRConnectorError("vendor dark")
+        record = self._records.get(external_id)
+        if record is None:
+            raise EHRNotFoundError("no such vendor record")
         return ExternalAppointment(
-            external_id=external_id, status="scheduled", start=None, end=None
+            external_id=external_id,
+            status=record["status"],
+            start=record["start"],
+            end=record["end"],
         )
 
     def find_appointment_by_idempotency_key(self, idempotency_key):
-        return None
+        external_id = f"vendor-{idempotency_key}"
+        record = self._records.get(external_id)
+        if record is None:
+            return None
+        return ExternalAppointment(
+            external_id=external_id,
+            status=record["status"],
+            start=record["start"],
+            end=record["end"],
+        )
 
 
 @pytest.fixture()
@@ -314,14 +360,16 @@ def test_booking_outside_working_hours_rejected(client, db, stub_integration):
 # --- failure paths -----------------------------------------------------------
 
 
-def test_vendor_failure_marks_failed_and_frees_slot(
+def test_vendor_validation_failure_marks_failed_and_frees_slot(
     client, db, stub_integration, fake_connector
 ):
+    """A definitive vendor rejection fails fast: no retry, slot freed."""
     setup = seed_setup(client, "fail")
     owner = setup["hosp"]["owner"]
     start, end = slot_utc(hour=9)
 
     fake_connector.fail_create = True
+    fake_connector.create_error = EHRValidationError
     resp = book(client, owner, setup, start, end, "fail-k1")
     assert resp.status_code == 502, resp.text
     appointment_id = resp.json()["detail"]["appointment_id"]
@@ -329,6 +377,7 @@ def test_vendor_failure_marks_failed_and_frees_slot(
     detail = client.get(f"/appointments/{appointment_id}", headers=owner)
     assert detail.json()["state"] == "failed"
     assert history_pairs(client, owner, appointment_id) == {("pending", "failed")}
+    assert fake_connector.creates == 0
     # The held slot is released — the day's schedule is whole again.
     assert "2026-10-05T09:00:00Z" in available_starts(client, setup)
 
@@ -353,7 +402,8 @@ def test_failed_reschedule_keeps_original_booking(
         json={"slot_start": iso(new_start), "slot_end": iso(new_end)},
         headers=owner,
     )
-    assert resp.status_code == 502, resp.text
+    # The vendor never moved: no 502, the original booking stands.
+    assert resp.status_code == 200, resp.text
 
     detail = client.get(f"/appointments/{appointment_id}", headers=owner).json()
     assert detail["state"] == "confirmed"

@@ -14,7 +14,11 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.deps import RequestContext, require_role
 from app.domain.appointment import service
-from app.domain.appointment.models import Appointment, AppointmentHistory
+from app.domain.appointment.models import (
+    Appointment,
+    AppointmentHistory,
+    AppointmentState,
+)
 from app.domain.appointment.schemas import (
     AppointmentCreateIn,
     AppointmentDetailOut,
@@ -132,8 +136,23 @@ def book_appointment(
         actor_user_id=ctx.user_id,
         integration=integration,
     )
-    # Idempotent replay answers 200 with the same row; a fresh booking 201.
-    if not created:
+    if appointment.state == AppointmentState.failed:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "appointment_id": str(appointment.id),
+                "error": "Vendor booking failed; appointment marked failed",
+            },
+        )
+    if appointment.state in (
+        AppointmentState.sync_pending,
+        AppointmentState.reconciliation_required,
+    ):
+        # Booked locally, vendor outcome still unknown — the slot stays
+        # held while verification/reconciliation runs.
+        response.status_code = status.HTTP_202_ACCEPTED
+    elif not created:
+        # Idempotent replay answers 200 with the same row.
         response.status_code = status.HTTP_200_OK
     return appointment
 

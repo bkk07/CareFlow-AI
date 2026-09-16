@@ -34,6 +34,12 @@ def _parse_appointment(payload: dict) -> ExternalAppointment:
         status=str(payload["status"]),
         start=_dt(payload["start_datetime"]),
         end=_dt(payload["end_datetime"]),
+        patient_external_id=str(payload["patient_id"])
+        if payload.get("patient_id") is not None
+        else None,
+        provider_external_id=str(payload["provider_id"])
+        if payload.get("provider_id") is not None
+        else None,
     )
 
 

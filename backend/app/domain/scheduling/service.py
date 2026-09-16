@@ -225,6 +225,35 @@ def reserve_slot(
     return block
 
 
+def release_appointment_hold(
+    session: Session, doctor_id: uuid.UUID, start: datetime, end: datetime
+) -> bool:
+    """Delete an appointment's exact held-slot block, if present.
+
+    Matched in Python (normalized to UTC) so naive-vs-aware storage
+    differences between SQLite and PostgreSQL cannot strand a block.
+    Returns True when a block was removed.
+    """
+    candidates = (
+        session.query(BlockedSlot)
+        .filter(
+            BlockedSlot.doctor_id == doctor_id,
+            BlockedSlot.reason == BlockedReason.appointment,
+            BlockedSlot.start_datetime < end,
+            BlockedSlot.end_datetime > start,
+        )
+        .all()
+    )
+    for block in candidates:
+        if availability.as_utc(block.start_datetime) == availability.as_utc(
+            start
+        ) and availability.as_utc(block.end_datetime) == availability.as_utc(end):
+            session.delete(block)
+            session.flush()
+            return True
+    return False
+
+
 def validate_rule_input(
     day_of_week: int | None,
     start_time,

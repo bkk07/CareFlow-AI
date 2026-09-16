@@ -34,7 +34,7 @@ from app.domain.hospital.service import assert_hospital_approved
 from app.domain.hospital_config.models import AppointmentType
 from app.domain.scheduling import service as scheduling_service
 from app.domain.scheduling.availability import Window, as_utc
-from app.domain.scheduling.models import BlockedReason, BlockedSlot
+from app.domain.scheduling.models import BlockedReason
 from app.domain.scheduling.service import SlotConflictError
 from app.integration.connector_interface import EHRConnectorError
 from app.integration.integration_service import IntegrationService
@@ -119,28 +119,7 @@ def assert_slot_available(
 def _release_block(
     session: Session, doctor_id: uuid.UUID, start: datetime, end: datetime
 ) -> None:
-    """Delete this appointment's held slot block, if present.
-
-    Matched in Python (normalized to UTC) so naive-vs-aware storage
-    differences between SQLite and PostgreSQL cannot strand a block.
-    """
-    candidates = (
-        session.query(BlockedSlot)
-        .filter(
-            BlockedSlot.doctor_id == doctor_id,
-            BlockedSlot.reason == BlockedReason.appointment,
-            BlockedSlot.start_datetime < end,
-            BlockedSlot.end_datetime > start,
-        )
-        .all()
-    )
-    for block in candidates:
-        if as_utc(block.start_datetime) == as_utc(
-            start
-        ) and as_utc(block.end_datetime) == as_utc(end):
-            session.delete(block)
-            session.flush()
-            return
+    scheduling_service.release_appointment_hold(session, doctor_id, start, end)
 
 
 def get_scoped_type(
@@ -255,32 +234,72 @@ def create_appointment(
             internal_appointment_id=appointment.id,
         )
     except EHRConnectorError as exc:
-        _release_block(session, doctor.id, start, end)
+        # Unknown outcome — the vendor may have committed. Recovery
+        # queries first, retries same-key within budget, then parks.
+        # (It commits internally; refresh below re-reads the outcome.)
+        from app.reliability.reconciliation import service as reconcile_service
+
+        appointment = reconcile_service.handle_create_failure(
+            session,
+            appointment,
+            exc,
+            integration=integration,
+            actor_user_id=actor_user_id,
+        )
+        session.refresh(appointment)
+        return appointment, True
+
+    appointment.external_id = external.external_id
+    from app.reliability.verification import service as verify_service
+
+    result = verify_service.verify_external_appointment(
+        session, appointment, integration
+    )
+    if result.outcome == verify_service.VerifyOutcome.matched:
         transition(
             session,
             appointment,
-            AppointmentState.failed,
+            AppointmentState.confirmed,
             actor_user_id=actor_user_id,
-            reason=f"Vendor create failed: {type(exc).__name__}",
             correlation_id=correlation_id,
         )
-        session.commit()
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={
-                "appointment_id": str(appointment.id),
-                "error": "Vendor booking failed; appointment marked failed",
-            },
-        ) from exc
+    else:
+        # A "success" we cannot corroborate is not a success. The slot
+        # stays held (the vendor may hold it too) while an operator
+        # looks: mismatch parks for reconciliation, an unreadable
+        # vendor parks in sync_pending for a re-read.
+        from app.reliability import operations as reliability_ops
 
-    appointment.external_id = external.external_id
-    transition(
-        session,
-        appointment,
-        AppointmentState.confirmed,
-        actor_user_id=actor_user_id,
-        correlation_id=correlation_id,
-    )
+        detail = result.mismatches or ["unreadable vendor record"]
+        if appointment.state == AppointmentState.pending:
+            transition(
+                session,
+                appointment,
+                AppointmentState.sync_pending,
+                actor_user_id=actor_user_id,
+                reason=f"Vendor response not corroborated: {detail}",
+                correlation_id=correlation_id,
+            )
+        if result.outcome == verify_service.VerifyOutcome.mismatched:
+            transition(
+                session,
+                appointment,
+                AppointmentState.reconciliation_required,
+                actor_user_id=actor_user_id,
+                reason=f"Vendor response not corroborated: {result.mismatches}",
+                correlation_id=correlation_id,
+            )
+        reliability_ops.open_record(
+            session,
+            appointment=appointment,
+            operation=session.get(
+                reliability_ops.IntegrationOperation, result.operation_id
+            ),
+            error=f"Uncorroborated vendor success: {detail}",
+            attempts=1,
+            external_id=external.external_id,
+            external_status=external.status,
+        )
     session.commit()
     session.refresh(appointment)
     return appointment, True
@@ -333,12 +352,20 @@ def reschedule_appointment(
     try:
         integration.update_appointment(appointment.external_id, start, end)
     except EHRConnectorError as exc:
-        _release_block(session, doctor.id, start, end)
-        session.commit()
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Vendor reschedule failed; original booking unchanged",
-        ) from exc
+        # Unknown outcome — reconcile from vendor truth (commits inside).
+        from app.reliability.reconciliation import service as reconcile_service
+
+        appointment = reconcile_service.handle_update_failure(
+            session,
+            appointment,
+            start,
+            end,
+            exc,
+            integration=integration,
+            actor_user_id=actor_user_id,
+        )
+        session.refresh(appointment)
+        return appointment
 
     old_start, old_end = appointment.slot_start, appointment.slot_end
     appointment.slot_start = start
@@ -352,6 +379,35 @@ def reschedule_appointment(
         reason=reason,
         correlation_id=appointment.correlation_id,
     )
+    # The vendor said yes — corroborate before trusting it. On divergence
+    # the booking parks (new slot still held) with an open record.
+    from app.reliability import operations as reliability_ops
+    from app.reliability.verification import service as verify_service
+
+    result = verify_service.verify_external_appointment(
+        session, appointment, integration
+    )
+    if result.outcome != verify_service.VerifyOutcome.matched:
+        if appointment.state == AppointmentState.rescheduled:
+            transition(
+                session,
+                appointment,
+                AppointmentState.reconciliation_required,
+                actor_user_id=actor_user_id,
+                reason=f"Vendor move not corroborated: {result.mismatches or ['unreadable vendor record']}",
+                correlation_id=appointment.correlation_id,
+            )
+        reliability_ops.open_record(
+            session,
+            appointment=appointment,
+            operation=session.get(
+                reliability_ops.IntegrationOperation, result.operation_id
+            ),
+            error="Uncorroborated vendor move: "
+            f"{result.mismatches or ['unreadable vendor record']}",
+            attempts=1,
+            external_id=appointment.external_id,
+        )
     session.commit()
     session.refresh(appointment)
     return appointment
@@ -376,10 +432,18 @@ def cancel_appointment(
         try:
             integration.cancel_appointment(appointment.external_id)
         except EHRConnectorError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Vendor cancellation failed; appointment unchanged",
-            ) from exc
+            # Unknown outcome — reconcile from vendor truth (commits inside).
+            from app.reliability.reconciliation import service as reconcile_service
+
+            appointment = reconcile_service.handle_cancel_failure(
+                session,
+                appointment,
+                exc,
+                integration=integration,
+                actor_user_id=actor_user_id,
+            )
+            session.refresh(appointment)
+            return appointment
     _release_block(session, appointment.doctor_id, appointment.slot_start, appointment.slot_end)
     transition(
         session,
@@ -389,6 +453,52 @@ def cancel_appointment(
         reason=reason,
         correlation_id=appointment.correlation_id,
     )
+    # Corroborate the vendor cancellation; divergence opens a record but
+    # the local booking stands cancelled — it will not be resurrected.
+    from app.reliability import operations as reliability_ops
+    from app.reliability.verification import service as verify_service
+
+    try:
+        current = (
+            integration.get_appointment(appointment.external_id)
+            if appointment.external_id is not None
+            else None
+        )
+    except EHRConnectorError as exc:
+        current = None
+        verify_error: str | None = f"{type(exc).__name__}: {exc}"
+    else:
+        verify_error = None
+    if current is None or current.status != "cancelled":
+        result_detail = (
+            verify_error
+            or f"vendor status={current.status if current else 'missing'}"
+        )
+        op = reliability_ops.record_operation(
+            session,
+            appointment_id=appointment.id,
+            operation_type=reliability_ops.OperationType.verify,
+            attempt_number=reliability_ops.next_attempt_number(
+                session,
+                appointment.id,
+                reliability_ops.OperationType.verify,
+            ),
+            status=reliability_ops.OperationStatus.failed
+            if verify_error
+            else reliability_ops.OperationStatus.succeeded,
+            request_payload={"external_id": appointment.external_id},
+            error=result_detail,
+            correlation_id=appointment.correlation_id,
+        )
+        reliability_ops.open_record(
+            session,
+            appointment=appointment,
+            operation=op,
+            error=f"Uncorroborated vendor cancellation: {result_detail}",
+            attempts=1,
+            external_id=appointment.external_id,
+            external_status=current.status if current else None,
+        )
     session.commit()
     session.refresh(appointment)
     return appointment

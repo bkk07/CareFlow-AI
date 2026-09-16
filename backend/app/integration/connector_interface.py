@@ -33,6 +33,11 @@ class ExternalAppointment:
     status: str
     start: datetime
     end: datetime
+    # Vendor-side linkage, when the vendor echoes it. Verification matches
+    # these against our identifier mappings; None means "not echoed" and
+    # matching falls back to slot times + idempotency-key ownership.
+    patient_external_id: str | None = None
+    provider_external_id: str | None = None
 
 
 class EHRConnectorError(Exception):

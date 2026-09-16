@@ -226,3 +226,36 @@ Notes on execution (Phase 7 — Appointment Core):
 - No Phase 8+ code (verification loop, reconciliation sweeps, MCP/AI)
   was added; `requested`/`sync_pending`/`reconciliation_required` exist
   as states with transitions so Phase 8 can drive them.
+
+## Verification, Synchronization, Reconciliation
+
+> next phase
+
+Notes on execution (Phase 8 — Verification, Synchronization, Reconciliation):
+
+- New `app/reliability/` package: `failure_classifier.py` (typed errors
+  to `TRANSIENT_RETRYABLE` / `NOT_RETRYABLE_VALIDATION` / `RATE_LIMITED`
+  / `UNKNOWN`, cap of 2 attempts with 1s/2s backoff), `verification/`
+  (re-reads the vendor record after every success and diffs times plus
+  identifier linkage — never trusts a 200 blindly),
+  `synchronization/` (single `diff_appointment` matcher plus
+  query-then-confirm adoption from idempotency-key lookups), and
+  `reconciliation/` (the unknown-outcome algorithm: validation dies
+  fast, everything else queries before any same-key retry, then parks
+  in a live state with the slot still held and an open work item).
+- Booking now answers 201 confirmed, 202 parked (`sync_pending` /
+  `reconciliation_required`), or 502 only for definitive failure.
+  Operator API: list/detail/retry/resolve for reconciliation records,
+  tenant-scoped, with `resolution_status` as an indexed column for the
+  Phase 13 dashboard. Retry auto-closes the record when vendor and
+  internal agree again.
+- Supporting changes: `ExternalAppointment` gained vendor linkage ids
+  (additive defaults; the mock connector populates them),
+  `rescheduled` gained edges to/from `reconciliation_required`, and the
+  appointment slot-release helper moved to scheduling for shared use.
+- Live fault smoke on a from-scratch stack: blackhole create still
+  books `confirmed` with one vendor row; vendor-dark books park 202
+  with an open record (2 bounded attempts, slot held); clearing the
+  fault and retrying resolves to `confirmed` with an empty queue.
+- No frontend this phase (precedent: Phase 6) — the ops surface is the
+  API the Phase 13 dashboard will consume. No Phase 9+ code was added.

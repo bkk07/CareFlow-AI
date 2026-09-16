@@ -45,9 +45,12 @@ ALLOWED_TRANSITIONS: dict[AppointmentState, set[AppointmentState]] = {
         AppointmentState.no_show,
     },
     # A rescheduled appointment is live at its new slot: it can move again
-    # or be closed out exactly like a confirmed one.
+    # or be closed out exactly like a confirmed one. It can also park in
+    # reconciliation when a move diverges, and resolve back to rescheduled
+    # (never silently to confirmed — the move happened).
     AppointmentState.rescheduled: {
         AppointmentState.rescheduled,
+        AppointmentState.reconciliation_required,
         AppointmentState.cancelled,
         AppointmentState.completed,
         AppointmentState.no_show,
@@ -59,6 +62,7 @@ ALLOWED_TRANSITIONS: dict[AppointmentState, set[AppointmentState]] = {
     },
     AppointmentState.reconciliation_required: {
         AppointmentState.confirmed,
+        AppointmentState.rescheduled,
         AppointmentState.cancelled,
         AppointmentState.failed,
     },
