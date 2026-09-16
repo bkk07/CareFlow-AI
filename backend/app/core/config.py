@@ -7,7 +7,7 @@ full list of keys with placeholder values.
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,7 +34,15 @@ class Settings(BaseSettings):
         default="http://localhost:8000", alias="EHR_MOCK_BASE_URL"
     )
     ehr_http_timeout_s: float = Field(default=10.0, alias="EHR_HTTP_TIMEOUT_S")
-    llm_api_key: str = Field(default="", alias="LLM_API_KEY")
+    llm_api_key: str = Field(
+        default="", validation_alias=AliasChoices("LLM_API_KEY", "GROQ_API_KEY")
+    )
+    llm_model: str = Field(default="openai/gpt-oss-20b", alias="LLM_MODEL")
+    llm_base_url: str = Field(
+        default="https://api.groq.com/openai/v1", alias="LLM_BASE_URL"
+    )
+    # AIContext (Phase 9) Redis TTL, e.g. 2h of conversation memory.
+    ai_context_ttl_s: int = Field(default=7200, alias="AI_CONTEXT_TTL_S")
     twilio_account_sid: str = Field(default="", alias="TWILIO_ACCOUNT_SID")
     twilio_auth_token: str = Field(default="", alias="TWILIO_AUTH_TOKEN")
     twilio_phone_number: str = Field(default="", alias="TWILIO_PHONE_NUMBER")

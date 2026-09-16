@@ -259,3 +259,38 @@ Notes on execution (Phase 8 — Verification, Synchronization, Reconciliation):
   fault and retrying resolves to `confirmed` with an empty queue.
 - No frontend this phase (precedent: Phase 6) — the ops surface is the
   API the Phase 13 dashboard will consume. No Phase 9+ code was added.
+
+## MCP Server + AI Agent (text)
+
+> next phase
+
+Notes on execution (Phase 9 — MCP Server + AI Agent):
+
+- `app/mcp_server/` package: `mcp_tool` decorator (role allow-list,
+  idempotency-key requirement, per-call `CapabilityExecution` audit
+  row incl. denied calls, single retry of transient faults for
+  read-only tools), 17 capability modules (the plan says "16" but
+  lists 17 files — the file list wins), and `server.py` with the
+  registry plus `GET /mcp/tools` / `POST /mcp/call`. Booking tools
+  reuse the Phase 7/8 services unchanged, so reconciliation fires
+  identically through chat and raw API. Phase 10/11 capabilities are
+  registered but answer honest 501s.
+- `app/ai/`: Redis-backed `AIContext` (in-memory fallback, 2h TTL;
+  selections/offered slots/pending items — never durable prefs),
+  orchestrator with the plan''s system prompt, a deterministic
+  pre-check that declines purely clinical messages (scheduling intent
+  still flows), an 8-iteration cap, and GROQ via httpx
+  (OpenAI-compatible, no new SDK). `transfer_to_human` persists an
+  `Escalation` row; migration `0009_mcp_agent` adds both tables.
+- Live smoke on a from-scratch stack: 17 tools listed, real slots
+  via tool, vendor-dark booking parks through the tool path and an
+  operator retry resolves it to confirmed, clinical chat declines
+  with zero iterations, keyless chat answers 503.
+- Two live findings fixed: `backend/.env` (with a real GROQ key) was
+  baked into the image by `COPY . .` — added `backend/.dockerignore`;
+  the default model `llama-3.3-70b-versatile` is retired on GROQ
+  (verified against /models) — default is now `openai/gpt-oss-20b`
+  with a live hello-agent round-trip. Model-backend failures map to
+  502 at `/chat`, mirroring the EHR path.
+- `ChatDebug.tsx` (patient app, dev-only label) posts to `/chat`.
+  No Phase 10+ logic was added.
