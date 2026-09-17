@@ -9,19 +9,41 @@ export const api = axios.create({ baseURL });
 export function setAccessToken(token: string | null) {
   if (token) {
     api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
-    localStorage.setItem("careflow_admin_token", token);
+    try {
+      localStorage.setItem("careflow_admin_token", token);
+    } catch {
+      /* private mode */
+    }
   } else {
     delete api.defaults.headers.common["Authorization"];
-    localStorage.removeItem("careflow_admin_token");
+    try {
+      localStorage.removeItem("careflow_admin_token");
+    } catch {
+      /* noop */
+    }
   }
 }
 
 export function restoreAccessToken(): string | null {
-  const token = localStorage.getItem("careflow_admin_token");
+  let token: string | null = null;
+  try {
+    token = localStorage.getItem("careflow_admin_token");
+  } catch {
+    token = null;
+  }
   if (token) {
     api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
   }
   return token;
+}
+
+export async function probeBackend(timeoutMs = 4000): Promise<boolean> {
+  try {
+    await api.get("/health", { timeout: timeoutMs });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export interface CurrentUser {
@@ -66,6 +88,8 @@ export interface Appointment {
   external_id: string | null;
   idempotency_key: string;
   correlation_id: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AppointmentHistoryEntry {
@@ -129,6 +153,8 @@ export interface HospitalAnalytics {
 
 export interface ReconciliationRecord {
   id: string;
+  hospital_id: string;
+  operation_id: string | null;
   appointment_id: string;
   external_id: string | null;
   error: string;
@@ -195,4 +221,362 @@ export async function login(email: string, password: string): Promise<void> {
 export async function me(): Promise<CurrentUser> {
   const { data } = await api.get("/auth/me");
   return data;
+}
+
+// -- hospital profile + staff -------------------------------------------------
+
+export interface Hospital {
+  id: string;
+  name: string;
+  address: string;
+  contact_email: string;
+  contact_phone: string;
+  status: string;
+  submitted_at: string | null;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  rejection_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getHospital(hospitalId: string): Promise<Hospital> {
+  return (await api.get(`/hospitals/${hospitalId}`)).data;
+}
+
+export async function updateHospital(
+  hospitalId: string,
+  patch: { name?: string; address?: string; contact_email?: string; contact_phone?: string },
+): Promise<Hospital> {
+  return (await api.put(`/hospitals/${hospitalId}`, patch)).data;
+}
+
+export interface StaffMember {
+  id: string;
+  email: string;
+  role: string;
+  hospital_id: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export async function listStaff(hospitalId: string): Promise<StaffMember[]> {
+  return (await api.get(`/hospitals/${hospitalId}/staff`)).data;
+}
+
+export async function inviteStaff(
+  hospitalId: string,
+  body: { email: string; password: string },
+): Promise<StaffMember> {
+  return (await api.post(`/hospitals/${hospitalId}/staff`, body)).data;
+}
+
+export async function deactivateStaff(hospitalId: string, userId: string): Promise<void> {
+  await api.delete(`/hospitals/${hospitalId}/staff/${userId}`);
+}
+
+// -- catalog -------------------------------------------------------------------
+
+export interface Department {
+  id: string;
+  hospital_id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Specialty {
+  id: string;
+  hospital_id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listDepartments(hospitalId: string): Promise<Department[]> {
+  return (await api.get(`/hospitals/${hospitalId}/departments`)).data;
+}
+
+export async function createDepartment(hospitalId: string, name: string): Promise<Department> {
+  return (await api.post(`/hospitals/${hospitalId}/departments`, { name })).data;
+}
+
+export async function renameDepartment(
+  hospitalId: string,
+  id: string,
+  name: string,
+): Promise<Department> {
+  return (await api.put(`/hospitals/${hospitalId}/departments/${id}`, { name })).data;
+}
+
+export async function deleteDepartment(hospitalId: string, id: string): Promise<void> {
+  await api.delete(`/hospitals/${hospitalId}/departments/${id}`);
+}
+
+export async function listSpecialties(hospitalId: string): Promise<Specialty[]> {
+  return (await api.get(`/hospitals/${hospitalId}/specialties`)).data;
+}
+
+export async function createSpecialty(hospitalId: string, name: string): Promise<Specialty> {
+  return (await api.post(`/hospitals/${hospitalId}/specialties`, { name })).data;
+}
+
+export async function deleteSpecialty(hospitalId: string, id: string): Promise<void> {
+  await api.delete(`/hospitals/${hospitalId}/specialties/${id}`);
+}
+
+export async function listAppointmentTypes(hospitalId: string): Promise<AppointmentType[]> {
+  return (await api.get(`/hospitals/${hospitalId}/appointment-types`)).data;
+}
+
+export async function createAppointmentType(
+  hospitalId: string,
+  body: { name: string; duration_minutes: number; compatible_specialty_ids?: string[] },
+): Promise<AppointmentType> {
+  return (await api.post(`/hospitals/${hospitalId}/appointment-types`, body)).data;
+}
+
+export async function deleteAppointmentType(hospitalId: string, id: string): Promise<void> {
+  await api.delete(`/hospitals/${hospitalId}/appointment-types/${id}`);
+}
+
+// -- doctors --------------------------------------------------------------------
+
+export interface DoctorDetail extends Doctor {
+  photo_url: string | null;
+  department_id: string | null;
+  qualifications: Record<string, unknown>;
+  experience_years: number;
+  languages: string[];
+  consultation_types: string[];
+  default_duration_minutes: number;
+  external_provider_id: string | null;
+  user_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listDoctors(hospitalId: string): Promise<DoctorDetail[]> {
+  return (await api.get(`/hospitals/${hospitalId}/doctors`)).data;
+}
+
+export async function createDoctor(
+  hospitalId: string,
+  body: {
+    name: string;
+    specialty_id?: string | null;
+    department_id?: string | null;
+    experience_years?: number;
+  },
+): Promise<DoctorDetail> {
+  return (await api.post(`/hospitals/${hospitalId}/doctors`, body)).data;
+}
+
+export async function activateDoctor(hospitalId: string, id: string): Promise<DoctorDetail> {
+  return (await api.post(`/hospitals/${hospitalId}/doctors/${id}/activate`)).data;
+}
+
+export async function deactivateDoctor(hospitalId: string, id: string): Promise<DoctorDetail> {
+  return (await api.post(`/hospitals/${hospitalId}/doctors/${id}/deactivate`)).data;
+}
+
+// -- appointments ---------------------------------------------------------------
+
+export async function listAppointments(hospitalId: string): Promise<Appointment[]> {
+  return (await api.get("/appointments", { params: { hospital_id: hospitalId } })).data;
+}
+
+export async function cancelAppointment(id: string, reason?: string): Promise<Appointment> {
+  return (await api.post(`/appointments/${id}/cancel`, { reason: reason ?? null })).data;
+}
+
+// -- questionnaires (authoring) --------------------------------------------------
+
+export interface Questionnaire {
+  id: string;
+  hospital_id: string;
+  name: string;
+  scope: string;
+  scope_ref_id: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface QuestionnaireQuestion {
+  id: string;
+  questionnaire_id: string;
+  order: number;
+  type: string;
+  prompt: string;
+  options: string[] | null;
+  required: boolean;
+}
+
+export interface QuestionnaireDetail {
+  questionnaire: Questionnaire;
+  questions: QuestionnaireQuestion[];
+}
+
+export async function listQuestionnaires(hospitalId: string): Promise<Questionnaire[]> {
+  return (await api.get(`/hospitals/${hospitalId}/questionnaires`)).data;
+}
+
+export async function createQuestionnaire(
+  hospitalId: string,
+  body: { name: string; scope?: string },
+): Promise<Questionnaire> {
+  return (
+    await api.post(`/hospitals/${hospitalId}/questionnaires`, {
+      scope: "hospital",
+      ...body,
+    })
+  ).data;
+}
+
+export async function getQuestionnaireDetail(
+  hospitalId: string,
+  id: string,
+): Promise<QuestionnaireDetail> {
+  return (await api.get(`/hospitals/${hospitalId}/questionnaires/${id}`)).data;
+}
+
+export async function updateQuestionnaire(
+  hospitalId: string,
+  id: string,
+  patch: { name?: string; is_active?: boolean },
+): Promise<Questionnaire> {
+  return (await api.put(`/hospitals/${hospitalId}/questionnaires/${id}`, patch)).data;
+}
+
+export async function addQuestion(
+  hospitalId: string,
+  questionnaireId: string,
+  body: { order: number; type: string; prompt: string; options?: string[] | null; required?: boolean },
+): Promise<QuestionnaireQuestion> {
+  return (
+    await api.post(`/hospitals/${hospitalId}/questionnaires/${questionnaireId}/questions`, body)
+  ).data;
+}
+
+// -- insights --------------------------------------------------------------------
+
+export interface AIActivityResponse {
+  hospital_id: string;
+  executions: AIActivityEntry[];
+}
+
+export async function fetchAIActivity(hospitalId: string): Promise<AIActivityResponse> {
+  return (await api.get(`/hospitals/${hospitalId}/ai-activity`)).data;
+}
+
+export async function fetchIntegrationStatus(hospitalId: string): Promise<IntegrationStatus> {
+  return (await api.get(`/hospitals/${hospitalId}/integration-status`)).data;
+}
+
+export async function fetchAnalytics(hospitalId: string): Promise<HospitalAnalytics> {
+  return (await api.get(`/hospitals/${hospitalId}/analytics`)).data;
+}
+
+export async function fetchOverview(hospitalId: string): Promise<HospitalOverview> {
+  return (await api.get(`/hospitals/${hospitalId}/overview`)).data;
+}
+
+// -- workflows --------------------------------------------------------------------
+
+export interface WorkflowExecution {
+  id: string;
+  event_type: string;
+  status: string;
+  attempt: number;
+  appointment_id: string | null;
+  correlation_id: string;
+  execution_history: unknown[];
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listWorkflows(): Promise<WorkflowExecution[]> {
+  return (await api.get("/workflows")).data;
+}
+
+// -- operations (retry queue / recovery history) ------------------------------------
+
+export interface Operation {
+  id: string;
+  appointment_id: string;
+  operation_type: string;
+  status: string;
+  attempt_number: number;
+  error: string | null;
+  correlation_id: string;
+  created_at: string;
+}
+
+export async function listOperations(params?: {
+  status?: string;
+  operation_type?: string;
+}): Promise<Operation[]> {
+  return (await api.get("/operations", { params })).data;
+}
+
+export async function retryOperation(id: string): Promise<{
+  operation_id: string;
+  appointment_id: string;
+  appointment_state: string;
+}> {
+  return (await api.post(`/operations/${id}/retry`)).data;
+}
+
+export async function verifyAppointment(
+  appointmentId: string,
+): Promise<{ appointment_id: string; outcome: string; mismatches: string[] }> {
+  const { data } = await api.post("/mcp/call", {
+    tool: "verify_external_appointment",
+    input: { appointment_id: appointmentId },
+  });
+  return data.result;
+}
+
+// -- reconciliation ------------------------------------------------------------------
+
+export async function listReconciliations(params?: {
+  resolution_status?: string;
+}): Promise<ReconciliationRecord[]> {
+  return (await api.get("/reconciliation/records", { params })).data;
+}
+
+export async function fetchReconciliation(id: string): Promise<ReconciliationDetail> {
+  return (await api.get(`/reconciliation/records/${id}`)).data;
+}
+
+export async function retryReconciliation(id: string): Promise<ReconciliationDetail> {
+  return (await api.post(`/reconciliation/records/${id}/retry`)).data;
+}
+
+export async function resolveReconciliation(
+  id: string,
+  body: { resolution: string; note?: string; final_state?: string },
+): Promise<ReconciliationDetail> {
+  return (await api.post(`/reconciliation/records/${id}/resolve`, body)).data;
+}
+
+// -- escalations -----------------------------------------------------------------------
+
+export interface Escalation {
+  id: string;
+  conversation_id: string;
+  appointment_id: string | null;
+  reason: string;
+  status: string;
+  created_by_user_id: string;
+  hospital_id: string | null;
+  created_at: string;
+}
+
+export async function listEscalations(): Promise<Escalation[]> {
+  return (await api.get("/escalations")).data;
+}
+
+export async function resolveEscalation(id: string): Promise<Escalation> {
+  return (await api.post(`/escalations/${id}/resolve`)).data;
 }
