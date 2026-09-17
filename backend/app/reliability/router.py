@@ -21,6 +21,8 @@ from app.integration.integration_service import IntegrationService
 from app.reliability import operations
 from app.reliability.models import (
     IntegrationOperation,
+    OperationStatus,
+    OperationType,
     ReconciliationRecord,
     ResolutionStatus,
 )
@@ -209,6 +211,83 @@ def resolve_record(
         final_state=body.final_state,
     )
     return _detail_out(db, record)
+
+
+# -- operation log (retry queue / recovery history reads) ------------------------
+
+
+def _scoped_operation(
+    db: Session, ctx: RequestContext, operation_id: uuid.UUID
+) -> tuple[IntegrationOperation, Appointment]:
+    operation = db.get(IntegrationOperation, operation_id)
+    if operation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Operation not found"
+        )
+    appointment = get_appointment_or_404(db, operation.appointment_id)
+    if (
+        ctx.role == Role.hospital_admin
+        and ctx.hospital_id != appointment.hospital_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not allowed to access this operation",
+        )
+    return operation, appointment
+
+
+@router.get("/operations", response_model=list[OperationOut])
+def list_operations(
+    status: OperationStatus | None = None,
+    operation_type: OperationType | None = None,
+    hospital_id: uuid.UUID | None = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_operator),
+) -> list:
+    """Hospital-scoped vendor-call log: the retry queue, unknown outcomes
+    and recovery history reads behind the ops console."""
+    if ctx.role == Role.hospital_admin:
+        if hospital_id is not None and hospital_id != ctx.hospital_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not allowed to list this hospital",
+            )
+        hospital_id = ctx.hospital_id
+    query = db.query(IntegrationOperation).join(
+        Appointment, Appointment.id == IntegrationOperation.appointment_id
+    )
+    if hospital_id is not None:
+        query = query.filter(Appointment.hospital_id == hospital_id)
+    if status is not None:
+        query = query.filter(IntegrationOperation.status == status)
+    if operation_type is not None:
+        query = query.filter(IntegrationOperation.operation_type == operation_type)
+    return (
+        query.order_by(IntegrationOperation.created_at.desc())
+        .limit(min(max(limit, 1), 200))
+        .all()
+    )
+
+
+@router.post("/operations/{operation_id}/retry")
+def retry_operation(
+    operation_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_operator),
+    integration: IntegrationService = Depends(get_integration_service),
+) -> dict:
+    """Re-drive recovery for the operation's appointment (vendor lookup
+    first, create only when the vendor provably has nothing)."""
+    _, appointment = _scoped_operation(db, ctx, operation_id)
+    appointment = reconcile_service.drive_recovery(
+        db, appointment, integration, actor_user_id=ctx.user_id, force=True
+    )
+    return {
+        "operation_id": str(operation_id),
+        "appointment_id": str(appointment.id),
+        "appointment_state": appointment.state.value,
+    }
 
 
 __all__ = ["router"]

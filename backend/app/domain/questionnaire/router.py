@@ -25,6 +25,7 @@ from app.domain.questionnaire.schemas import (
     QuestionnaireCreateIn,
     QuestionnaireDetailOut,
     QuestionnaireOut,
+    QuestionnaireUpdateIn,
     QuestionOut,
     ResponseOut,
     ResponseSubmitIn,
@@ -166,6 +167,24 @@ def get_questionnaire_detail(
             _question_out(q) for q in service.list_questions(db, questionnaire)
         ],
     )
+
+
+@router.put(
+    "/hospitals/{hospital_id}/questionnaires/{questionnaire_id}",
+    response_model=QuestionnaireOut,
+)
+def update_questionnaire(
+    questionnaire_id: uuid.UUID,
+    body: QuestionnaireUpdateIn,
+    hospital: Hospital = Depends(require_managed_hospital),
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_admin),
+) -> Questionnaire:
+    """Rename or (de)activate a form. Inactive forms stop resolving for
+    new appointments but keep their history."""
+    del ctx
+    questionnaire = service.get_hospital_questionnaire(db, hospital, questionnaire_id)
+    return service.update_questionnaire(db, questionnaire, body)
 
 
 # -- appointment answering -----------------------------------------------------

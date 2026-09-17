@@ -104,6 +104,24 @@ def get_hospital_questionnaire(
     return row
 
 
+def update_questionnaire(
+    session: Session, questionnaire: Questionnaire, body
+) -> Questionnaire:
+    """Rename / (de)activate. Deactivation keeps history; the resolver
+    only considers active forms for new appointments."""
+    data = body.model_dump(exclude_unset=True)
+    if "name" in data:
+        name = data["name"].strip()
+        if not name:
+            raise _unprocessable("name must not be empty")
+        questionnaire.name = name
+    if "is_active" in data:
+        questionnaire.is_active = data["is_active"]
+    session.commit()
+    session.refresh(questionnaire)
+    return questionnaire
+
+
 def add_question(
     session: Session,
     questionnaire: Questionnaire,

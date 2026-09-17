@@ -19,7 +19,9 @@ from app.domain.scheduling.router import router as scheduling_router
 from app.integration.mock_ehr.router import router as mock_ehr_router
 from app.ai.router import router as chat_router
 from app.mcp_server.server import router as mcp_router
+from app.mcp_server.escalations import router as escalations_router
 from app.notification.router import router as notification_router
+from app.workflow.router import router as workflow_router
 from app.observability.correlation import CorrelationIdMiddleware
 from app.observability.router import router as observability_router
 from app.reliability.router import router as reliability_router
@@ -53,6 +55,8 @@ app.include_router(questionnaire_router)
 app.include_router(scheduling_router)
 app.include_router(mock_ehr_router)
 app.include_router(mcp_router)
+app.include_router(escalations_router)
+app.include_router(workflow_router)
 app.include_router(chat_router)
 app.include_router(notification_router)
 app.include_router(observability_router)

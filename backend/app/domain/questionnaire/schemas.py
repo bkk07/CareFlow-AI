@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain.questionnaire.models import QuestionnaireScope, QuestionType
 
@@ -22,6 +22,13 @@ class QuestionnaireOut(BaseModel):
     scope_ref_id: uuid.UUID | None
     is_active: bool
     created_at: datetime
+
+
+class QuestionnaireUpdateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    is_active: bool | None = None
 
 
 class QuestionCreateIn(BaseModel):
