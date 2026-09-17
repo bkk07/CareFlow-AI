@@ -1,6 +1,8 @@
 """Patient self-service endpoints (patient role only, own rows only)."""
 
-from fastapi import APIRouter, Depends
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
@@ -11,6 +13,8 @@ from app.domain.patient.models import PatientProfile, UserPreferences
 from app.domain.patient.schemas import (
     ContactOut,
     ContactUpdateIn,
+    PatientAppointmentDetailOut,
+    PatientAppointmentOut,
     PatientOut,
     PatientUpdateIn,
     PreferencesOut,
@@ -74,3 +78,31 @@ def update_contact(
 ) -> PatientProfile:
     """Register the phone/name/DOB the telephone channel verifies against."""
     return service.update_contact(db, ctx.user_id, body)
+
+
+@router.get("/me/appointments", response_model=list[PatientAppointmentOut])
+def list_my_appointments(
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_patient),
+) -> list:
+    """Own appointments with doctor/hospital/type names joined in, so the
+    patient portal renders list + detail without extra lookups."""
+    return service.list_patient_appointments(db, ctx.user_id)
+
+
+@router.get(
+    "/me/appointments/{appointment_id}",
+    response_model=PatientAppointmentDetailOut,
+)
+def get_my_appointment(
+    appointment_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_patient),
+) -> PatientAppointmentDetailOut:
+    detail = service.get_patient_appointment_detail(db, ctx.user_id, appointment_id)
+    if detail is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Appointment not found",
+        )
+    return detail

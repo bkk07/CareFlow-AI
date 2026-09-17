@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     telephony_stream_url: str = Field(default="", alias="TELEPHONY_STREAM_URL")
 
     backend_cors_origins: str = Field(
-        default="http://localhost:5173,http://localhost:5174,http://localhost:5177,http://localhost:3000",
+        default="http://localhost:5173,http://localhost:5174,http://localhost:5176,http://localhost:5177,http://localhost:5178,http://localhost:3000",
         alias="BACKEND_CORS_ORIGINS",
     )
 

@@ -234,3 +234,91 @@ def test_preferences_do_not_scope_patient_identity(client, db):
     assert user.hospital_id is None
     assert user.role.value == "patient"
     assert client.get("/patients/me", headers=headers).json()["hospital_id"] is None
+
+
+# --- own appointments (enriched view for the patient portal) ------------------
+
+
+def seed_patient_appointment(db, client, tag="myappts"):
+    """Approved hospital + named doctor/type + one owned appointment row."""
+    import uuid as uuid_mod
+    from datetime import datetime, timedelta, timezone
+
+    from app.domain.appointment.models import (
+        Appointment,
+        AppointmentHistory,
+        AppointmentState,
+    )
+    from app.domain.auth.models import User
+
+    hosp = approved_hospital(client, tag=tag)
+    hid, doctor_id, type_id = seed_refs(client, hosp)
+    email, headers = register_patient(client)
+    patient_id = db.query(User).filter(User.email == email).one().id
+
+    start = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(days=2)
+    appt = Appointment(
+        hospital_id=uuid_mod.UUID(hid),
+        patient_id=patient_id,
+        doctor_id=uuid_mod.UUID(doctor_id),
+        appointment_type_id=uuid_mod.UUID(type_id),
+        slot_start=start,
+        slot_end=start + timedelta(minutes=30),
+        state=AppointmentState.confirmed,
+        idempotency_key=f"myappts-{tag}-{uuid_mod.uuid4().hex[:8]}",
+        correlation_id=uuid_mod.uuid4(),
+    )
+    db.add(appt)
+    db.commit()
+    db.refresh(appt)
+    db.add(
+        AppointmentHistory(
+            appointment_id=appt.id,
+            from_state=AppointmentState.pending,
+            to_state=AppointmentState.confirmed,
+            actor_system="test",
+            correlation_id=appt.correlation_id,
+        )
+    )
+    db.commit()
+    return headers, str(appt.id)
+
+
+def test_patient_my_appointments_list_is_enriched_and_scoped(client, db):
+    headers, appt_id = seed_patient_appointment(db, client)
+
+    listing = client.get("/patients/me/appointments", headers=headers)
+    assert listing.status_code == 200, listing.text
+    rows = listing.json()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["id"] == appt_id
+    assert row["doctor_name"] == "Dr. Pref"
+    assert row["specialty"] == "Cardiology"
+    assert row["department"] == "Heart"
+    assert row["appointment_type_name"] == "Consult"
+    assert row["duration_minutes"] == 30
+    assert row["state"] == "confirmed"
+    assert row["hospital_name"].startswith("Hospital myappts")
+
+    # Another patient sees nothing and cannot open the row.
+    _, other = register_patient(client)
+    assert client.get("/patients/me/appointments", headers=other).json() == []
+    denied = client.get(f"/patients/me/appointments/{appt_id}", headers=other)
+    assert denied.status_code == 404
+
+
+def test_patient_my_appointment_detail_has_history(client, db):
+    headers, appt_id = seed_patient_appointment(db, client, tag="mydetail")
+
+    detail = client.get(f"/patients/me/appointments/{appt_id}", headers=headers)
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["doctor_name"] == "Dr. Pref"
+    assert len(body["history"]) == 1
+    assert body["history"][0]["to_state"] == "confirmed"
+
+    missing = client.get(
+        f"/patients/me/appointments/{uuid.uuid4()}", headers=headers
+    )
+    assert missing.status_code == 404

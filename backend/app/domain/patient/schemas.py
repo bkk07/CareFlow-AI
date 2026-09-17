@@ -5,6 +5,8 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
+from app.domain.appointment.models import AppointmentState
+from app.domain.appointment.schemas import AppointmentHistoryOut
 from app.domain.auth.models import Role
 from app.domain.patient.models import ConsultationMode, TimeOfDay
 
@@ -52,3 +54,29 @@ class ContactUpdateIn(BaseModel):
     phone: str | None = Field(default=None, max_length=32)
     full_name: str | None = Field(default=None, max_length=255)
     date_of_birth: date | None = Field(default=None)
+
+
+class PatientAppointmentOut(BaseModel):
+    """One appointment with display names joined in — the patient portal
+    list/detail view without extra lookups."""
+
+    id: uuid.UUID
+    doctor_id: uuid.UUID
+    doctor_name: str
+    doctor_photo_url: str | None
+    specialty: str | None
+    department: str | None
+    hospital_id: uuid.UUID
+    hospital_name: str
+    appointment_type_id: uuid.UUID
+    appointment_type_name: str
+    duration_minutes: int
+    slot_start: datetime
+    slot_end: datetime
+    state: AppointmentState
+    created_at: datetime
+    updated_at: datetime
+
+
+class PatientAppointmentDetailOut(PatientAppointmentOut):
+    history: list[AppointmentHistoryOut]
