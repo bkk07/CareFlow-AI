@@ -1,0 +1,114 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #f7f9fb;
+  --foreground: #163042;
+  --primary: #1769aa;
+  --primary-dark: #11527f;
+  --navy: #123b5d;
+  --secondary: #168c8c;
+  --muted: #617486;
+  --border: #dce5ea;
+  --success: #2e8b68;
+  --warning: #c58a22;
+  --danger: #c94c4c;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  @apply bg-background text-ink font-sans antialiased;
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+::selection {
+  background: #eaf4fb;
+}
+
+:focus-visible {
+  outline: 2px solid #1769aa;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@layer components {
+  .shell-container {
+    @apply mx-auto w-full max-w-shell px-4 sm:px-6 pb-28 md:pb-12;
+  }
+  .card-base {
+    @apply bg-card border border-border rounded-card shadow-subtle;
+  }
+  .btn-base {
+    @apply inline-flex items-center justify-center gap-2 font-semibold rounded-control transition-all duration-150 select-none;
+  }
+  .input-base {
+    @apply w-full bg-white border border-border rounded-control px-3.5 py-2.5 text-[0.95rem] text-ink placeholder:text-ink-faint focus:border-healthcare focus:ring-2 focus:ring-healthcare/25 outline-none transition;
+  }
+  .section-title {
+    @apply text-[1.05rem] font-bold text-ink tracking-tight;
+  }
+  .page-title {
+    @apply text-[1.65rem] sm:text-[1.9rem] font-extrabold text-navy tracking-tight leading-tight;
+  }
+  .page-sub {
+    @apply text-ink-secondary text-[0.95rem] leading-relaxed;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[0.83rem] font-semibold whitespace-nowrap transition cursor-pointer;
+  }
+}
+
+/* thin scrollbars for filter rows */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* skeleton shimmer */
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+.skeleton {
+  background: linear-gradient(90deg, #e8eef2 25%, #f5f8fa 50%, #e8eef2 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.3s infinite linear;
+}
+
+/* voice waveform bars */
+@keyframes wave {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+.voice-bar {
+  transform-origin: center;
+  animation: wave 1.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

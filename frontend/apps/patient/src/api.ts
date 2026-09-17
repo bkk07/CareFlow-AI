@@ -209,3 +209,177 @@ export async function checkAvailability(args: {
   });
   return result.slots;
 }
+
+export async function probeBackend(timeoutMs = 4000): Promise<boolean> {
+  try {
+    await api.get("/health", { timeout: timeoutMs });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function wsBase(): string {
+  return baseURL.replace(/^http/, "ws");
+}
+
+export async function registerPatient(email: string, password: string): Promise<void> {
+  await api.post("/auth/register", { email, password, role: "patient" });
+  await login(email, password);
+}
+
+export interface PatientAppointment {
+  id: string;
+  doctor_id: string;
+  doctor_name: string;
+  doctor_photo_url: string | null;
+  specialty: string | null;
+  department: string | null;
+  hospital_id: string;
+  hospital_name: string;
+  appointment_type_id: string;
+  appointment_type_name: string;
+  duration_minutes: number;
+  slot_start: string;
+  slot_end: string;
+  state: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PatientAppointmentDetail extends PatientAppointment {
+  history: HistoryEntry[];
+}
+
+export async function fetchMyAppointments(): Promise<PatientAppointment[]> {
+  return (await api.get("/patients/me/appointments")).data;
+}
+
+export async function fetchMyAppointment(id: string): Promise<PatientAppointmentDetail> {
+  return (await api.get(`/patients/me/appointments/${id}`)).data;
+}
+
+export async function createAppointment(args: {
+  patient_id: string;
+  doctor_id: string;
+  appointment_type_id: string;
+  slot_start: string;
+  slot_end: string;
+}): Promise<Appointment> {
+  return (
+    await api.post("/appointments", { ...args, idempotency_key: newKey() })
+  ).data;
+}
+
+export async function rescheduleAppointment(
+  id: string,
+  args: { slot_start: string; slot_end: string; reason?: string },
+): Promise<Appointment> {
+  return (await api.post(`/appointments/${id}/reschedule`, args)).data;
+}
+
+export async function cancelAppointment(id: string, reason?: string): Promise<Appointment> {
+  return (await api.post(`/appointments/${id}/cancel`, { reason: reason ?? null })).data;
+}
+
+export interface Contact {
+  patient_user_id: string;
+  phone: string | null;
+  full_name: string | null;
+  date_of_birth: string | null;
+  updated_at: string;
+}
+
+export async function fetchContact(): Promise<Contact> {
+  return (await api.get("/patients/me/contact")).data;
+}
+
+export async function saveContact(args: {
+  full_name?: string | null;
+  phone?: string | null;
+  date_of_birth?: string | null;
+}): Promise<Contact> {
+  return (await api.put("/patients/me/contact", args)).data;
+}
+
+export async function updateEmail(email: string): Promise<CurrentUser> {
+  return (await api.put("/patients/me", { email })).data;
+}
+
+export interface BackendPreferences {
+  patient_user_id: string;
+  preferred_doctor_id: string | null;
+  preferred_hospital_id: string | null;
+  preferred_appointment_type_id: string | null;
+  preferred_time_of_day: string | null;
+  preferred_consultation_mode: string | null;
+  updated_at: string;
+}
+
+export async function fetchPreferences(): Promise<BackendPreferences> {
+  return (await api.get("/patients/me/preferences")).data;
+}
+
+export async function savePreferences(
+  patch: Partial<
+    Pick<
+      BackendPreferences,
+      | "preferred_doctor_id"
+      | "preferred_hospital_id"
+      | "preferred_appointment_type_id"
+      | "preferred_time_of_day"
+      | "preferred_consultation_mode"
+    >
+  >,
+): Promise<BackendPreferences> {
+  return (await api.put("/patients/me/preferences", patch)).data;
+}
+
+export async function fetchNotifications(): Promise<Notification[]> {
+  return (await api.get("/notifications")).data;
+}
+
+export interface ChatReply {
+  conversation_id: string;
+  reply: string;
+  iterations: number;
+  escalated: boolean;
+  stopped: boolean;
+}
+
+export async function postChat(message: string, conversationId?: string | null): Promise<ChatReply> {
+  return (
+    await api.post("/chat", {
+      message,
+      conversation_id: conversationId ?? null,
+    })
+  ).data;
+}
+
+export async function fetchAppointmentQuestionnaire(
+  appointmentId: string,
+): Promise<Questionnaire | null> {
+  return (await api.get(`/appointments/${appointmentId}/questionnaire`)).data;
+}
+
+export interface QuestionnaireSubmitOut {
+  id: string;
+  appointment_id: string;
+  questionnaire_id: string;
+  answers: Record<string, unknown>;
+  completed: boolean;
+  completed_at: string | null;
+  flagged: boolean;
+  escalation_id: string | null;
+}
+
+export async function submitQuestionnaireAnswers(
+  appointmentId: string,
+  answers: Record<string, unknown>,
+): Promise<QuestionnaireSubmitOut> {
+  return (
+    await api.post(`/appointments/${appointmentId}/questionnaire/responses`, {
+      answers,
+    })
+  ).data;
+}
