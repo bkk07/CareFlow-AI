@@ -6,22 +6,46 @@ const baseURL =
 
 export const api = axios.create({ baseURL });
 
+const TOKEN_KEY = "careflow_doctor_token";
+
 export function setAccessToken(token: string | null) {
   if (token) {
     api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
-    localStorage.setItem("careflow_doctor_token", token);
+    try {
+      localStorage.setItem(TOKEN_KEY, token);
+    } catch {
+      /* private mode */
+    }
   } else {
     delete api.defaults.headers.common["Authorization"];
-    localStorage.removeItem("careflow_doctor_token");
+    try {
+      localStorage.removeItem(TOKEN_KEY);
+    } catch {
+      /* noop */
+    }
   }
 }
 
 export function restoreAccessToken(): string | null {
-  const token = localStorage.getItem("careflow_doctor_token");
+  let token: string | null = null;
+  try {
+    token = localStorage.getItem(TOKEN_KEY);
+  } catch {
+    token = null;
+  }
   if (token) {
     api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
   }
   return token;
+}
+
+export async function probeBackend(timeoutMs = 4000): Promise<boolean> {
+  try {
+    await api.get("/health", { timeout: timeoutMs });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export interface CurrentUser {
@@ -35,29 +59,93 @@ export interface DoctorProfile {
   id: string;
   hospital_id: string;
   name: string;
+  photo_url: string | null;
+  specialty_id: string | null;
+  department_id: string | null;
+  qualifications: Record<string, unknown>;
+  experience_years: number;
+  languages: string[];
+  consultation_types: string[];
+  default_duration_minutes: number;
+  external_provider_id: string | null;
+  user_id: string | null;
   status: string;
+  created_at: string;
+  updated_at: string;
 }
 
-export interface Appointment {
+export interface DoctorSelfUpdate {
+  name?: string;
+  photo_url?: string | null;
+  qualifications?: Record<string, unknown>;
+  experience_years?: number;
+  languages?: string[];
+  consultation_types?: string[];
+  default_duration_minutes?: number;
+}
+
+export interface DoctorAppointment {
   id: string;
   patient_id: string;
+  patient_name: string;
+  patient_email: string | null;
+  patient_phone: string | null;
   doctor_id: string;
+  appointment_type_id: string;
+  appointment_type_name: string;
+  slot_start: string;
+  slot_end: string;
+  state: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AppointmentHistoryEntry {
+  id: string;
+  appointment_id: string;
+  from_state: string;
+  to_state: string;
+  actor_user_id: string | null;
+  actor_system: string | null;
+  reason: string | null;
+  correlation_id: string;
+  created_at: string;
+}
+
+export interface AppointmentDetail {
+  id: string;
+  hospital_id: string;
+  patient_id: string;
+  doctor_id: string;
+  appointment_type_id: string;
   slot_start: string;
   slot_end: string;
   state: string;
   external_id: string | null;
+  idempotency_key: string;
+  correlation_id: string;
+  created_at: string;
+  updated_at: string;
+  history: AppointmentHistoryEntry[];
+  /** Questionnaire responses side-loaded for the detail view. */
+  responses: QuestionnaireResponse[];
 }
 
 export interface AvailabilityRule {
   id: string;
+  doctor_id: string;
   day_of_week: number | null;
   start_time: string;
   end_time: string;
   recurrence: string;
+  valid_from: string | null;
+  valid_to: string | null;
+  created_at: string;
 }
 
 export interface BlockedSlot {
   id: string;
+  doctor_id: string;
   start_datetime: string;
   end_datetime: string;
   reason: string;
@@ -73,7 +161,7 @@ export interface DoctorCalendar {
   calendar: Calendar;
   rules: AvailabilityRule[];
   blocks: BlockedSlot[];
-  live_appointments: Appointment[];
+  live_appointments: DoctorAppointment[];
 }
 
 export interface QuestionnaireResponse {
@@ -83,6 +171,35 @@ export interface QuestionnaireResponse {
   answers: Record<string, unknown>;
   completed: boolean;
   completed_at: string | null;
+  flagged?: boolean;
+  escalation_id?: string | null;
+}
+
+export interface DoctorQuestionnaireItem {
+  appointment_id: string;
+  patient_id: string;
+  patient_name: string;
+  slot_start: string;
+  slot_end: string;
+  state: string;
+  responses: QuestionnaireResponse[];
+}
+
+export interface BackendNotification {
+  id: string;
+  channel: string;
+  type: string;
+  status: string;
+  subject: string | null;
+  body: string | null;
+  error: string | null;
+  sent_at: string | null;
+  created_at: string;
+}
+
+export interface Slot {
+  start: string;
+  end: string;
 }
 
 export async function login(email: string, password: string): Promise<void> {
@@ -93,4 +210,137 @@ export async function login(email: string, password: string): Promise<void> {
 export async function me(): Promise<CurrentUser> {
   const { data } = await api.get("/auth/me");
   return data;
+}
+
+export async function myProfile(): Promise<DoctorProfile> {
+  return (await api.get("/doctors/me")).data;
+}
+
+export async function updateMyProfile(
+  patch: DoctorSelfUpdate,
+): Promise<DoctorProfile> {
+  return (await api.put("/doctors/me", patch)).data;
+}
+
+export async function myAppointments(
+  range: "today" | "upcoming" = "upcoming",
+): Promise<DoctorAppointment[]> {
+  return (await api.get("/doctors/me/appointments", { params: { range } })).data;
+}
+
+export async function appointmentDetail(id: string): Promise<AppointmentDetail> {
+  // GET /appointments/{id} already embeds `history`; responses ride along
+  // so the detail view renders without extra lookups.
+  const [detail, responses] = await Promise.all([
+    api.get(`/appointments/${id}`).then((r) => r.data),
+    questionnaireResponses(id).catch(() => [] as QuestionnaireResponse[]),
+  ]);
+  return { ...detail, responses };
+}
+
+export async function myCalendar(): Promise<DoctorCalendar> {
+  const data = (await api.get("/doctors/me/calendar")).data;
+  return {
+    calendar: data.calendar,
+    rules: data.rules,
+    blocks: data.blocks,
+    // /doctors/me/calendar names the live list `live_appointments`
+    live_appointments: data.live_appointments ?? data.live ?? [],
+  };
+}
+
+export async function listRules(
+  hospitalId: string,
+  doctorId: string,
+): Promise<AvailabilityRule[]> {
+  return (
+    await api.get(`/hospitals/${hospitalId}/doctors/${doctorId}/availability-rules`)
+  ).data;
+}
+
+export async function createRule(
+  hospitalId: string,
+  doctorId: string,
+  body: {
+    day_of_week: number | null;
+    start_time: string;
+    end_time: string;
+    recurrence?: string;
+  },
+): Promise<AvailabilityRule> {
+  return (
+    await api.post(
+      `/hospitals/${hospitalId}/doctors/${doctorId}/availability-rules`,
+      { recurrence: "weekly", ...body },
+    )
+  ).data;
+}
+
+export async function deleteRule(
+  hospitalId: string,
+  doctorId: string,
+  ruleId: string,
+): Promise<void> {
+  await api.delete(
+    `/hospitals/${hospitalId}/doctors/${doctorId}/availability-rules/${ruleId}`,
+  );
+}
+
+export async function listBlocks(
+  hospitalId: string,
+  doctorId: string,
+): Promise<BlockedSlot[]> {
+  return (
+    await api.get(`/hospitals/${hospitalId}/doctors/${doctorId}/blocked-slots`)
+  ).data;
+}
+
+export async function createBlock(
+  hospitalId: string,
+  doctorId: string,
+  body: { start_datetime: string; end_datetime: string; reason?: string },
+): Promise<BlockedSlot> {
+  return (
+    await api.post(
+      `/hospitals/${hospitalId}/doctors/${doctorId}/blocked-slots`,
+      body,
+    )
+  ).data;
+}
+
+export async function deleteBlock(
+  hospitalId: string,
+  doctorId: string,
+  blockId: string,
+): Promise<void> {
+  await api.delete(
+    `/hospitals/${hospitalId}/doctors/${doctorId}/blocked-slots/${blockId}`,
+  );
+}
+
+export async function updateCalendar(
+  hospitalId: string,
+  doctorId: string,
+  isActive: boolean,
+): Promise<Calendar> {
+  return (
+    await api.put(`/hospitals/${hospitalId}/doctors/${doctorId}/calendar`, {
+      is_active: isActive,
+    })
+  ).data;
+}
+
+export async function questionnaireResponses(
+  appointmentId: string,
+): Promise<QuestionnaireResponse[]> {
+  return (await api.get(`/appointments/${appointmentId}/questionnaire/responses`))
+    .data;
+}
+
+export async function questionnaireInbox(): Promise<DoctorQuestionnaireItem[]> {
+  return (await api.get("/doctors/me/questionnaire-responses")).data;
+}
+
+export async function fetchNotifications(): Promise<BackendNotification[]> {
+  return (await api.get("/notifications")).data;
 }
