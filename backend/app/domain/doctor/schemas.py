@@ -4,10 +4,11 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain.appointment.schemas import AppointmentOut
 from app.domain.doctor.models import DoctorStatus
+from app.domain.questionnaire.schemas import ResponseOut
 from app.domain.scheduling.schemas import (
     AvailabilityRuleOut,
     BlockedSlotOut,
@@ -60,6 +61,59 @@ class DoctorOut(BaseModel):
     status: DoctorStatus
     created_at: datetime
     updated_at: datetime
+
+
+class DoctorSelfUpdateIn(BaseModel):
+    """Self-service profile edit for a doctor login.
+
+    Restricted to presentation/practice fields only — specialty,
+    department, status,     hospital linkage and login linkage stay
+    hospital-admin managed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    photo_url: str | None = Field(default=None, max_length=1000)
+    qualifications: dict[str, Any] | None = None
+    experience_years: int | None = Field(default=None, ge=0)
+    languages: list[str] | None = None
+    consultation_types: list[str] | None = None
+    default_duration_minutes: int | None = Field(default=None, gt=0)
+
+
+class DoctorAppointmentOut(BaseModel):
+    """Enriched appointment row for the doctor dashboard.
+
+    Patient display names come from PatientProfile/User so the portal
+    renders today/upcoming/detail without extra lookups.
+    """
+
+    id: uuid.UUID
+    patient_id: uuid.UUID
+    patient_name: str
+    patient_email: str | None = None
+    patient_phone: str | None = None
+    doctor_id: uuid.UUID
+    appointment_type_id: uuid.UUID
+    appointment_type_name: str
+    slot_start: datetime
+    slot_end: datetime
+    state: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class DoctorQuestionnaireItemOut(BaseModel):
+    """One appointment with its questionnaire responses for the doctor inbox."""
+
+    appointment_id: uuid.UUID
+    patient_id: uuid.UUID
+    patient_name: str
+    slot_start: datetime
+    slot_end: datetime
+    state: str
+    responses: list[ResponseOut]
 
 
 class DoctorCalendarOut(BaseModel):

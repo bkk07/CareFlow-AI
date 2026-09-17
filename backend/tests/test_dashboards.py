@@ -370,6 +370,54 @@ def test_platform_ai_evaluation_aggregates(client, stub_integration, tool_factor
     assert evaluation["error_rate"] > 0
 
 
+# -- platform aggregates -------------------------------------------------------------
+
+
+def test_platform_overview_integrations_analytics(client, stub_integration):
+    setup = seed_setup(client, tag="platagg")
+    book(client, setup, "plat-agg-1", hour=9)
+    platform_h = setup["hosp"]["platform"]
+    assert (
+        client.post(
+            "/mcp/call", json={"tool": "search_doctors", "input": {}},
+            headers=setup["hosp"]["owner"],
+        ).status_code
+        == 200
+    )
+
+    overview = client.get("/platform/overview", headers=platform_h)
+    assert overview.status_code == 200, overview.text
+    body = overview.json()
+    assert body["hospitals_total"] >= 1
+    assert body["doctors_total"] >= 1
+    assert body["doctors_active"] >= 1
+    assert body["patients_total"] >= 1
+    assert body["appointments_today"] >= 0
+    assert "pending_applications" in body
+    assert "open_reconciliations" in body
+    assert "open_escalations" in body
+
+    integrations = client.get("/platform/integrations", headers=platform_h).json()
+    assert len(integrations["integrations"]) >= 1
+    entry = next(
+        i for i in integrations["integrations"] if i["hospital_id"] == setup["hid"]
+    )
+    assert entry["hospital_name"]
+    assert entry["operations_total"] >= 1
+    assert entry["vendor_mappings"] >= 1
+
+    analytics = client.get("/platform/analytics", headers=platform_h).json()
+    assert analytics["appointments_total"] >= 1
+    assert analytics["appointments_by_state"].get("confirmed", 0) >= 1
+    assert isinstance(analytics["bookings_per_day_30d"], dict)
+    assert analytics["ai_executions_total"] >= 1
+
+    # Hospital admins are locked out of the platform surface.
+    assert client.get("/platform/overview", headers=setup["hosp"]["owner"]).status_code == 403
+    assert client.get("/platform/integrations", headers=setup["hosp"]["owner"]).status_code == 403
+    assert client.get("/platform/analytics", headers=setup["hosp"]["owner"]).status_code == 403
+
+
 # -- HITL resolve moves real state ---------------------------------------------------
 
 
@@ -424,3 +472,128 @@ def test_resolve_with_final_state_moves_booking(client, db, stub_integration, fa
     assert resolved.status_code == 200, resolved.text
     assert resolved.json()["resolution_status"] == "resolved"
     assert db.get(Appointment, uuid.UUID(parked["id"])).state.value == "cancelled"
+
+
+# -- doctor 10/10: self-update, enriched reads, inbox ----------------------------
+
+
+def test_doctor_self_update_profile(client, stub_integration):
+    setup = seed_setup(client, tag="docself")
+    login = register_doctor_login(client, setup["hid"], "docself")
+    link_doctor(client, setup, login["id"])
+    h = login["headers"]
+
+    # Patient logins cannot touch the doctor self endpoint.
+    assert (
+        client.put("/doctors/me", json={"name": "X"}, headers=setup["patient"]["headers"]).status_code
+        == 403
+    )
+
+    updated = client.put(
+        "/doctors/me",
+        json={
+            "name": "Dr. Self Edit",
+            "experience_years": 15,
+            "languages": ["en", "es"],
+            "consultation_types": ["in_person", "video"],
+            "default_duration_minutes": 45,
+        },
+        headers=h,
+    )
+    assert updated.status_code == 200, updated.text
+    body = updated.json()
+    assert body["name"] == "Dr. Self Edit"
+    assert body["experience_years"] == 15
+    assert body["languages"] == ["en", "es"]
+    assert body["default_duration_minutes"] == 45
+
+    # Admin-managed fields are not part of the self schema → 422, never applied.
+    rejected = client.put(
+        "/doctors/me", json={"status": "suspended"}, headers=h
+    )
+    assert rejected.status_code == 422
+    me = client.get("/doctors/me", headers=h).json()
+    assert me["status"] != "suspended"
+
+
+def test_doctor_appointments_enriched_and_detail_scoped(client, stub_integration):
+    setup = seed_setup(client, tag="docenr")
+    login = register_doctor_login(client, setup["hid"], "docenr")
+    link_doctor(client, setup, login["id"])
+    h = login["headers"]
+
+    appt = book(client, setup, "doc-enr-1", hour=9)
+
+    upcoming = client.get("/doctors/me/appointments?range=upcoming", headers=h)
+    assert upcoming.status_code == 200
+    rows = upcoming.json()
+    assert len(rows) >= 1
+    row = next(r for r in rows if r["id"] == appt["id"])
+    assert row["patient_id"] == setup["patient"]["id"]
+    assert row["patient_name"]
+    assert row["appointment_type_name"]
+    assert row["slot_start"]
+
+    # Raw detail read works for the owning doctor…
+    detail = client.get(f"/appointments/{appt['id']}", headers=h)
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["id"] == appt["id"]
+
+    # …but not for a doctor of another hospital.
+    stranger = seed_setup(client, tag="docenr2")
+    stranger_login = register_doctor_login(client, stranger["hid"], "docenr2")
+    link_doctor(client, stranger, stranger_login["id"])
+    cross = client.get(f"/appointments/{appt['id']}", headers=stranger_login["headers"])
+    assert cross.status_code == 403
+
+    # …and not for a patient who does not own it.
+    other_patient_headers = stranger["patient"]["headers"]
+    denied = client.get(f"/appointments/{appt['id']}", headers=other_patient_headers)
+    assert denied.status_code == 403
+
+
+def test_doctor_notifications_inbox(client, stub_integration):
+    setup = seed_setup(client, tag="docnot")
+    login = register_doctor_login(client, setup["hid"], "docnot")
+    link_doctor(client, setup, login["id"])
+
+    # Empty inbox reads fine.
+    empty = client.get("/notifications", headers=login["headers"])
+    assert empty.status_code == 200
+    assert empty.json() == []
+
+    # Hospital admin pushes an in-app note to the doctor login.
+    sent = client.post(
+        "/mcp/call",
+        json={
+            "tool": "send_notification",
+            "input": {
+                "recipient_user_id": login["id"],
+                "channel": "in_app",
+                "message": "New booking: 9 AM follow-up",
+            },
+        },
+        headers=setup["hosp"]["owner"],
+    )
+    assert sent.status_code == 200, sent.text
+
+    inbox = client.get("/notifications", headers=login["headers"]).json()
+    assert len(inbox) == 1
+    assert inbox[0]["body"] == "New booking: 9 AM follow-up"
+
+
+def test_doctor_questionnaire_inbox_aggregated(client, stub_integration):
+    setup, _, _ = setup_with_form(client, tag="docinbox")
+    login = register_doctor_login(client, setup["hid"], "docinbox")
+    link_doctor(client, setup, login["id"])
+    h = login["headers"]
+
+    appt = book(client, setup, "doc-inbox-1")
+    inbox = client.get("/doctors/me/questionnaire-responses", headers=h)
+    assert inbox.status_code == 200, inbox.text
+    items = inbox.json()
+    assert len(items) >= 1
+    item = next(i for i in items if i["appointment_id"] == appt["id"])
+    assert item["patient_id"] == setup["patient"]["id"]
+    assert item["patient_name"]
+    assert isinstance(item["responses"], list)

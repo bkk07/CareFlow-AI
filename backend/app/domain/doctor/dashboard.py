@@ -13,7 +13,10 @@ from sqlalchemy.orm import Session
 from app.core.deps import RequestContext
 from app.domain.appointment.models import Appointment
 from app.domain.appointment.state_machine import LIVE_STATES
+from app.domain.auth.models import User
 from app.domain.doctor.models import Doctor
+from app.domain.hospital_config.models import AppointmentType
+from app.domain.patient.models import PatientProfile
 from app.domain.scheduling import service as scheduling_service
 from app.domain.scheduling.availability import as_utc
 from app.domain.scheduling.models import AvailabilityRule, BlockedSlot
@@ -103,4 +106,108 @@ def calendar_for(session: Session, doctor: Doctor) -> dict:
     return {"calendar": calendar, "rules": rules, "blocks": blocks, "live": live}
 
 
-__all__ = ["appointments_for", "calendar_for", "get_linked_doctor"]
+def _patient_display(
+    session: Session, patient_id
+) -> tuple[str, str | None, str | None]:
+    """(name, email, phone) for a patient user, with graceful fallbacks."""
+    user = session.get(User, patient_id)
+    profile = (
+        session.query(PatientProfile)
+        .filter(PatientProfile.patient_user_id == patient_id)
+        .first()
+    )
+    name = (
+        profile.full_name
+        if (profile and profile.full_name)
+        else (user.email.split("@")[0] if user else "Patient")
+    )
+    email = user.email if user else None
+    phone = profile.phone if profile and profile.phone else None
+    return name, email, phone
+
+
+def enriched_appointments(
+    session: Session, doctor: Doctor, *, day
+) -> tuple[list[dict], list[dict]]:
+    """(today, upcoming) enriched rows for the doctor portal list views."""
+    today_rows, upcoming_rows = appointments_for(session, doctor, day=day)
+
+    def enrich(row: Appointment) -> dict:
+        name, email, phone = _patient_display(session, row.patient_id)
+        appt_type = session.get(AppointmentType, row.appointment_type_id)
+        return {
+            "id": row.id,
+            "patient_id": row.patient_id,
+            "patient_name": name,
+            "patient_email": email,
+            "patient_phone": phone,
+            "doctor_id": row.doctor_id,
+            "appointment_type_id": row.appointment_type_id,
+            "appointment_type_name": appt_type.name
+            if appt_type is not None
+            else "Visit",
+            "slot_start": row.slot_start,
+            "slot_end": row.slot_end,
+            "state": row.state.value
+            if hasattr(row.state, "value")
+            else str(row.state),
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+        }
+
+    return [enrich(r) for r in today_rows], [enrich(r) for r in upcoming_rows]
+
+
+def questionnaire_inbox(session: Session, doctor: Doctor) -> list[dict]:
+    """Every own appointment (newest first) with its responses attached."""
+    from app.domain.questionnaire.models import QuestionnaireResponse
+    from app.domain.questionnaire.schemas import ResponseOut
+
+    rows = (
+        session.query(Appointment)
+        .filter(Appointment.doctor_id == doctor.id)
+        .order_by(Appointment.slot_start.desc())
+        .all()
+    )
+    inbox: list[dict] = []
+    for appt in rows:
+        responses = (
+            session.query(QuestionnaireResponse)
+            .filter(QuestionnaireResponse.appointment_id == appt.id)
+            .order_by(QuestionnaireResponse.created_at)
+            .all()
+        )
+        name, _, _ = _patient_display(session, appt.patient_id)
+        inbox.append(
+            {
+                "appointment_id": appt.id,
+                "patient_id": appt.patient_id,
+                "patient_name": name,
+                "slot_start": appt.slot_start,
+                "slot_end": appt.slot_end,
+                "state": appt.state.value
+                if hasattr(appt.state, "value")
+                else str(appt.state),
+                "responses": [
+                    ResponseOut(
+                        id=r.id,
+                        appointment_id=r.appointment_id,
+                        questionnaire_id=r.questionnaire_id,
+                        answers=r.answers,
+                        completed=r.completed_at is not None,
+                        completed_at=r.completed_at,
+                    )
+                    for r in responses
+                ],
+            }
+        )
+    return inbox
+
+
+__all__ = [
+    "appointments_for",
+    "calendar_for",
+    "enriched_appointments",
+    "get_linked_doctor",
+    "questionnaire_inbox",
+]

@@ -1,4 +1,4 @@
-"""Notification endpoints: patients read their own inbox."""
+"""Notification endpoints: patients and doctors read their own inbox."""
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -11,7 +11,7 @@ from app.notification.schemas import NotificationOut
 
 router = APIRouter(tags=["notifications"])
 
-_reader = require_role(Role.patient)
+_reader = require_role(Role.patient, Role.doctor)
 
 
 @router.get("/notifications", response_model=list[NotificationOut])

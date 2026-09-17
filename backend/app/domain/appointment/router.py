@@ -1,7 +1,8 @@
 """Appointment endpoints (internal-facing; wrapped as MCP tools in Phase 9).
 
 Mutations are open to the owning patient and to hospital_admins of the
-appointment's hospital. Reads additionally allow platform_admin.
+appointment's hospital. Reads additionally allow the owning doctor and
+platform_admin.
 `get_integration_service` is a dependency (not a singleton) so tests can
 inject a stub connector while production uses real HTTP.
 """
@@ -37,7 +38,9 @@ from app.integration.integration_service import IntegrationService
 router = APIRouter(tags=["appointments"])
 
 _booker = require_role(Role.patient, Role.hospital_admin)
-_reader = require_role(Role.patient, Role.hospital_admin, Role.platform_admin)
+_reader = require_role(
+    Role.patient, Role.hospital_admin, Role.platform_admin, Role.doctor
+)
 
 
 def get_integration_service(db: Session = Depends(get_db)) -> IntegrationService:
@@ -64,8 +67,14 @@ def _resolve_booking_scope(
 
 
 def _check_appointment_access(
-    ctx: RequestContext, appointment: Appointment
+    ctx: RequestContext, appointment: Appointment, db: Session | None = None
 ) -> None:
+    """Shared access gate (also imported by MCP tools with (ctx, appointment)).
+
+    Doctors see only their own linked calendar's appointments, which needs
+    `db`; callers without a session (MCP tools today run with one too, but
+    the parameter stays optional for compatibility) deny doctor access.
+    """
     if ctx.role == Role.platform_admin:
         return
     if ctx.role == Role.patient and appointment.patient_id == ctx.user_id:
@@ -75,6 +84,19 @@ def _check_appointment_access(
         and ctx.hospital_id == appointment.hospital_id
     ):
         return
+    if ctx.role == Role.doctor and db is not None:
+        # Doctors see only their own linked calendar's appointments.
+        from app.domain.doctor import dashboard as doctor_dashboard
+
+        try:
+            linked = doctor_dashboard.get_linked_doctor(db, ctx)
+        except HTTPException:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not allowed to access this appointment",
+            ) from None
+        if appointment.doctor_id == linked.id:
+            return
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Not allowed to access this appointment",
@@ -173,6 +195,19 @@ def list_appointments(
                 detail="Patients can only list their own appointments",
             )
         patient_id = ctx.user_id
+    elif ctx.role == Role.doctor:
+        from app.domain.doctor import dashboard as doctor_dashboard
+
+        linked = doctor_dashboard.get_linked_doctor(db, ctx)
+        if doctor_id is not None and doctor_id != linked.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Doctors can only list their own appointments",
+            )
+        doctor_id = linked.id
+        if patient_id is not None:
+            # Patient filter is allowed (search within own calendar).
+            pass
     elif ctx.role == Role.hospital_admin:
         if hospital_id is not None and hospital_id != ctx.hospital_id:
             raise HTTPException(
@@ -203,7 +238,7 @@ def get_appointment(
     ctx: RequestContext = Depends(_reader),
 ) -> AppointmentDetailOut:
     appointment = service.get_appointment_or_404(db, appointment_id)
-    _check_appointment_access(ctx, appointment)
+    _check_appointment_access(ctx, appointment, db)
     history = _history_for(db, appointment.id)
     return AppointmentDetailOut(
         id=appointment.id,
@@ -234,7 +269,7 @@ def reschedule_appointment(
     integration: IntegrationService = Depends(get_integration_service),
 ) -> Appointment:
     appointment = service.get_appointment_or_404(db, appointment_id)
-    _check_appointment_access(ctx, appointment)
+    _check_appointment_access(ctx, appointment, db)
     hospital = get_hospital_or_404(db, appointment.hospital_id)
     try:
         return service.reschedule_appointment(
@@ -262,7 +297,7 @@ def cancel_appointment(
     integration: IntegrationService = Depends(get_integration_service),
 ) -> Appointment:
     appointment = service.get_appointment_or_404(db, appointment_id)
-    _check_appointment_access(ctx, appointment)
+    _check_appointment_access(ctx, appointment, db)
     try:
         return service.cancel_appointment(
             db,

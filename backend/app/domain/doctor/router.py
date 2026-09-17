@@ -9,14 +9,16 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.deps import RequestContext, require_role
 from app.core.tenant import hospital_scoped_query
-from app.domain.appointment.schemas import AppointmentOut
 from app.domain.auth.models import Role
 from app.domain.doctor import dashboard, service
 from app.domain.doctor.models import Doctor
 from app.domain.doctor.schemas import (
+    DoctorAppointmentOut,
     DoctorCalendarOut,
     DoctorCreateIn,
     DoctorOut,
+    DoctorQuestionnaireItemOut,
+    DoctorSelfUpdateIn,
     DoctorUpdateIn,
 )
 from app.domain.hospital.deps import require_managed_hospital
@@ -120,7 +122,39 @@ def get_my_profile(
     return dashboard.get_linked_doctor(db, ctx)
 
 
-@router.get("/doctors/me/appointments", response_model=list[AppointmentOut])
+@router.put("/doctors/me", response_model=DoctorOut)
+def update_my_profile(
+    body: DoctorSelfUpdateIn,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_doctor),
+) -> Doctor:
+    """Self-service edit: presentation/practice fields only.
+
+    Specialty, department, status and hospital linkage stay
+    hospital-admin managed — the schema simply has no such fields.
+    """
+    from app.domain.hospital.models import Hospital as HospitalModel
+
+    doctor = dashboard.get_linked_doctor(db, ctx)
+    hospital = db.get(HospitalModel, doctor.hospital_id)
+    data = body.model_dump(exclude_unset=True)
+    allowed = {
+        "name",
+        "photo_url",
+        "qualifications",
+        "experience_years",
+        "languages",
+        "consultation_types",
+        "default_duration_minutes",
+    }
+    safe = {k: v for k, v in data.items() if k in allowed}
+    if not safe:
+        return doctor
+    update_body = DoctorUpdateIn(**safe)
+    return service.update_doctor(db, hospital, doctor, update_body)
+
+
+@router.get("/doctors/me/appointments", response_model=list[DoctorAppointmentOut])
 def get_my_appointments(
     range: str = "upcoming",
     db: Session = Depends(get_db),
@@ -132,10 +166,23 @@ def get_my_appointments(
             detail="range must be 'today' or 'upcoming'",
         )
     doctor = dashboard.get_linked_doctor(db, ctx)
-    today, upcoming = dashboard.appointments_for(
+    today, upcoming = dashboard.enriched_appointments(
         db, doctor, day=datetime.now(timezone.utc)
     )
     return today if range == "today" else upcoming
+
+
+@router.get(
+    "/doctors/me/questionnaire-responses",
+    response_model=list[DoctorQuestionnaireItemOut],
+)
+def get_my_questionnaire_inbox(
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_doctor),
+) -> list:
+    """All own appointments (newest first) with responses attached."""
+    doctor = dashboard.get_linked_doctor(db, ctx)
+    return dashboard.questionnaire_inbox(db, doctor)
 
 
 @router.get("/doctors/me/calendar", response_model=DoctorCalendarOut)
