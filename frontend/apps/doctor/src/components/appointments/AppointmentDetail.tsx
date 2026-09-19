@@ -1,6 +1,6 @@
 import { CalendarDays, CheckCircle2, Clock, FileText } from "lucide-react";
 import type { Appointment, Questionnaire } from "../../types";
-import { consultationModeLabel } from "../../mock/services";
+import { consultationModeLabel } from "../../lib/helpers";
 import { Avatar, StatusBadge } from "../common/ui";
 import { Button } from "../common/ui";
 import { Link } from "react-router-dom";

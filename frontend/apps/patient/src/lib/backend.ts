@@ -161,6 +161,7 @@ export function mapSlot(s: Slot, index: number): TimeSlot {
 /** Backend doctor search hit -> Doctor card model (directory has no photos/bios). */
 export function mapDoctorResult(d: DoctorResult): Doctor {
   const modes: ConsultationMode[] = ["in_person", "video"];
+  const where = d.hospital_city ? `${d.hospital_name} · ${d.hospital_city}` : d.hospital_name;
   return {
     id: d.id,
     name: d.name,
@@ -171,7 +172,7 @@ export function mapDoctorResult(d: DoctorResult): Doctor {
     experienceYears: 0,
     languages: ["English"],
     hospitalId: d.hospital_id,
-    hospitalName: d.hospital_name,
+    hospitalName: d.distance_km != null ? `${where} · ${d.distance_km.toFixed(1)} km away` : where,
     photo: "",
     consultationModes: modes,
     rating: 0,
@@ -179,15 +180,19 @@ export function mapDoctorResult(d: DoctorResult): Doctor {
     nextAvailable: "Check availability",
     about: `${d.name}${d.specialty ? ` · ${d.specialty}` : ""} at ${d.hospital_name}.`,
     areasOfPractice: d.specialty ? [d.specialty] : [],
+    distanceKm: d.distance_km ?? null,
   };
 }
 
 /** Backend hospital search hit -> Hospital card model. */
 export function mapHospitalResult(h: Hospital): UIHospital {
+  const location = h.distance_km != null
+    ? `${h.city ?? ""} · ${h.distance_km.toFixed(1)} km away`.replace(/^ · /, "")
+    : (h.city ?? "");
   return {
     id: h.id,
     name: h.name,
-    location: "",
+    location,
     image: "",
     departments: [],
     specialties: [],
@@ -195,6 +200,7 @@ export function mapHospitalResult(h: Hospital): UIHospital {
     rating: 0,
     consultationTypes: ["in_person", "video"],
     about: h.name,
+    distanceKm: h.distance_km ?? null,
   };
 }
 

@@ -6,7 +6,6 @@ import type {
   DoctorProfile,
   DoctorQuestionnaireItem,
 } from "../api";
-import { CURRENT_DOCTOR } from "../mock/doctors";
 import type {
   Appointment,
   AppointmentStatus,
@@ -138,31 +137,34 @@ export function mapDoctorAppointment(
   };
 }
 
-/** Backend profile -> portal Doctor. Reference names (specialty /
- *  department / hospital) are display-only and stay local: the API exposes
- *  ids, so live mode keeps the portal's labels and syncs the clinical fields.
+/** Backend profile -> portal Doctor. Live-backend-only: every field comes
+ *  from the API. Reference names (specialty / department / hospital) have no
+ *  backend endpoint, so they render empty until the backend provides them.
  */
 export function mapDoctorProfile(p: DoctorProfile): Doctor {
   const qualifications =
     typeof p.qualifications === "object" && p.qualifications !== null
-      ? (Object.values(p.qualifications).join(", ") || CURRENT_DOCTOR.qualifications)
-      : CURRENT_DOCTOR.qualifications;
+      ? Object.values(p.qualifications).join(", ")
+      : "";
   const modes = (p.consultation_types ?? []).filter((m): m is Doctor["consultationTypes"][number] =>
     ["in_person", "video", "phone"].includes(m),
   );
   return {
-    ...CURRENT_DOCTOR,
     id: p.id,
     name: p.name,
+    specialty: "",
+    department: "",
     qualifications,
     experienceYears: p.experience_years,
-    languages: p.languages.length > 0 ? p.languages : CURRENT_DOCTOR.languages,
-    consultationTypes: modes.length > 0 ? modes : CURRENT_DOCTOR.consultationTypes,
+    languages: p.languages ?? [],
+    hospital: "",
+    consultationTypes: modes,
     appointmentDuration: p.default_duration_minutes,
     status: (["invited", "active", "inactive", "suspended"].includes(p.status)
       ? p.status
-      : CURRENT_DOCTOR.status) as Doctor["status"],
+      : "active") as Doctor["status"],
     photo: p.photo_url ?? "",
+    acceptingAppointments: true,
   };
 }
 

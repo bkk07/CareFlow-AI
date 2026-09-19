@@ -1,0 +1,24 @@
+# Local alt-ports override — keeps ai-study (8000/6379) running.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.alt-ports.yml up -d --build redis backend
+services:
+  redis:
+    ports:
+      - "6380:6379"
+  backend:
+    ports:
+      - "8001:8000"
+  frontend:
+    ports:
+      - "5178:5173"
+    environment:
+      VITE_API_URL: http://localhost:8001
+  hospital-admin:
+    ports:
+      - "5179:5174"
+    environment:
+      VITE_API_URL: http://localhost:8001
+  doctor:
+    ports:
+      - "5180:5177"
+    environment:
+      VITE_API_URL: http://localhost:8001

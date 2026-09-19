@@ -2,13 +2,12 @@ import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useSchedule } from "../context/ScheduleContext";
 import { AppointmentCard } from "../components/appointments/AppointmentCard";
-import { EmptyState } from "../components/common/ui";
+import { CardSkeleton, EmptyState, ErrorState } from "../components/common/ui";
 
 export default function TodayPage() {
-  const { appointments, blocks, live, loading } = useSchedule();
+  const { appointments, blocks, loading, error, refresh } = useSchedule();
   const today = useMemo(() => appointments.filter((a) => a.dayGroup === "today").sort((x, y) => x.sortKey.localeCompare(y.sortKey)), [appointments]);
   const todayBlocks = useMemo(() => {
-    if (!live) return blocks.filter((b) => b.date === "Today");
     // Live blocks carry formatted dates like "Fri, Sep 26" — match today's label.
     const label = new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
     const todayShort = new Date().toDateString();
@@ -20,7 +19,7 @@ export default function TodayPage() {
         return b.date === label;
       }
     });
-  }, [blocks, live]);
+  }, [blocks]);
 
   return (
     <div className="space-y-4">
@@ -29,11 +28,18 @@ export default function TodayPage() {
         <p className="page-sub mt-1">{today.length} appointments · {todayBlocks.length} blocked periods. Times in local time.</p>
       </div>
 
-      {live && loading && (
-        <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">Syncing live schedule…</p>
-      )}
+      <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">
+        {loading ? "Syncing live schedule…" : "Live schedule from your hospital"}
+      </p>
 
-      {today.length === 0 ? (
+      {error && <ErrorState title="Could not load today's schedule" body={error} onRetry={() => void refresh()} />}
+
+      {loading && today.length === 0 && !error ? (
+        <div className="space-y-2.5">
+          <CardSkeleton lines={3} />
+          <CardSkeleton lines={3} />
+        </div>
+      ) : today.length === 0 ? (
         <div className="card-base"><EmptyState title="No appointments today" body="Your upcoming schedule is clear. Blocked time and new bookings will appear here." /></div>
       ) : (
         <ol className="space-y-2.5" aria-label="Today appointments timeline">

@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 import { Clock, MapPin, Star } from "lucide-react";
 import type { Doctor, Hospital } from "../../types";
-import { consultationModeLabel } from "../../mock/services";
+import { consultationModeLabel } from "../../lib/helpers";
 import { Button, SafeImage, StatusBadge } from "../common/ui";
 
 export function DoctorCard({

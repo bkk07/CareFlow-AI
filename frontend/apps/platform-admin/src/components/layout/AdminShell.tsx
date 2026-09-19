@@ -14,7 +14,7 @@ import {
   Users,
   Workflow,
 } from "lucide-react";
-import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { useAdmin } from "../../store/AdminStore";
 import { Avatar } from "../common/ui";
@@ -58,7 +58,6 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const { logout, unread, notifications, markAllRead, user, live } = useAdmin();
   const [panelOpen, setPanelOpen] = useState(false);
   const navigate = useNavigate();
-  const location = useLocation();
 
   return (
     <div className="min-h-screen bg-background">
@@ -120,7 +119,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       </header>
 
       <div className="md:pl-[252px]">
-        <main key={location.pathname} className="shell-container pt-5">{children}</main>
+        <main className="shell-container pt-5">{children}</main>
       </div>
 
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-border px-2 pt-1.5 pb-[calc(0.4rem+env(safe-area-inset-bottom))] overflow-x-auto no-scrollbar" aria-label="Mobile">

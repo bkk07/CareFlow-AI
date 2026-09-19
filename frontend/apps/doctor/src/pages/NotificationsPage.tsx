@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { useSchedule } from "../context/ScheduleContext";
-import { EmptyState } from "../components/common/ui";
+import { CardSkeleton, EmptyState, ErrorState } from "../components/common/ui";
 import { Tabs } from "../components/common/Modal";
 import type { NotificationCategory } from "../types";
 
@@ -14,7 +14,7 @@ const LABEL: Record<NotificationCategory, string> = {
 };
 
 export default function NotificationsPage() {
-  const { notifications, markRead, markAllRead, live, loading, refresh } = useSchedule();
+  const { notifications, markRead, markAllRead, loading, error, refresh } = useSchedule();
   const [filter, setFilter] = useState<Filter>("all");
   const visible = useMemo(
     () => notifications.filter((n) => (filter === "all" ? true : n.category === filter)),
@@ -31,14 +31,14 @@ export default function NotificationsPage() {
         <button onClick={markAllRead} className="text-[0.83rem] font-bold text-healthcare hover:underline">Mark all read</button>
       </div>
 
-      {live && (
-        <div className="flex items-center gap-2">
-          <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">
-            {loading ? "Syncing inbox…" : "Live inbox from your hospital"}
-          </p>
-          <button onClick={() => void refresh()} className="text-[0.8rem] font-bold text-healthcare hover:underline">Refresh</button>
-        </div>
-      )}
+      <div className="flex items-center gap-2">
+        <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">
+          {loading ? "Syncing inbox…" : "Live inbox from your hospital"}
+        </p>
+        <button onClick={() => void refresh()} className="text-[0.8rem] font-bold text-healthcare hover:underline">Refresh</button>
+      </div>
+
+      {error && <ErrorState title="Could not load notifications" body={error} onRetry={() => void refresh()} />}
 
       <div className="card-base px-2">
         <Tabs<Filter>
@@ -48,7 +48,9 @@ export default function NotificationsPage() {
         />
       </div>
 
-      {visible.length === 0 ? (
+      {loading && visible.length === 0 && !error ? (
+        <CardSkeleton lines={4} />
+      ) : visible.length === 0 ? (
         <div className="card-base"><EmptyState title="No notifications" body="You're all caught up. New bookings and form completions will appear here." /></div>
       ) : (
         <div className="card-base divide-y divide-border overflow-hidden">

@@ -2,8 +2,8 @@
 
 Token shapes:
 - access:  {"sub": user_id, "role": ..., "hospital_id": ...|None,
-             "type": "access", "exp": now+15min}
-- refresh: {"sub": user_id, "type": "refresh", "exp": now+7days}
+             "type": "access", "exp": now+2days}
+- refresh: {"sub": user_id, "type": "refresh", "exp": now+2days}
 
 `hospital_id` inside the access token is a convenience claim only — every
 request re-loads the user row in `get_current_context()` and uses the DB

@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Building2, CheckCircle2, Phone, Plus, Trash2, Video } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useSchedule } from "../context/ScheduleContext";
-import { Button, EmptyState } from "../components/common/ui";
+import { Button, CardSkeleton, EmptyState, ErrorState } from "../components/common/ui";
 import { Modal } from "../components/common/Modal";
 import type { BlockedSlot, ConsultationMode } from "../types";
 
@@ -25,33 +25,25 @@ function todayInput(): string {
 export default function AvailabilityPage() {
   const { doctor, updateDoctor } = useAuth();
   const {
-    live,
     loading,
+    error,
     rules,
     blocks,
     accepting,
     setAccepting,
     toggleRule,
     updateRule,
-    addBlock,
     addLiveBlock,
     deleteBlock,
     refresh,
   } = useSchedule();
   const [blockOpen, setBlockOpen] = useState(false);
-  // Mock-mode block form (display strings, local only).
-  const [date, setDate] = useState("Fri, Sep 26");
-  const [start, setStart] = useState("12:00 PM");
-  const [end, setEnd] = useState("01:00 PM");
-  // Live-mode block form (real datetimes for the API).
   const [liveDate, setLiveDate] = useState(todayInput);
   const [liveStart, setLiveStart] = useState("12:00");
   const [liveEnd, setLiveEnd] = useState("13:00");
   const [reason, setReason] = useState<BlockedSlot["reason"]>("Meeting");
   const [saved, setSaved] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-
-  const acceptingShown = live ? accepting : doctor.acceptingAppointments;
 
   function flash(msg: string) {
     setSaved(msg);
@@ -78,11 +70,6 @@ export default function AvailabilityPage() {
   }
 
   async function flipAccepting() {
-    if (!live) {
-      await updateDoctor({ acceptingAppointments: !doctor.acceptingAppointments });
-      flash("Availability status updated");
-      return;
-    }
     try {
       await setAccepting(!accepting);
       flash("Availability status updated");
@@ -93,13 +80,8 @@ export default function AvailabilityPage() {
 
   async function saveBlock() {
     try {
-      if (live) {
-        await addLiveBlock(liveDate, liveStart, liveEnd, reason);
-        flash(`Blocked ${liveDate} · ${liveStart}–${liveEnd}`);
-      } else {
-        await addBlock({ date, start, end, reason });
-        flash(`Blocked ${date} · ${start}–${end}`);
-      }
+      await addLiveBlock(liveDate, liveStart, liveEnd, reason);
+      flash(`Blocked ${liveDate} · ${liveStart}–${liveEnd}`);
       setBlockOpen(false);
     } catch {
       fail("Could not save blocked time. Check the times and try again.");
@@ -135,13 +117,15 @@ export default function AvailabilityPage() {
       <div>
         <h1 className="page-title">Availability</h1>
         <p className="page-sub mt-1">
-          {live ? "Working hours, visit length, consultation types, and blocked time — synced with your hospital." : "Working hours, visit length, consultation types, and blocked time. All saved locally."}
+          Working hours, visit length, consultation types, and blocked time — synced with your hospital.
         </p>
       </div>
 
-      {live && loading && (
-        <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">Syncing availability…</p>
-      )}
+      <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">
+        {loading ? "Syncing availability…" : "Live availability from your hospital"}
+      </p>
+
+      {error && <ErrorState title="Could not load availability" body={error} onRetry={() => void refresh()} />}
 
       <AnimatePresence>
         {saved && (
@@ -157,34 +141,40 @@ export default function AvailabilityPage() {
       <section className="card-base p-5" aria-label="Availability status">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <h2 className="section-title">{acceptingShown ? "Accepting appointments" : "Not accepting new appointments"}</h2>
+            <h2 className="section-title">{accepting ? "Accepting appointments" : "Not accepting new appointments"}</h2>
             <p className="text-[0.83rem] text-ink-secondary mt-0.5">
-              {acceptingShown ? "Patients can book your open periods." : doctor.status === "suspended" ? "Appointments temporarily unavailable." : "Booking is paused; existing visits stay unchanged."}
+              {accepting ? "Patients can book your open periods." : doctor.status === "suspended" ? "Appointments temporarily unavailable." : "Booking is paused; existing visits stay unchanged."}
             </p>
           </div>
-          <Toggle on={acceptingShown} onChange={() => void flipAccepting()} label="Accepting appointments" />
+          <Toggle on={accepting} onChange={() => void flipAccepting()} label="Accepting appointments" />
         </div>
       </section>
 
       <section className="card-base p-5" aria-label="Working hours">
         <h2 className="section-title">Working hours</h2>
-        <ul className="mt-3 divide-y divide-border">
-          {rules.map((r) => (
-            <li key={r.id} className="py-2.5 flex items-center gap-3 flex-wrap">
-              <span className="w-24 font-bold text-[0.88rem] text-ink">{r.day}</span>
-              <Toggle on={r.enabled} onChange={() => void toggleRule(r.id).catch(() => fail("Could not update working hours."))} label={`${r.day} enabled`} />
-              {r.enabled ? (
-                <span className="flex items-center gap-1.5 text-sm">
-                  <input type="time" value={r.start} onChange={(e) => void updateRule(r.id, { start: e.target.value }).catch(() => fail("Could not update working hours."))} aria-label={`${r.day} start`} className="border border-border rounded-lg px-2 py-1.5 text-sm" />
-                  <span className="text-ink-faint">–</span>
-                  <input type="time" value={r.end} onChange={(e) => void updateRule(r.id, { end: e.target.value }).catch(() => fail("Could not update working hours."))} aria-label={`${r.day} end`} className="border border-border rounded-lg px-2 py-1.5 text-sm" />
-                </span>
-              ) : (
-                <span className="text-[0.82rem] text-ink-faint font-semibold">Closed</span>
-              )}
-            </li>
-          ))}
-        </ul>
+        {loading && rules.length === 0 && !error ? (
+          <div className="mt-3"><CardSkeleton lines={4} /></div>
+        ) : rules.length === 0 ? (
+          <p className="text-[0.83rem] text-ink-secondary mt-2">No working hours yet — they will appear here once your hospital sets them up.</p>
+        ) : (
+          <ul className="mt-3 divide-y divide-border">
+            {rules.map((r) => (
+              <li key={r.id} className="py-2.5 flex items-center gap-3 flex-wrap">
+                <span className="w-24 font-bold text-[0.88rem] text-ink">{r.day}</span>
+                <Toggle on={r.enabled} onChange={() => void toggleRule(r.id).catch(() => fail("Could not update working hours."))} label={`${r.day} enabled`} />
+                {r.enabled ? (
+                  <span className="flex items-center gap-1.5 text-sm">
+                    <input type="time" value={r.start} onChange={(e) => void updateRule(r.id, { start: e.target.value }).catch(() => fail("Could not update working hours."))} aria-label={`${r.day} start`} className="border border-border rounded-lg px-2 py-1.5 text-sm" />
+                    <span className="text-ink-faint">–</span>
+                    <input type="time" value={r.end} onChange={(e) => void updateRule(r.id, { end: e.target.value }).catch(() => fail("Could not update working hours."))} aria-label={`${r.day} end`} className="border border-border rounded-lg px-2 py-1.5 text-sm" />
+                  </span>
+                ) : (
+                  <span className="text-[0.82rem] text-ink-faint font-semibold">Closed</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="card-base p-5" aria-label="Appointment duration">
@@ -248,36 +238,18 @@ export default function AvailabilityPage() {
             ))}
           </ul>
         )}
-        {live && (
-          <button onClick={() => void refresh()} className="mt-3 text-[0.8rem] font-bold text-healthcare hover:underline">Refresh from hospital</button>
-        )}
+        <button onClick={() => void refresh()} className="mt-3 text-[0.8rem] font-bold text-healthcare hover:underline">Refresh from hospital</button>
       </section>
 
       <Modal open={blockOpen} onClose={() => setBlockOpen(false)} title="Block time">
         <div className="space-y-3">
-          {live ? (
-            <>
-              <label className="block text-[0.83rem] font-bold">Date
-                <input type="date" value={liveDate} onChange={(e) => setLiveDate(e.target.value)} className="input-base mt-1" />
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                <label className="block text-[0.83rem] font-bold">Start<input type="time" value={liveStart} onChange={(e) => setLiveStart(e.target.value)} className="input-base mt-1" /></label>
-                <label className="block text-[0.83rem] font-bold">End<input type="time" value={liveEnd} onChange={(e) => setLiveEnd(e.target.value)} className="input-base mt-1" /></label>
-              </div>
-            </>
-          ) : (
-            <>
-              <label className="block text-[0.83rem] font-bold">Date
-                <select value={date} onChange={(e) => setDate(e.target.value)} className="input-base mt-1">
-                  {["Today", "Tomorrow", "Fri, Sep 26", "Mon, Sep 28"].map((d) => <option key={d}>{d}</option>)}
-                </select>
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                <label className="block text-[0.83rem] font-bold">Start<input value={start} onChange={(e) => setStart(e.target.value)} className="input-base mt-1" /></label>
-                <label className="block text-[0.83rem] font-bold">End<input value={end} onChange={(e) => setEnd(e.target.value)} className="input-base mt-1" /></label>
-              </div>
-            </>
-          )}
+          <label className="block text-[0.83rem] font-bold">Date
+            <input type="date" value={liveDate} onChange={(e) => setLiveDate(e.target.value)} className="input-base mt-1" />
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block text-[0.83rem] font-bold">Start<input type="time" value={liveStart} onChange={(e) => setLiveStart(e.target.value)} className="input-base mt-1" /></label>
+            <label className="block text-[0.83rem] font-bold">End<input type="time" value={liveEnd} onChange={(e) => setLiveEnd(e.target.value)} className="input-base mt-1" /></label>
+          </div>
           <label className="block text-[0.83rem] font-bold">Reason
             <select value={reason} onChange={(e) => setReason(e.target.value as BlockedSlot["reason"])} className="input-base mt-1">
               {REASONS.map((r) => <option key={r}>{r}</option>)}

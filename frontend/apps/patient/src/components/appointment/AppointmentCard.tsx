@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 import { CalendarDays, Clock, MapPin, Video, Phone, Building2 } from "lucide-react";
 import type { Appointment } from "../../types";
-import { consultationModeLabel } from "../../mock/services";
+import { consultationModeLabel } from "../../lib/helpers";
 import { Button, SafeImage, StatusBadge } from "../common/ui";
 
 function ModeIcon({ mode }: { mode: Appointment["consultationMode"] }) {

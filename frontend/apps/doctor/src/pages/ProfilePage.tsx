@@ -1,15 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Award, Building2, CheckCircle2, Clock, Edit3, Globe } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useSchedule } from "../context/ScheduleContext";
-import { consultationModeLabel } from "../mock/services";
-import { Avatar, Button, StatusBadge } from "../components/common/ui";
+import { consultationModeLabel } from "../lib/helpers";
+import { Avatar, Button, CardSkeleton, StatusBadge } from "../components/common/ui";
 import { Modal } from "../components/common/Modal";
 import type { ConsultationMode } from "../types";
 
 export default function ProfilePage() {
-  const { doctor, updateDoctor, mode } = useAuth();
+  const { doctor, updateDoctor, mode, profile } = useAuth();
   const { live, accepting } = useSchedule();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(doctor.name);
@@ -19,6 +19,15 @@ export default function ProfilePage() {
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Sync the edit form when the backend profile arrives.
+  useEffect(() => {
+    if (editing) return;
+    setName(doctor.name);
+    setQualifications(doctor.qualifications);
+    setExperience(String(doctor.experienceYears));
+    setLanguages(doctor.languages.join(", "));
+  }, [doctor, editing]);
 
   async function save() {
     setSaving(true);
@@ -54,19 +63,41 @@ export default function ProfilePage() {
     }
   }
 
+  if (mode === "checking") {
+    return (
+      <div className="max-w-3xl mx-auto space-y-4">
+        <CardSkeleton lines={4} />
+        <CardSkeleton lines={3} />
+      </div>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <div className="max-w-3xl mx-auto">
+        <div className="card-base p-6 text-center">
+          <p className="font-bold text-ink">Profile unavailable</p>
+          <p className="text-sm text-ink-secondary mt-1">Your backend profile could not be loaded yet. Sign in again or try later.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const acceptingShown = live ? accepting : doctor.acceptingAppointments;
+
   return (
     <div className="max-w-3xl mx-auto space-y-4">
       <AnimatePresence>
         {saved && (
           <motion.p initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex items-center gap-1.5 text-[0.85rem] font-bold text-success bg-success-soft border border-success/25 rounded-control px-3.5 py-2.5">
-            <CheckCircle2 size={16} /> {live ? "Profile saved to your hospital" : "Profile saved (local mock state)"}
+            <CheckCircle2 size={16} /> Profile saved to your hospital
           </motion.p>
         )}
       </AnimatePresence>
       {saveError && (
         <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3.5 py-2.5">{saveError}</p>
       )}
-      {live && mode === "live" && (
+      {live && (
         <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">Live profile — specialty, department and status are managed by your hospital admin.</p>
       )}
 
@@ -74,13 +105,13 @@ export default function ProfilePage() {
         <div className="flex flex-col sm:flex-row gap-4 sm:items-center">
           <Avatar name={doctor.name} photo={doctor.photo} size="lg" />
           <div className="flex-1 min-w-0">
-            <h1 className="text-[1.35rem] font-extrabold text-navy">{doctor.name}</h1>
+            <h1 className="text-[1.35rem] font-extrabold text-navy">{doctor.name || "Doctor"}</h1>
             <p className="text-sm font-semibold text-healthcare">{doctor.specialty} · {doctor.department}</p>
             <p className="text-[0.83rem] text-ink-secondary mt-0.5 flex items-center gap-1.5"><Building2 size={13} /> {doctor.hospital}</p>
             <div className="flex gap-1.5 mt-2 flex-wrap">
               <StatusBadge status={doctor.status} />
-              <span className={`text-[0.72rem] font-bold rounded-full px-2.5 py-1 ${(live ? accepting : doctor.acceptingAppointments) ? "bg-success-soft text-success" : "bg-slate-100 text-ink-secondary"}`}>
-                {(live ? accepting : doctor.acceptingAppointments) ? "Accepting appointments" : "Not accepting appointments"}
+              <span className={`text-[0.72rem] font-bold rounded-full px-2.5 py-1 ${acceptingShown ? "bg-success-soft text-success" : "bg-slate-100 text-ink-secondary"}`}>
+                {acceptingShown ? "Accepting appointments" : "Not accepting appointments"}
               </span>
             </div>
           </div>
@@ -92,16 +123,16 @@ export default function ProfilePage() {
         <section className="card-base p-5">
           <h2 className="section-title">Professional information</h2>
           <ul className="mt-3 space-y-2.5 text-sm">
-            <li className="flex items-center gap-2"><Award size={15} className="text-teal shrink-0" /><span className="font-semibold">{doctor.qualifications}</span></li>
+            <li className="flex items-center gap-2"><Award size={15} className="text-teal shrink-0" /><span className="font-semibold">{doctor.qualifications || "—"}</span></li>
             <li className="flex items-center gap-2"><Clock size={15} className="text-teal shrink-0" /><span className="font-semibold">{doctor.experienceYears} years experience</span></li>
-            <li className="flex items-center gap-2"><Globe size={15} className="text-teal shrink-0" /><span className="font-semibold">{doctor.languages.join(" · ")}</span></li>
+            <li className="flex items-center gap-2"><Globe size={15} className="text-teal shrink-0" /><span className="font-semibold">{doctor.languages.join(" · ") || "—"}</span></li>
           </ul>
         </section>
         <section className="card-base p-5">
           <h2 className="section-title">Practice setup</h2>
           <dl className="mt-3 space-y-2 text-sm">
             <div className="flex justify-between gap-2"><dt className="text-ink-secondary">Visit length</dt><dd className="font-bold">{doctor.appointmentDuration} min</dd></div>
-            <div className="flex justify-between gap-2"><dt className="text-ink-secondary">Consultation</dt><dd className="font-bold text-right">{doctor.consultationTypes.map(consultationModeLabel).join(" · ")}</dd></div>
+            <div className="flex justify-between gap-2"><dt className="text-ink-secondary">Consultation</dt><dd className="font-bold text-right">{doctor.consultationTypes.map(consultationModeLabel).join(" · ") || "—"}</dd></div>
             <div className="flex justify-between gap-2"><dt className="text-ink-secondary">Status</dt><dd><StatusBadge status={doctor.status} /></dd></div>
           </dl>
         </section>

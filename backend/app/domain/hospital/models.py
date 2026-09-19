@@ -4,7 +4,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, String, Uuid, func
+from sqlalchemy import DateTime, Enum, Float, String, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -29,6 +29,12 @@ class Hospital(Base):
         String(255), unique=True, index=True, nullable=False
     )
     contact_phone: Mapped[str] = mapped_column(String(50), nullable=False)
+    # City the hospital sits in — powers "near me" ranking for patients.
+    city: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    # Precise geo for distance-based recommendation. Nullable: older rows
+    # and registrations without coordinates fall back to city ranking.
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     status: Mapped[HospitalStatus] = mapped_column(
         Enum(HospitalStatus, name="hospital_status", validate_strings=True),
         nullable=False,

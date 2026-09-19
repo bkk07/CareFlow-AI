@@ -7,7 +7,7 @@ import { Modal } from "../../components/common/Modal";
 import type { Doctor } from "../../types";
 
 export default function DoctorsPage() {
-  const { doctors, specialties, departments, setDoctorStatus, createDoctor, live, loading, backendError } = useAdmin();
+  const { doctors, specialties, departments, setDoctorStatus, createDoctor, live, loading, backendError, refreshAll } = useAdmin();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [selected, setSelected] = useState<Doctor | null>(null);
@@ -22,8 +22,8 @@ export default function DoctorsPage() {
     setError(null);
     try {
       await fn();
-    } catch {
-      setError(backendError ?? "Operation failed.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : (backendError ?? "Operation failed."));
     }
   }
 
@@ -34,6 +34,18 @@ export default function DoctorsPage() {
     return true;
   });
 
+  if (loading && doctors.length === 0) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h1 className="page-title">Doctors</h1>
+          <p className="page-sub mt-1">Hospital roster.</p>
+        </div>
+        <div className="card-base p-5 text-sm text-ink-secondary">Loading doctors…</div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -41,9 +53,7 @@ export default function DoctorsPage() {
           <h1 className="page-title">Doctors</h1>
           <p className="page-sub mt-1">{doctors.length} doctors · {doctors.filter((d) => d.status === "active").length} active.</p>
         </div>
-        {live && (
-          <Button size="sm" onClick={() => { setNewName(""); setNewSpecialty(specialties[0]?.id ?? ""); setNewDepartment(departments[0]?.id ?? ""); setCreateOpen(true); }}><Plus size={15} /> Add doctor</Button>
-        )}
+        <Button size="sm" onClick={() => { setNewName(""); setNewSpecialty(specialties[0]?.id ?? ""); setNewDepartment(departments[0]?.id ?? ""); setCreateOpen(true); }}><Plus size={15} /> Add doctor</Button>
       </div>
 
       {live && (
@@ -51,7 +61,7 @@ export default function DoctorsPage() {
           {loading ? "Syncing…" : "Live roster — activation needs specialty, department and a compatible visit type."}
         </p>
       )}
-      {(error ?? backendError) && live && (
+      {(error ?? backendError) && (
         <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">{error ?? backendError}</p>
       )}
 
@@ -67,7 +77,7 @@ export default function DoctorsPage() {
       </div>
 
       {visible.length === 0 ? (
-        <div className="card-base"><EmptyState title="No doctors found" body="Try a different search or status filter." /></div>
+        <div className="card-base"><EmptyState title="No doctors found" body={doctors.length === 0 ? "No doctors registered yet — add your first doctor." : "Try a different search or status filter."} action={doctors.length === 0 ? <Button size="sm" variant="outline" onClick={() => void refreshAll()}>Refresh</Button> : undefined} /></div>
       ) : (
         <ResponsiveTable headers={["Doctor", "Specialty", "Department", "Exp.", "Modes", "Status", "Availability", "Actions"]}>
           {visible.map((d) => (

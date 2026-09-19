@@ -9,7 +9,7 @@ import {
   Settings,
   User,
 } from "lucide-react";
-import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { useSchedule } from "../../context/ScheduleContext";
@@ -52,11 +52,10 @@ export function Logo() {
 
 export function DoctorShell({ children }: { children: React.ReactNode }) {
   const { doctor, logout } = useAuth();
-  const { unreadCount, notifications, markAllRead, live, accepting } = useSchedule();
+  const { unreadCount, notifications, markAllRead, accepting } = useSchedule();
   const [panelOpen, setPanelOpen] = useState(false);
   const navigate = useNavigate();
-  const location = useLocation();
-  const acceptingShown = live ? accepting : doctor.acceptingAppointments;
+  const acceptingShown = accepting;
 
   function doLogout() {
     logout();
@@ -162,7 +161,7 @@ export function DoctorShell({ children }: { children: React.ReactNode }) {
       </header>
 
       <div className="md:pl-[248px]">
-        <main key={location.pathname} className="shell-container pt-5 sm:pt-6">{children}</main>
+        <main className="shell-container pt-5 sm:pt-6">{children}</main>
       </div>
 
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-border px-1 pt-1.5 pb-[calc(0.4rem+env(safe-area-inset-bottom))]" aria-label="Mobile">

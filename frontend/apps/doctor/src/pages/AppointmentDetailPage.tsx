@@ -5,7 +5,7 @@ import { appointmentDetail, type AppointmentDetail as ApiDetail } from "../api";
 import { formatDateLabel, formatTime, mapAppointmentState } from "../lib/backend";
 import { useSchedule } from "../context/ScheduleContext";
 import { AppointmentDetailBody } from "../components/appointments/AppointmentDetail";
-import { EmptyState } from "../components/common/ui";
+import { CardSkeleton, EmptyState, ErrorState } from "../components/common/ui";
 import type { Appointment, Questionnaire } from "../types";
 
 function toUI(
@@ -72,14 +72,14 @@ function toUI(
 
 export default function AppointmentDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { appointments, questionnaires, live, loading: listLoading } = useSchedule();
+  const { appointments } = useSchedule();
   const [detail, setDetail] = useState<ApiDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(true);
   const [detailError, setDetailError] = useState(false);
 
   useEffect(() => {
-    if (!live || !id) {
-      setDetail(null);
+    if (!id) {
+      setDetailLoading(false);
       return;
     }
     let cancelled = false;
@@ -98,49 +98,25 @@ export default function AppointmentDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [live, id]);
+  }, [id]);
 
-  if (live) {
-    if (detailLoading || listLoading) {
-      return (
-        <div className="max-w-2xl mx-auto">
-          <Link to="/today" className="inline-flex items-center gap-1.5 text-[0.85rem] font-bold text-ink-secondary hover:text-healthcare mb-3"><ArrowLeft size={16} /> Back to schedule</Link>
-          <div className="card-base p-5 sm:p-6"><p className="text-sm text-ink-secondary py-8 text-center">Loading appointment…</p></div>
-        </div>
-      );
-    }
-    if (detailError || !detail) {
-      return (
-        <div className="max-w-2xl mx-auto">
-          <Link to="/today" className="inline-flex items-center gap-1.5 text-[0.85rem] font-bold text-ink-secondary hover:text-healthcare mb-3"><ArrowLeft size={16} /> Back</Link>
-          <div className="card-base"><EmptyState title="Appointment not found" body="It may have been moved. Return to today's schedule." /></div>
-        </div>
-      );
-    }
-    const known = appointments.find((a) => a.id === detail.id);
-    const { appointment, questionnaire } = toUI(
-      detail,
-      known?.patient.name ?? "Patient",
-      known?.hospital ?? "My hospital",
-    );
-    if (known) {
-      appointment.type = known.type;
-      appointment.mode = known.mode;
-      appointment.department = known.department;
-      appointment.patient = known.patient;
-    }
+  if (detailLoading) {
     return (
       <div className="max-w-2xl mx-auto">
         <Link to="/today" className="inline-flex items-center gap-1.5 text-[0.85rem] font-bold text-ink-secondary hover:text-healthcare mb-3"><ArrowLeft size={16} /> Back to schedule</Link>
-        <div className="card-base p-5 sm:p-6">
-          <AppointmentDetailBody appointment={appointment} questionnaire={questionnaire} />
-        </div>
+        <CardSkeleton lines={5} />
       </div>
     );
   }
-
-  const appointment = appointments.find((a) => a.id === id);
-  if (!appointment) {
+  if (detailError) {
+    return (
+      <div className="max-w-2xl mx-auto">
+        <Link to="/today" className="inline-flex items-center gap-1.5 text-[0.85rem] font-bold text-ink-secondary hover:text-healthcare mb-3"><ArrowLeft size={16} /> Back</Link>
+        <ErrorState title="Could not load appointment" body="Check your connection and try again." onRetry={() => window.location.reload()} />
+      </div>
+    );
+  }
+  if (!detail) {
     return (
       <div className="max-w-2xl mx-auto">
         <Link to="/today" className="inline-flex items-center gap-1.5 text-[0.85rem] font-bold text-ink-secondary hover:text-healthcare mb-3"><ArrowLeft size={16} /> Back</Link>
@@ -148,7 +124,18 @@ export default function AppointmentDetailPage() {
       </div>
     );
   }
-  const questionnaire = questionnaires.find((q) => q.appointmentId === appointment.id);
+  const known = appointments.find((a) => a.id === detail.id);
+  const { appointment, questionnaire } = toUI(
+    detail,
+    known?.patient.name ?? "Patient",
+    known?.hospital ?? "My hospital",
+  );
+  if (known) {
+    appointment.type = known.type;
+    appointment.mode = known.mode;
+    appointment.department = known.department;
+    appointment.patient = known.patient;
+  }
   return (
     <div className="max-w-2xl mx-auto">
       <Link to="/today" className="inline-flex items-center gap-1.5 text-[0.85rem] font-bold text-ink-secondary hover:text-healthcare mb-3"><ArrowLeft size={16} /> Back to schedule</Link>

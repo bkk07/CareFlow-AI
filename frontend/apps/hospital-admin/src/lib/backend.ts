@@ -274,7 +274,7 @@ export function mapOperation(o: ApiOperation): Operation {
     type: o.operation_type,
     appointment: o.appointment_id,
     patient: "—",
-    system: "Mock EHR",
+    system: "EHR",
     status: st,
     started: formatDateTime(o.created_at),
     lastAttempt: formatDateTime(o.created_at),

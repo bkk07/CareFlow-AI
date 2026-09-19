@@ -10,7 +10,7 @@ import {
   Users,
   Workflow,
 } from "lucide-react";
-import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { useAdmin } from "../../store/AdminStore";
 import { Avatar } from "../common/ui";
@@ -29,7 +29,6 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const { logout, unread, notifications, markAllRead, user, live } = useAdmin();
   const [panelOpen, setPanelOpen] = useState(false);
   const navigate = useNavigate();
-  const location = useLocation();
 
   return (
     <div className="min-h-screen bg-background">
@@ -81,12 +80,16 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                       <p className="font-bold text-navy text-sm">Notifications</p>
                       <button onClick={markAllRead} className="text-[0.76rem] font-bold text-healthcare hover:underline">Mark all read</button>
                     </div>
-                    {notifications.slice(0, 5).map((n) => (
-                      <div key={n.id} className={`px-4 py-3 border-b border-border/60 text-sm ${n.unread ? "bg-healthcare-faint" : ""}`}>
-                        <p className="font-semibold text-[0.84rem]">{n.title}</p>
-                        <p className="text-ink-secondary text-[0.79rem] line-clamp-2">{n.body}</p>
-                      </div>
-                    ))}
+                    {notifications.length === 0 ? (
+                      <p className="px-4 py-6 text-center text-[0.82rem] text-ink-secondary">No notifications yet.</p>
+                    ) : (
+                      notifications.slice(0, 5).map((n) => (
+                        <div key={n.id} className={`px-4 py-3 border-b border-border/60 text-sm ${n.unread ? "bg-healthcare-faint" : ""}`}>
+                          <p className="font-semibold text-[0.84rem]">{n.title}</p>
+                          <p className="text-ink-secondary text-[0.79rem] line-clamp-2">{n.body}</p>
+                        </div>
+                      ))
+                    )}
                   </motion.div>
                 </>
               )}
@@ -97,7 +100,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       </header>
 
       <div className="md:pl-[252px]">
-        <main key={location.pathname} className="shell-container pt-5">{children}</main>
+        <main className="shell-container pt-5">{children}</main>
       </div>
 
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-border px-2 pt-1.5 pb-[calc(0.4rem+env(safe-area-inset-bottom))] overflow-x-auto no-scrollbar" aria-label="Mobile">

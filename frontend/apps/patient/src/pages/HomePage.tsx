@@ -11,10 +11,9 @@ import {
   Video,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { AI_EXAMPLE_PROMPTS, DOCTORS, HOSPITALS, QUESTIONNAIRES } from "../mock/data";
-import { searchDoctors as apiSearchDoctors, searchHospitals as apiSearchHospitals } from "../api";
+import { searchDoctors as apiSearchDoctors, searchHospitals as apiSearchHospitals, fetchContact as apiFetchContact } from "../api";
 import { mapDoctorResult, mapHospitalResult } from "../lib/backend";
-import { IMAGES } from "../mock/images";
+import { readPosition, type GeoCoords } from "../lib/helpers";
 import { useAppState } from "../context/AppStateContext";
 import { useAuth } from "../context/AuthContext";
 import { AppointmentCard } from "../components/appointment/AppointmentCard";
@@ -22,8 +21,14 @@ import { DoctorCard } from "../components/doctor/cards";
 import { HospitalCard } from "../components/hospital/HospitalCard";
 import { DoctorProfileModal } from "../components/doctor/DoctorProfileModal";
 import { AppointmentDetailModal } from "../components/appointment/AppointmentDetailModal";
-import { Button, CardSkeleton, EmptyState, SafeImage } from "../components/common/ui";
+import { Button, CardSkeleton, EmptyState } from "../components/common/ui";
 import type { Doctor, Hospital } from "../types";
+
+const AI_EXAMPLE_PROMPTS = [
+  "I need a cardiologist this week",
+  "Find a dermatologist near me",
+  "What appointments do I have?",
+];
 
 const QUICK_ACTIONS = [
   { id: "find", label: "Find a Doctor", desc: "Browse by specialty", icon: Stethoscope, tint: "bg-healthcare-soft text-healthcare" },
@@ -41,23 +46,46 @@ export default function HomePage() {
   const [profileDoctor, setProfileDoctor] = useState<Doctor | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [recommended, setRecommended] = useState<Doctor[]>(DOCTORS.slice(0, 3));
-  const [nearby, setNearby] = useState<Hospital[]>(HOSPITALS.slice(0, 2));
+  const [recommended, setRecommended] = useState<Doctor[]>([]);
+  const [nearby, setNearby] = useState<Hospital[]>([]);
+  const [geo, setGeo] = useState<GeoCoords | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [geoError, setGeoError] = useState<string | null>(null);
 
-  // Live: recommendations come from the real directory, not mock data.
+  function useMyLocation() {
+    setLocating(true);
+    setGeoError(null);
+    readPosition()
+      .then((g) => setGeo(g))
+      .catch((e: unknown) => setGeoError(e instanceof Error ? e.message : "Could not read your location."))
+      .finally(() => setLocating(false));
+  }
+
+  // Recommendations come from the real directory: precise coordinates
+  // rank by true distance, otherwise the saved city is the fallback.
   useEffect(() => {
-    if (!live) {
-      setRecommended(DOCTORS.slice(0, 3));
-      setNearby(HOSPITALS.slice(0, 2));
-      return;
-    }
+    if (!live) return;
     let cancelled = false;
     setLoading(true);
-    Promise.all([apiSearchDoctors({}), apiSearchHospitals("")])
+    const run = async () => {
+      if (geo) {
+        return Promise.all([
+          apiSearchDoctors({ latitude: geo.latitude, longitude: geo.longitude }),
+          apiSearchHospitals("", undefined, geo),
+        ]);
+      }
+      const contact = await apiFetchContact().catch(() => null);
+      const city = contact?.city ?? undefined;
+      return Promise.all([
+        apiSearchDoctors({ city }),
+        apiSearchHospitals("", city),
+      ]);
+    };
+    run()
       .then(([docs, hosps]) => {
         if (cancelled) return;
-        if (docs.length > 0) setRecommended(docs.slice(0, 3).map(mapDoctorResult));
-        if (hosps.length > 0) setNearby(hosps.slice(0, 2).map(mapHospitalResult));
+        setRecommended(docs.slice(0, 3).map(mapDoctorResult));
+        setNearby(hosps.slice(0, 2).map(mapHospitalResult));
       })
       .catch(() => undefined)
       .finally(() => {
@@ -66,7 +94,7 @@ export default function HomePage() {
     return () => {
       cancelled = true;
     };
-  }, [live]);
+  }, [live, geo]);
 
   const upcoming = useMemo(
     () =>
@@ -78,13 +106,6 @@ export default function HomePage() {
   const detailAppt = detailId ? (appointments.find((a) => a.id === detailId) ?? null) : null;
 
   const activity = useMemo(() => {
-    if (!live) {
-      return [
-        { t: "Appointment confirmed", s: "Cardiology · Dr. Sarah Johnson", time: "2h ago", dot: "bg-success" },
-        { t: "Questionnaire in progress", s: `${QUESTIONNAIRES[0].progress.done} of ${QUESTIONNAIRES[0].progress.total} completed`, time: "5h ago", dot: "bg-warning" },
-        { t: "AI conversation", s: "“Cardiology openings this week”", time: "Yesterday", dot: "bg-healthcare" },
-      ];
-    }
     const rows = notifications.slice(0, 3).map((n) => ({
       t: n.title,
       s: n.body,
@@ -96,7 +117,7 @@ export default function HomePage() {
       return [{ t: `${a.status.replace("_", " ")} visit`, s: `${a.specialty} · ${a.doctorName}`, time: `${a.date} at ${a.time}`, dot: "bg-success" }];
     }
     return rows;
-  }, [live, notifications, appointments]);
+  }, [notifications, appointments]);
 
   function submitSearch(e?: React.FormEvent) {
     e?.preventDefault();
@@ -146,6 +167,27 @@ export default function HomePage() {
                 </div>
               </div>
             </form>
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+              {geo ? (
+                <>
+                  <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-1.5 w-fit">
+                    Ranked by distance from you
+                  </p>
+                  <button onClick={() => setGeo(null)} className="text-[0.78rem] font-semibold text-ink-secondary hover:text-healthcare hover:underline">
+                    Clear location
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={useMyLocation}
+                  disabled={locating}
+                  className="text-[0.78rem] font-semibold text-healthcare bg-healthcare-faint border border-healthcare/25 rounded-control px-3 py-1.5 hover:underline disabled:opacity-60"
+                >
+                  {locating ? "Reading location…" : "Use my location for nearby care"}
+                </button>
+              )}
+            </div>
+            {geoError && <p role="alert" className="text-[0.78rem] font-semibold text-danger mt-2">{geoError}</p>}
             <div className="flex flex-wrap gap-1.5 mt-3">
               {AI_EXAMPLE_PROMPTS.map((p) => (
                 <button
@@ -166,10 +208,7 @@ export default function HomePage() {
               </Button>
             </div>
           </div>
-          <div className="relative min-h-[220px] hidden md:block">
-            <SafeImage src={IMAGES.homeHero} alt="Welcoming hospital environment" name="CareFlow" className="absolute inset-0 w-full h-full" />
-            <div className="absolute inset-0 bg-gradient-to-r from-white via-white/20 to-transparent" aria-hidden />
-          </div>
+          <div className="relative min-h-[220px] hidden md:block bg-gradient-to-br from-healthcare via-teal to-navy" aria-hidden />
         </div>
       </section>
 

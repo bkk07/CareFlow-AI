@@ -3,7 +3,7 @@ import { Search, SlidersHorizontal } from "lucide-react";
 import { useSchedule } from "../context/ScheduleContext";
 import { AppointmentCard } from "../components/appointments/AppointmentCard";
 import { Drawer } from "../components/common/Modal";
-import { Button, EmptyState } from "../components/common/ui";
+import { Button, CardSkeleton, EmptyState, ErrorState } from "../components/common/ui";
 import type { Appointment } from "../types";
 
 const GROUPS: { id: Appointment["dayGroup"]; label: string }[] = [
@@ -14,7 +14,7 @@ const GROUPS: { id: Appointment["dayGroup"]; label: string }[] = [
 ];
 
 export default function UpcomingPage() {
-  const { appointments, live, loading } = useSchedule();
+  const { appointments, loading, error, refresh } = useSchedule();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [qstate, setQstate] = useState("all");
@@ -59,9 +59,11 @@ export default function UpcomingPage() {
         <p className="page-sub mt-1">Grouped by day. Search by patient name or appointment type.</p>
       </div>
 
-      {live && loading && (
-        <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">Syncing live schedule…</p>
-      )}
+      <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">
+        {loading ? "Syncing live schedule…" : "Live schedule from your hospital"}
+      </p>
+
+      {error && <ErrorState title="Could not load appointments" body={error} onRetry={() => void refresh()} />}
 
       <div className="card-base p-3.5 flex flex-col sm:flex-row gap-2">
         <div className="flex items-center gap-2 flex-1 bg-background border border-border rounded-control px-3">
@@ -83,7 +85,12 @@ export default function UpcomingPage() {
         </button>
       </div>
 
-      {searching ? (
+      {loading && visible.length === 0 && !error ? (
+        <div className="space-y-2.5">
+          <CardSkeleton lines={3} />
+          <CardSkeleton lines={2} />
+        </div>
+      ) : searching ? (
         visible.length === 0 ? (
           <div className="card-base"><EmptyState title="No matching appointments" body="Try a different patient name, type, or clear the filters." /></div>
         ) : (
@@ -101,7 +108,7 @@ export default function UpcomingPage() {
           );
         })
       )}
-      {visible.length === 0 && !searching && (
+      {visible.length === 0 && !searching && !loading && !error && (
         <div className="card-base"><EmptyState title="No upcoming appointments" body="Your upcoming schedule is clear." /></div>
       )}
 

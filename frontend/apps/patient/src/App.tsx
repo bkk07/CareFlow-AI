@@ -1,5 +1,5 @@
-import { AnimatePresence, MotionConfig, motion } from "framer-motion";
-import { Navigate, Route, BrowserRouter as Router, Routes, useLocation } from "react-router-dom";
+import { MotionConfig } from "framer-motion";
+import { Navigate, Outlet, Route, BrowserRouter as Router, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { AppStateProvider } from "./context/AppStateContext";
 import { PatientShell } from "./components/layout/PatientShell";
@@ -14,38 +14,33 @@ import ChatDebugPage from "./pages/ChatDebugPage";
 import PreferencesPage from "./pages/PreferencesPage";
 import ProfilePage from "./pages/ProfilePage";
 
-function Protected({ children }: { children: React.ReactNode }) {
+function ProtectedLayout() {
   const { isAuthenticated } = useAuth();
   if (!isAuthenticated) return <Navigate to="/login" replace />;
-  return <PatientShell>{children}</PatientShell>;
+  return (
+    <PatientShell>
+      <Outlet />
+    </PatientShell>
+  );
 }
 
-function AnimatedRoutes() {
-  const location = useLocation();
+function AppRoutes() {
   return (
-    <AnimatePresence mode="wait">
-      <motion.div
-        key={location.pathname}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -6 }}
-        transition={{ duration: 0.22 }}
-      >
-        <Routes location={location}>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/" element={<Protected><HomePage /></Protected>} />
-          <Route path="/book" element={<Protected><BookPage /></Protected>} />
-          <Route path="/visits" element={<Protected><VisitsPage /></Protected>} />
-          <Route path="/inbox" element={<Protected><InboxPage /></Protected>} />
-          <Route path="/chat" element={<Protected><ChatPage /></Protected>} />
-          <Route path="/chat-debug" element={<Protected><ChatDebugPage /></Protected>} />
-          <Route path="/voice" element={<Protected><VoicePage /></Protected>} />
-          <Route path="/preferences" element={<Protected><PreferencesPage /></Protected>} />
-          <Route path="/profile" element={<Protected><ProfilePage /></Protected>} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </motion.div>
-    </AnimatePresence>
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route element={<ProtectedLayout />}>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/book" element={<BookPage />} />
+        <Route path="/visits" element={<VisitsPage />} />
+        <Route path="/inbox" element={<InboxPage />} />
+        <Route path="/chat" element={<ChatPage />} />
+        <Route path="/chat-debug" element={<ChatDebugPage />} />
+        <Route path="/voice" element={<VoicePage />} />
+        <Route path="/preferences" element={<PreferencesPage />} />
+        <Route path="/profile" element={<ProfilePage />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
 
@@ -55,7 +50,7 @@ export default function App() {
       <AuthProvider>
         <AppStateProvider>
           <Router>
-            <AnimatedRoutes />
+            <AppRoutes />
           </Router>
         </AppStateProvider>
       </AuthProvider>

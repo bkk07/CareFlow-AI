@@ -4,7 +4,6 @@ import {
   fetchContact,
   login as apiLogin,
   me as apiMe,
-  probeBackend,
   registerPatient as apiRegister,
   restoreAccessToken,
   saveContact as apiSaveContact,
@@ -13,10 +12,9 @@ import {
   type Contact,
   type CurrentUser,
 } from "../api";
-import { CURRENT_PATIENT } from "../mock/data";
 import type { PatientProfile } from "../types";
 
-export type BackendMode = "checking" | "live" | "mock";
+export type BackendMode = "checking" | "live";
 
 interface AuthState {
   isAuthenticated: boolean;
@@ -29,19 +27,31 @@ interface AuthState {
   authError: string | null;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
-  loginMock: () => void;
   logout: () => void;
   refreshProfile: () => Promise<void>;
-  updateContactInfo: (patch: { full_name?: string; phone?: string; date_of_birth?: string }) => Promise<void>;
+  updateContactInfo: (patch: { full_name?: string; phone?: string; date_of_birth?: string; city?: string | null }) => Promise<void>;
   updateAccountEmail: (email: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
-const MOCK_KEY = "careflow_mock_auth";
+
+const EMPTY_PATIENT: PatientProfile = {
+  id: "",
+  name: "",
+  email: "",
+  phone: "",
+  dob: "",
+  gender: "",
+  address: "",
+  avatar: "",
+  memberSince: "",
+  bloodGroup: "",
+  emergencyContact: "",
+};
 
 function profileFromBackend(user: CurrentUser, contact: Contact | null): PatientProfile {
   return {
-    ...CURRENT_PATIENT,
+    ...EMPTY_PATIENT,
     id: user.id,
     email: user.email,
     name: contact?.full_name ?? user.email.split("@")[0],
@@ -58,37 +68,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [accessToken, setAccessTokenState] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // On boot: if the backend is up and a token is stored, restore the session.
-  // Otherwise fall back to the offline mock session when one was saved.
+  // On boot: restore the JWT session when one was saved.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const reachable = await probeBackend();
-      if (cancelled) return;
-      if (!reachable) {
-        try {
-          if (localStorage.getItem(MOCK_KEY) === "1") setIsAuthenticated(true);
-        } catch {
-          /* private mode */
-        }
-        setMode("mock");
-        return;
-      }
       const token = restoreAccessToken();
-      if (!token) {
-        setMode("live");
-        return;
-      }
-      try {
-        const me = await apiMe();
-        const profile = await fetchContact().catch(() => null);
-        if (cancelled) return;
-        setUser(me);
-        setContact(profile);
-        setAccessTokenState(token);
-        setIsAuthenticated(true);
-      } catch {
-        setAccessToken(null);
+      if (token) {
+        try {
+          const me = await apiMe();
+          const profile = await fetchContact().catch(() => null);
+          if (cancelled) return;
+          setUser(me);
+          setContact(profile);
+          setAccessTokenState(token);
+          setIsAuthenticated(true);
+        } catch {
+          setAccessToken(null);
+        }
       }
       if (!cancelled) setMode("live");
     })();
@@ -99,18 +95,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     setAuthError(null);
-    const reachable = await probeBackend();
-    if (!reachable) {
-      // Offline: keep the demo usable with mock data.
-      try {
-        localStorage.setItem(MOCK_KEY, "1");
-      } catch {
-        /* private mode */
-      }
-      setMode("mock");
-      setIsAuthenticated(true);
-      return;
-    }
     try {
       await apiLogin(email, password);
       const me = await apiMe();
@@ -142,23 +126,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const loginMock = useCallback(() => {
-    try {
-      localStorage.setItem(MOCK_KEY, "1");
-    } catch {
-      /* private mode */
-    }
-    setMode("mock");
-    setIsAuthenticated(true);
-  }, []);
-
   const logout = useCallback(() => {
     setAccessToken(null);
-    try {
-      localStorage.removeItem(MOCK_KEY);
-    } catch {
-      /* noop */
-    }
     setUser(null);
     setContact(null);
     setAccessTokenState(null);
@@ -175,7 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateContactInfo = useCallback(
-    async (patch: { full_name?: string; phone?: string; date_of_birth?: string }) => {
+    async (patch: { full_name?: string; phone?: string; date_of_birth?: string; city?: string | null }) => {
       const next = await apiSaveContact(patch);
       setContact(next);
     },
@@ -188,8 +157,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const patient = useMemo<PatientProfile>(
-    () => (mode === "live" && user ? profileFromBackend(user, contact) : CURRENT_PATIENT),
-    [mode, user, contact],
+    () => (user ? profileFromBackend(user, contact) : EMPTY_PATIENT),
+    [user, contact],
   );
 
   const value = useMemo(
@@ -203,13 +172,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       authError,
       login,
       register,
-      loginMock,
       logout,
       refreshProfile,
       updateContactInfo,
       updateAccountEmail,
     }),
-    [isAuthenticated, mode, user, contact, patient, accessToken, authError, login, register, loginMock, logout, refreshProfile, updateContactInfo, updateAccountEmail],
+    [isAuthenticated, mode, user, contact, patient, accessToken, authError, login, register, logout, refreshProfile, updateContactInfo, updateAccountEmail],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

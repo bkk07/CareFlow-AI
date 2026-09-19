@@ -15,14 +15,14 @@ const TIMELINES: Record<string, string[]> = {
 };
 
 export default function AppointmentsPage() {
-  const { appointments, cancelAppointment, live, loading, backendError } = useAdmin();
+  const { appointments, cancelAppointment, live, loading, backendError, refreshAll } = useAdmin();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [selected, setSelected] = useState<Appointment | null>(null);
   const [cancelId, setCancelId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const shortId = (id: string) => (live && id.includes("-") ? id.slice(0, 8).toUpperCase() : id);
+  const shortId = (id: string) => (id.includes("-") ? id.slice(0, 8).toUpperCase() : id);
 
   const visible = useMemo(() => {
     const q = query.toLowerCase().trim();
@@ -32,6 +32,18 @@ export default function AppointmentsPage() {
       return true;
     });
   }, [appointments, query, status]);
+
+  if (loading && appointments.length === 0) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h1 className="page-title">Appointments</h1>
+          <p className="page-sub mt-1">Hospital-wide scheduling across all doctors.</p>
+        </div>
+        <div className="card-base p-5 text-sm text-ink-secondary">Loading appointments…</div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -45,7 +57,7 @@ export default function AppointmentsPage() {
           {loading ? "Syncing…" : "Live bookings — cancelling notifies the patient."}
         </p>
       )}
-      {(error ?? backendError) && live && (
+      {(error ?? backendError) && (
         <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">{error ?? backendError}</p>
       )}
 
@@ -61,7 +73,7 @@ export default function AppointmentsPage() {
       </div>
 
       {visible.length === 0 ? (
-        <div className="card-base"><EmptyState title="No appointments found" body="Try a different search or status filter." /></div>
+        <div className="card-base"><EmptyState title="No appointments found" body={appointments.length === 0 ? "No appointments recorded yet — new bookings will appear here." : "Try a different search or status filter."} action={appointments.length === 0 ? <Button size="sm" variant="outline" onClick={() => void refreshAll()}>Refresh</Button> : undefined} /></div>
       ) : (
         <ResponsiveTable headers={["Patient", "Doctor", "Date", "Type", "Status", "Form", "Actions"]}>
           {visible.map((a) => (
@@ -119,7 +131,7 @@ export default function AppointmentsPage() {
         open={!!cancelId}
         onClose={() => setCancelId(null)}
         title="Cancel appointment"
-        body={live ? "The slot will be released and the patient notified. This cannot be undone from here." : "The slot will be released and the patient notified (mock). This cannot be undone from here."}
+        body="The slot will be released and the patient notified. This cannot be undone from here."
         confirmLabel="Cancel appointment"
         danger
         onConfirm={() => {

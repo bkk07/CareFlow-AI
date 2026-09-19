@@ -19,6 +19,7 @@ export interface Hospital {
   rating: number;
   consultationTypes: ConsultationMode[];
   about: string;
+  distanceKm?: number | null;
 }
 
 export interface Doctor {
@@ -39,6 +40,7 @@ export interface Doctor {
   nextAvailable: string;
   about: string;
   areasOfPractice: string[];
+  distanceKm?: number | null;
 }
 
 export interface AppointmentType {
@@ -138,6 +140,15 @@ export interface ChatMessage {
   text: string;
   time: string;
   cards?: ChatCard[];
+  /** Live doctor cards from the assistant turn (DB-backed, bookable). */
+  doctors?: {
+    id: string;
+    name: string;
+    photo_url: string | null;
+    hospital_name: string;
+    hospital_city: string | null;
+    specialty: string | null;
+  }[];
 }
 
 export interface PatientProfile {

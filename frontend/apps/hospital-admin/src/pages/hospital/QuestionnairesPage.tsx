@@ -1,19 +1,16 @@
 import { useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import { Copy, Eye, Pencil, Plus } from "lucide-react";
+import { Copy, Eye, Plus } from "lucide-react";
 import { useAdmin } from "../../store/AdminStore";
 import { Button, EmptyState, StatusBadge } from "../../components/common/ui";
 import { Drawer, Modal, ResponsiveTable } from "../../components/common/Modal";
 import type { Questionnaire } from "../../types";
 import type { QuestionnaireDetail } from "../../api";
 
-const Q_TYPES = ["Yes/No", "Single choice", "Multiple choice", "Numeric", "Date", "Short text", "Long text", "Structured field"];
-
 export default function QuestionnairesPage() {
-  const { questionnaires, duplicateQuestionnaire, toggleQuestionnaire, createQuestionnaire, fetchQuestionnaireDetail, live, loading, backendError } = useAdmin();
+  const { questionnaires, duplicateQuestionnaire, toggleQuestionnaire, createQuestionnaire, fetchQuestionnaireDetail, live, loading, backendError, refreshAll } = useAdmin();
   const [preview, setPreview] = useState<Questionnaire | null>(null);
   const [previewDetail, setPreviewDetail] = useState<QuestionnaireDetail | null>(null);
-  const [builder, setBuilder] = useState<Questionnaire | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -30,20 +27,32 @@ export default function QuestionnairesPage() {
   async function openPreview(q: Questionnaire) {
     setPreview(q);
     setPreviewDetail(null);
-    if (live) {
+    setPreviewLoading(true);
+    try {
       const detail = await fetchQuestionnaireDetail(q.id);
       setPreviewDetail(detail);
+    } catch {
+      setPreviewDetail(null);
+    } finally {
+      setPreviewLoading(false);
     }
   }
 
-  const previewFields = live
-    ? (previewDetail?.questions ?? []).map((f) => ({
-        question: f.prompt,
-        type: f.type,
-        required: f.required,
-        options: f.options ?? undefined,
-      }))
-    : (preview?.fields ?? []);
+  const previewFields = (previewDetail?.questions ?? []).map((f) => ({
+    question: f.prompt,
+    type: f.type,
+    required: f.required,
+    options: f.options ?? undefined,
+  }));
+
+  if (loading && questionnaires.length === 0) {
+    return (
+      <div className="space-y-4">
+        <div><h1 className="page-title">Questionnaires</h1><p className="page-sub mt-1">Administrative pre-visit forms. No diagnostic content.</p></div>
+        <div className="card-base p-5 text-sm text-ink-secondary">Loading questionnaires…</div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -57,12 +66,12 @@ export default function QuestionnairesPage() {
           {loading ? "Syncing…" : "Live forms — only active forms resolve for new appointments."}
         </p>
       )}
-      {(error ?? backendError) && live && (
+      {(error ?? backendError) && (
         <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">{error ?? backendError}</p>
       )}
 
       {questionnaires.length === 0 ? (
-        <div className="card-base"><EmptyState title="No questionnaires" body="Create your first pre-visit form." /></div>
+        <div className="card-base"><EmptyState title="No questionnaires" body="Create your first pre-visit form." action={<Button size="sm" variant="outline" onClick={() => void refreshAll()}>Refresh</Button>} /></div>
       ) : (
         <ResponsiveTable headers={["Form", "Specialty", "Doctor", "Type", "Questions", "Status", "Updated", "Actions"]}>
           {questionnaires.map((q) => (
@@ -77,7 +86,6 @@ export default function QuestionnairesPage() {
               <td className="td-cell">
                 <div className="flex gap-2">
                   <button onClick={() => void openPreview(q)} className="text-[0.78rem] font-bold text-healthcare hover:underline inline-flex items-center gap-1"><Eye size={12} /> Preview</button>
-                  {!live && <button onClick={() => setBuilder(q)} className="text-[0.78rem] font-bold text-ink-secondary hover:text-healthcare inline-flex items-center gap-1"><Pencil size={12} /> Edit</button>}
                   <button onClick={() => void run(() => duplicateQuestionnaire(q.id))} className="text-[0.78rem] font-bold text-ink-secondary hover:text-healthcare inline-flex items-center gap-1"><Copy size={12} /> Duplicate</button>
                   <button onClick={() => void run(() => toggleQuestionnaire(q.id))} className="text-[0.78rem] font-bold text-ink-secondary hover:text-danger">{q.status === "active" ? "Deactivate" : "Activate"}</button>
                 </div>
@@ -91,46 +99,23 @@ export default function QuestionnairesPage() {
         {preview && (
           <div className="bg-background/60 rounded-control p-4">
             <p className="text-[0.78rem] font-bold text-ink-secondary uppercase tracking-wide">How the patient sees it</p>
-            <div className="mt-2 space-y-3">
-              {previewFields.map((f, i) => (
-                <div key={i} className="bg-white border border-border rounded-control p-3.5">
-                  <p className="font-bold text-[0.88rem]">{i + 1}. {f.question} {f.required && <span className="text-danger text-[0.72rem]">Required</span>}</p>
-                  <p className="text-[0.75rem] text-ink-secondary mt-0.5">{f.type}</p>
-                  {f.type === "Yes/No" && <div className="grid grid-cols-2 gap-1.5 mt-2">{["Yes", "No"].map((o) => <span key={o} className="border border-border rounded-lg py-2 text-center text-sm font-semibold">{o}</span>)}</div>}
-                  {(f.type === "Single choice" || f.type === "Multiple choice") && <div className="space-y-1.5 mt-2">{(f.options ?? ["Option A", "Option B"]).map((o) => <span key={o} className="block border border-border rounded-lg px-3 py-2 text-sm">{o}</span>)}</div>}
-                  {(f.type === "Short text" || f.type === "Long text" || f.type === "Numeric" || f.type === "Date") && <div className="border border-border rounded-lg px-3 py-2.5 text-sm text-ink-faint mt-2">Patient answer field</div>}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </Drawer>
-
-      <Drawer open={!!builder} onClose={() => setBuilder(null)} title={builder ? `Builder · ${builder.name}` : "Builder"}>
-        {builder && (
-          <div className="space-y-3">
-            <AnimatePresence initial={false}>
-              {builder.fields.map((f, i) => (
-                <motion.div key={`${f.question}-${i}`} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="border border-border rounded-control p-3.5 bg-white">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="font-bold text-[0.87rem]">{i + 1}. {f.question}</p>
-                    <StatusBadge status={f.required ? "required" : "optional"} />
+            {previewLoading ? (
+              <p className="text-sm text-ink-secondary mt-2">Loading questions…</p>
+            ) : previewFields.length === 0 ? (
+              <p className="text-sm text-ink-secondary mt-2">No questions in this form yet.</p>
+            ) : (
+              <div className="mt-2 space-y-3">
+                {previewFields.map((f, i) => (
+                  <div key={i} className="bg-white border border-border rounded-control p-3.5">
+                    <p className="font-bold text-[0.88rem]">{i + 1}. {f.question} {f.required && <span className="text-danger text-[0.72rem]">Required</span>}</p>
+                    <p className="text-[0.75rem] text-ink-secondary mt-0.5">{f.type}</p>
+                    {f.type === "Yes/No" && <div className="grid grid-cols-2 gap-1.5 mt-2">{["Yes", "No"].map((o) => <span key={o} className="border border-border rounded-lg py-2 text-center text-sm font-semibold">{o}</span>)}</div>}
+                    {(f.type === "Single choice" || f.type === "Multiple choice") && <div className="space-y-1.5 mt-2">{(f.options ?? ["Option A", "Option B"]).map((o) => <span key={o} className="block border border-border rounded-lg px-3 py-2 text-sm">{o}</span>)}</div>}
+                    {(f.type === "Short text" || f.type === "Long text" || f.type === "Numeric" || f.type === "Date") && <div className="border border-border rounded-lg px-3 py-2.5 text-sm text-ink-faint mt-2">Patient answer field</div>}
                   </div>
-                  <p className="text-[0.76rem] text-ink-secondary mt-1">{f.type}{f.options ? ` · ${f.options.join(", ")}` : ""}</p>
-                  <div className="flex gap-2 mt-2">
-                    <button className="text-[0.76rem] font-bold text-healthcare hover:underline">Edit</button>
-                    <button className="text-[0.76rem] font-bold text-ink-secondary hover:text-healthcare">Duplicate</button>
-                    <button className="text-[0.76rem] font-bold text-ink-secondary hover:text-danger">Delete</button>
-                  </div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-            <div className="flex flex-wrap gap-1.5">
-              {Q_TYPES.map((t) => (
-                <button key={t} className="text-[0.75rem] font-bold border border-border rounded-full px-2.5 py-1.5 hover:border-healthcare hover:text-healthcare transition">+ {t}</button>
-              ))}
-            </div>
-            <Button className="w-full" onClick={() => setBuilder(null)}>Done</Button>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </Drawer>

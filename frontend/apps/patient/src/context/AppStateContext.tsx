@@ -8,7 +8,6 @@ import {
 } from "../api";
 import { mapNotification, mapPatientAppointment, persistRead } from "../lib/backend";
 import { useAuth } from "./AuthContext";
-import { INITIAL_APPOINTMENTS, INITIAL_NOTIFICATIONS } from "../mock/data";
 import type { Appointment, NotificationItem } from "../types";
 
 interface AppState {
@@ -17,7 +16,7 @@ interface AppState {
   unreadCount: number;
   /** True while the first live load is in flight. */
   loading: boolean;
-  /** True when data comes from the backend (false = offline mock data). */
+  /** True when the backend session is ready. */
   live: boolean;
   refresh: () => Promise<void>;
   addAppointment: (a: Appointment) => void;
@@ -34,8 +33,8 @@ const Ctx = createContext<AppState | null>(null);
 export function AppStateProvider({ children }: { children: ReactNode }) {
   const { mode, isAuthenticated } = useAuth();
   const live = mode === "live" && isAuthenticated;
-  const [appointments, setAppointments] = useState<Appointment[]>(INITIAL_APPOINTMENTS);
-  const [notifications, setNotifications] = useState<NotificationItem[]>(INITIAL_NOTIFICATIONS);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [liveLoaded, setLiveLoaded] = useState(false);
 
@@ -54,13 +53,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     }
   }, [live]);
 
-  // When a live session starts, swap mock seeds for backend data.
+  // When a live session starts, load backend data; on logout, clear it.
   useEffect(() => {
     if (live && !liveLoaded) void refresh();
     if (!live && liveLoaded) {
       setLiveLoaded(false);
-      setAppointments(INITIAL_APPOINTMENTS);
-      setNotifications(INITIAL_NOTIFICATIONS);
+      setAppointments([]);
+      setNotifications([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live]);
@@ -75,23 +74,18 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const rescheduleLive = useCallback(
     async (id: string, slotStart: string, slotEnd: string) => {
-      if (!live) return;
       await apiReschedule(id, { slot_start: slotStart, slot_end: slotEnd });
       await refresh();
     },
-    [live, refresh],
+    [refresh],
   );
 
   const cancelAppointment = useCallback(
     async (id: string) => {
-      if (!live) {
-        setAppointments((prev) => prev.map((a) => (a.id === id ? { ...a, status: "cancelled" } : a)));
-        return;
-      }
       await apiCancel(id);
       await refresh();
     },
-    [live, refresh],
+    [refresh],
   );
 
   const markAllRead = useCallback(() => {

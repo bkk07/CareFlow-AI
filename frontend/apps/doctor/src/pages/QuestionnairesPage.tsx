@@ -2,13 +2,13 @@ import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ArrowRight, CheckCircle2, Clock, FileText } from "lucide-react";
 import { useSchedule } from "../context/ScheduleContext";
-import { EmptyState, StatusBadge } from "../components/common/ui";
+import { CardSkeleton, EmptyState, ErrorState, StatusBadge } from "../components/common/ui";
 import { Tabs } from "../components/common/Modal";
 
 type Filter = "all" | "completed" | "pending";
 
 export default function QuestionnairesPage() {
-  const { questionnaires, live, loading } = useSchedule();
+  const { questionnaires, loading, error, refresh } = useSchedule();
   const [params] = useSearchParams();
   const focusId = params.get("appointment");
   const [filter, setFilter] = useState<Filter>("all");
@@ -28,11 +28,11 @@ export default function QuestionnairesPage() {
         <p className="page-sub mt-1">Patient-provided administrative information — no diagnosis or clinical scoring.</p>
       </div>
 
-      {live && (
-        <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">
-          {loading ? "Syncing responses…" : "Live responses from your appointments"}
-        </p>
-      )}
+      <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">
+        {loading ? "Syncing responses…" : "Live responses from your appointments"}
+      </p>
+
+      {error && <ErrorState title="Could not load questionnaires" body={error} onRetry={() => void refresh()} />}
 
       <div className="card-base px-2">
         <Tabs<Filter>
@@ -42,7 +42,11 @@ export default function QuestionnairesPage() {
         />
       </div>
 
-      {visible.length === 0 ? (
+      {loading && visible.length === 0 && !error ? (
+        <div className="space-y-3">
+          <CardSkeleton lines={3} />
+        </div>
+      ) : visible.length === 0 ? (
         <div className="card-base"><EmptyState title="No questionnaires pending" body="New patient responses will appear here before each visit." /></div>
       ) : (
         <div className="space-y-3">

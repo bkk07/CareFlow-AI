@@ -4,7 +4,6 @@ import {
   login as apiLogin,
   me as apiMe,
   myProfile as apiMyProfile,
-  probeBackend,
   restoreAccessToken,
   setAccessToken,
   updateMyProfile as apiUpdateProfile,
@@ -12,14 +11,29 @@ import {
   type DoctorProfile as BackendProfile,
 } from "../api";
 import { mapDoctorProfile } from "../lib/backend";
-import { CURRENT_DOCTOR } from "../mock/doctors";
 import type { ConsultationMode, Doctor } from "../types";
 
-export type BackendMode = "checking" | "live" | "mock";
+export type BackendMode = "checking" | "live";
+
+const EMPTY_DOCTOR: Doctor = {
+  id: "",
+  name: "",
+  specialty: "",
+  department: "",
+  qualifications: "",
+  experienceYears: 0,
+  languages: [],
+  hospital: "",
+  photo: "",
+  consultationTypes: [],
+  appointmentDuration: 0,
+  status: "active",
+  acceptingAppointments: false,
+};
 
 interface AuthState {
   isAuthenticated: boolean;
-  /** live = backend reachable + JWT session; mock = offline demo data. */
+  /** live = backend JWT session. No offline fallback. */
   mode: BackendMode;
   user: CurrentUser | null;
   profile: BackendProfile | null;
@@ -27,14 +41,12 @@ interface AuthState {
   accessToken: string | null;
   authError: string | null;
   login: (email: string, password: string) => Promise<void>;
-  loginMock: () => void;
   logout: () => void;
   updateDoctor: (patch: Partial<Doctor>) => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
 
 const AuthCtx = createContext<AuthState | null>(null);
-const MOCK_KEY = "careflow_doctor_mock_auth";
 
 function profilePatchFromUI(
   patch: Partial<Doctor>,
@@ -58,29 +70,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [profile, setProfile] = useState<BackendProfile | null>(null);
-  const [mockDoctor, setMockDoctor] = useState<Doctor>(CURRENT_DOCTOR);
   const [accessToken, setAccessTokenState] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // On boot: if the backend is up and a token is stored, restore the session.
-  // Otherwise fall back to the offline mock session when one was saved.
+  // On boot: restore the JWT session from storage via the backend.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const reachable = await probeBackend();
-      if (cancelled) return;
-      if (!reachable) {
-        try {
-          if (localStorage.getItem(MOCK_KEY) === "1") setIsAuthenticated(true);
-        } catch {
-          /* private mode */
-        }
-        setMode("mock");
-        return;
-      }
       const token = restoreAccessToken();
       if (!token) {
-        setMode("live");
+        if (!cancelled) setMode("live");
         return;
       }
       try {
@@ -92,6 +91,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsAuthenticated(true);
       } catch {
         setAccessToken(null);
+        if (!cancelled) {
+          setUser(null);
+          setProfile(null);
+          setAccessTokenState(null);
+          setIsAuthenticated(false);
+        }
       }
       if (!cancelled) setMode("live");
     })();
@@ -102,18 +107,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     setAuthError(null);
-    const reachable = await probeBackend();
-    if (!reachable) {
-      // Offline: keep the demo usable with mock data.
-      try {
-        localStorage.setItem(MOCK_KEY, "1");
-      } catch {
-        /* private mode */
-      }
-      setMode("mock");
-      setIsAuthenticated(true);
-      return;
-    }
     try {
       await apiLogin(email, password);
       const [me, prof] = await Promise.all([apiMe(), apiMyProfile()]);
@@ -128,23 +121,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const loginMock = useCallback(() => {
-    try {
-      localStorage.setItem(MOCK_KEY, "1");
-    } catch {
-      /* noop */
-    }
-    setMode("mock");
-    setIsAuthenticated(true);
-  }, []);
-
   const logout = useCallback(() => {
     setAccessToken(null);
-    try {
-      localStorage.removeItem(MOCK_KEY);
-    } catch {
-      /* noop */
-    }
     setUser(null);
     setProfile(null);
     setAccessTokenState(null);
@@ -160,25 +138,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const updateDoctor = useCallback(
     async (patch: Partial<Doctor>) => {
-      if (mode === "live" && profile) {
-        const body = profilePatchFromUI(patch);
-        if (body) {
-          const next = await apiUpdateProfile(body);
-          setProfile(next);
-          return;
-        }
-        return;
-      }
-      // Mock mode (and acceptingAppointments, which has no backend field):
-      // keep everything local.
-      setMockDoctor((d) => ({ ...d, ...patch }));
+      const body = profilePatchFromUI(patch);
+      // acceptingAppointments has no backend field (Schedule owns
+      // calendars.is_active) — nothing to persist for it here.
+      if (!body) return;
+      if (!profile) throw new Error("profile-not-loaded");
+      const next = await apiUpdateProfile(body);
+      setProfile(next);
     },
-    [mode, profile],
+    [profile],
   );
 
   const doctor = useMemo<Doctor>(
-    () => (mode === "live" && profile ? mapDoctorProfile(profile) : mockDoctor),
-    [mode, profile, mockDoctor],
+    () => (profile ? mapDoctorProfile(profile) : EMPTY_DOCTOR),
+    [profile],
   );
 
   const value = useMemo(
@@ -191,7 +164,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       accessToken,
       authError,
       login,
-      loginMock,
       logout,
       updateDoctor,
       refreshProfile,
@@ -205,7 +177,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       accessToken,
       authError,
       login,
-      loginMock,
       logout,
       updateDoctor,
       refreshProfile,

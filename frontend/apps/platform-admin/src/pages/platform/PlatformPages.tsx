@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, CheckCircle2, XCircle } from "lucide-react";
-import { AI_ACTIVITY } from "../../mock/ops";
 import { useAdmin } from "../../store/AdminStore";
 import { Avatar, Button, EmptyState, MetricCard, StatusBadge } from "../../components/common/ui";
 import { ConfirmDialog, Drawer, ResponsiveTable } from "../../components/common/Modal";
@@ -23,20 +22,24 @@ export function LiveBanner({ text }: { text: string }) {
 }
 
 export function PlatformOverviewPage() {
-  const { overview, hospitals, live } = useAdmin();
-  const pending = live && overview ? overview.pending_applications : hospitals.filter((h) => ["submitted", "under_review", "draft"].includes(h.status)).length;
-  const openIssues = live && overview ? overview.open_reconciliations + overview.open_escalations : 0;
+  const { overview, hospitals, loading, backendError } = useAdmin();
+  const pending = overview ? overview.pending_applications : hospitals.filter((h) => ["submitted", "under_review", "draft"].includes(h.status)).length;
+  const openIssues = overview ? overview.open_reconciliations + overview.open_escalations : 0;
   return (
     <div className="space-y-5">
       <div><h1 className="page-title">Platform Overview</h1><p className="page-sub mt-1">Global visibility across hospitals, doctors, and operations.</p></div>
       <LiveBanner text="Live network counts" />
+      {loading && <p className="text-[0.83rem] text-ink-secondary">Loading platform overview…</p>}
+      {backendError && (
+        <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">{backendError}</p>
+      )}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-        <MetricCard label="Hospitals" value={String(live && overview ? overview.hospitals_total : hospitals.length)} sub={`${pending} pending review`} />
-        <MetricCard label="Active doctors" value={String(live && overview ? overview.doctors_active : "—")} sub="across network" tone="teal" />
-        <MetricCard label="Patients" value={live && overview ? overview.patients_total.toLocaleString() : "—"} sub="administrative records" />
-        <MetricCard label="Appointments today" value={String(live && overview ? overview.appointments_today : "—")} sub="all hospitals" />
+        <MetricCard label="Hospitals" value={String(overview ? overview.hospitals_total : hospitals.length)} sub={`${pending} pending review`} />
+        <MetricCard label="Active doctors" value={overview ? String(overview.doctors_active) : "—"} sub="across network" tone="teal" />
+        <MetricCard label="Patients" value={overview ? overview.patients_total.toLocaleString() : "—"} sub="administrative records" />
+        <MetricCard label="Appointments today" value={overview ? String(overview.appointments_today) : "—"} sub="all hospitals" />
         <MetricCard label="AI conversations" value="—" sub="see AI Activity" />
-        <MetricCard label="Integration health" value={live && overview ? (overview.open_reconciliations > 0 ? "Attention" : "Healthy") : "—"} sub="open reconciliations" tone={live && overview && overview.open_reconciliations > 0 ? "warning" : "success"} />
+        <MetricCard label="Integration health" value={overview ? (overview.open_reconciliations > 0 ? "Attention" : "Healthy") : "—"} sub="open reconciliations" tone={overview && overview.open_reconciliations > 0 ? "warning" : "success"} />
         <MetricCard label="Open operational issues" value={String(openIssues)} sub="needs review" tone={openIssues > 0 ? "danger" : "navy"} />
         <MetricCard label="Pending applications" value={String(pending)} sub="awaiting decision" tone={pending > 0 ? "warning" : "navy"} />
       </div>
@@ -45,28 +48,22 @@ export function PlatformOverviewPage() {
           <h2 className="section-title">Needs attention</h2>
           <Link to="/platform/applications" className="text-[0.8rem] font-bold text-healthcare hover:underline inline-flex items-center gap-1">Review <ArrowRight size={13} /></Link>
         </div>
-        <ul className="mt-2 divide-y divide-border/70 text-sm">
-          {live && overview ? (
-            <>
-              <li className="py-2">{overview.pending_applications} hospital applications — <strong>awaiting review</strong>.</li>
-              <li className="py-2">{overview.open_reconciliations} open reconciliations — <strong>verification needed</strong>.</li>
-              <li className="py-2">{overview.open_escalations} open escalations — <strong>operator queue</strong>.</li>
-            </>
-          ) : (
-            <>
-              <li className="py-2">Northgate Hospital application — <strong>submitted</strong>, awaiting review.</li>
-              <li className="py-2">2 unknown integration outcomes — <strong>verification needed</strong>.</li>
-              <li className="py-2">Eastside Clinic application was <strong>rejected</strong> — record kept for audit.</li>
-            </>
-          )}
-        </ul>
+        {overview ? (
+          <ul className="mt-2 divide-y divide-border/70 text-sm">
+            <li className="py-2">{overview.pending_applications} hospital applications — <strong>awaiting review</strong>.</li>
+            <li className="py-2">{overview.open_reconciliations} open reconciliations — <strong>verification needed</strong>.</li>
+            <li className="py-2">{overview.open_escalations} open escalations — <strong>operator queue</strong>.</li>
+          </ul>
+        ) : (
+          <div className="mt-2"><EmptyState title="No platform data yet" body="Connect the backend to populate network counts. New applications, reconciliations, and escalations will appear here." /></div>
+        )}
       </div>
     </div>
   );
 }
 
 export function HospitalApplicationsPage() {
-  const { hospitals, reviewHospital, live, backendError } = useAdmin();
+  const { hospitals, reviewHospital, loading, backendError } = useAdmin();
   const [selected, setSelected] = useState<Hospital | null>(null);
   const [decision, setDecision] = useState<{ id: string; approve: boolean } | null>(null);
   const [reason, setReason] = useState("Does not meet onboarding requirements.");
@@ -88,12 +85,13 @@ export function HospitalApplicationsPage() {
     <div className="space-y-4">
       <div><h1 className="page-title">Hospital Applications</h1><p className="page-sub mt-1">{pending.length} awaiting decision.</p></div>
       <LiveBanner text="Live applications from the platform" />
-      {(error ?? backendError) && live && (
+      {loading && <p className="text-[0.83rem] text-ink-secondary">Loading applications…</p>}
+      {(error ?? backendError) && (
         <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">{error ?? backendError}</p>
       )}
-      {pending.length === 0 ? (
+      {pending.length === 0 && !loading ? (
         <div className="card-base"><EmptyState title="No pending applications" body="New hospital applications will appear here for review." /></div>
-      ) : (
+      ) : pending.length > 0 ? (
         <ResponsiveTable headers={["Hospital", "Submitted", "Contact", "Status", "Actions"]}>
           {hospitals.map((h) => (
             <tr key={h.id} className="hover:bg-background/60 transition">
@@ -115,7 +113,7 @@ export function HospitalApplicationsPage() {
             </tr>
           ))}
         </ResponsiveTable>
-      )}
+      ) : null}
       <Drawer open={!!selected} onClose={() => setSelected(null)} title={selected?.name ?? "Application"}>
         {selected && (
           <div className="space-y-4 text-sm">
@@ -168,39 +166,44 @@ export function HospitalApplicationsPage() {
 }
 
 export function PlatformHospitalsPage() {
-  const { hospitals, suspendHospital, live, backendError } = useAdmin();
+  const { hospitals, suspendHospital, loading, backendError } = useAdmin();
   const [error, setError] = useState<string | null>(null);
   const [confirmSuspend, setConfirmSuspend] = useState<string | null>(null);
   return (
     <div className="space-y-4">
       <div><h1 className="page-title">Hospitals</h1><p className="page-sub mt-1">Every organization on the platform.</p></div>
       <LiveBanner text="Live hospital directory" />
-      {(error ?? backendError) && live && (
+      {loading && <p className="text-[0.83rem] text-ink-secondary">Loading hospitals…</p>}
+      {(error ?? backendError) && (
         <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">{error ?? backendError}</p>
       )}
-      <ResponsiveTable headers={["Hospital", "Status", "Doctors", "Today", "Contact", "Actions"]}>
-        {hospitals.map((h) => (
-          <tr key={h.id} className="hover:bg-background/60">
-            <td className="td-cell font-bold">{h.name}<span className="block text-[0.72rem] text-ink-faint font-semibold">{live ? h.id.slice(0, 8) : h.location}</span></td>
-            <td className="td-cell"><StatusBadge status={h.status} /></td>
-            <td className="td-cell">{h.activeDoctors}/{h.doctors} active</td>
-            <td className="td-cell">{h.appointmentsToday}</td>
-            <td className="td-cell text-ink-secondary text-[0.8rem]">{h.contact}</td>
-            <td className="td-cell">
-              {live && h.status === "approved" ? (
-                <button
-                  onClick={() => setConfirmSuspend(h.id)}
-                  className="text-[0.78rem] font-bold text-ink-secondary hover:text-danger"
-                >
-                  Suspend
-                </button>
-              ) : (
-                <span className="text-ink-faint text-[0.78rem]">—</span>
-              )}
-            </td>
-          </tr>
-        ))}
-      </ResponsiveTable>
+      {hospitals.length === 0 && !loading ? (
+        <div className="card-base"><EmptyState title="No hospitals yet" body="Hospitals registered through the backend will appear here." /></div>
+      ) : hospitals.length > 0 ? (
+        <ResponsiveTable headers={["Hospital", "Status", "Doctors", "Today", "Contact", "Actions"]}>
+          {hospitals.map((h) => (
+            <tr key={h.id} className="hover:bg-background/60">
+              <td className="td-cell font-bold">{h.name}<span className="block text-[0.72rem] text-ink-faint font-semibold">{h.id.slice(0, 8)}</span></td>
+              <td className="td-cell"><StatusBadge status={h.status} /></td>
+              <td className="td-cell">{h.activeDoctors}/{h.doctors} active</td>
+              <td className="td-cell">{h.appointmentsToday}</td>
+              <td className="td-cell text-ink-secondary text-[0.8rem]">{h.contact}</td>
+              <td className="td-cell">
+                {h.status === "approved" ? (
+                  <button
+                    onClick={() => setConfirmSuspend(h.id)}
+                    className="text-[0.78rem] font-bold text-ink-secondary hover:text-danger"
+                  >
+                    Suspend
+                  </button>
+                ) : (
+                  <span className="text-ink-faint text-[0.78rem]">—</span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </ResponsiveTable>
+      ) : null}
       <ConfirmDialog
         open={!!confirmSuspend}
         onClose={() => setConfirmSuspend(null)}
@@ -222,33 +225,47 @@ export function PlatformHospitalsPage() {
 }
 
 export function PlatformDoctorsPage() {
-  const { doctors } = useAdmin();
+  const { doctors, loading, backendError } = useAdmin();
   return (
     <div className="space-y-4">
       <div><h1 className="page-title">Doctors</h1><p className="page-sub mt-1">Global directory across hospitals.</p></div>
       <LiveBanner text="Live doctor directory" />
-      <ResponsiveTable headers={["Doctor", "Hospital", "Specialty", "Status", "This week"]}>
-        {doctors.map((d) => (
-          <tr key={d.id} className="hover:bg-background/60">
-            <td className="td-cell"><span className="flex items-center gap-2"><Avatar name={d.name} photo={d.photo} size="sm" /><span className="font-bold">{d.name}</span></span></td>
-            <td className="td-cell">{d.hospital}</td>
-            <td className="td-cell">{d.specialty}</td>
-            <td className="td-cell"><StatusBadge status={d.status} /></td>
-            <td className="td-cell">{d.appointmentsWeek}</td>
-          </tr>
-        ))}
-      </ResponsiveTable>
+      {loading && <p className="text-[0.83rem] text-ink-secondary">Loading doctors…</p>}
+      {backendError && (
+        <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">{backendError}</p>
+      )}
+      {doctors.length === 0 && !loading ? (
+        <div className="card-base"><EmptyState title="No doctors yet" body="Doctors registered through the backend will appear here." /></div>
+      ) : doctors.length > 0 ? (
+        <ResponsiveTable headers={["Doctor", "Hospital", "Specialty", "Status", "This week"]}>
+          {doctors.map((d) => (
+            <tr key={d.id} className="hover:bg-background/60">
+              <td className="td-cell"><span className="flex items-center gap-2"><Avatar name={d.name} photo={d.photo} size="sm" /><span className="font-bold">{d.name}</span></span></td>
+              <td className="td-cell">{d.hospital}</td>
+              <td className="td-cell">{d.specialty}</td>
+              <td className="td-cell"><StatusBadge status={d.status} /></td>
+              <td className="td-cell">{d.appointmentsWeek}</td>
+            </tr>
+          ))}
+        </ResponsiveTable>
+      ) : null}
     </div>
   );
 }
 
 export function PlatformPatientsPage() {
-  const { patients, live } = useAdmin();
-  if (live) {
-    return (
-      <div className="space-y-4">
-        <div><h1 className="page-title">Patients</h1><p className="page-sub mt-1">Minimal administrative directory. Contact details partially masked.</p></div>
-        <LiveBanner text="Live patient directory" />
+  const { patients, loading, backendError } = useAdmin();
+  return (
+    <div className="space-y-4">
+      <div><h1 className="page-title">Patients</h1><p className="page-sub mt-1">Minimal administrative directory. Contact details partially masked.</p></div>
+      <LiveBanner text="Live patient directory" />
+      {loading && <p className="text-[0.83rem] text-ink-secondary">Loading patients…</p>}
+      {backendError && (
+        <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">{backendError}</p>
+      )}
+      {patients.length === 0 && !loading ? (
+        <div className="card-base"><EmptyState title="No patients yet" body="No patient accounts registered yet." /></div>
+      ) : patients.length > 0 ? (
         <ResponsiveTable headers={["Patient", "Contact", "Status", "Since"]}>
           {patients.map((p) => (
             <tr key={p.id} className="hover:bg-background/60">
@@ -259,98 +276,89 @@ export function PlatformPatientsPage() {
             </tr>
           ))}
         </ResponsiveTable>
-        {patients.length === 0 && (
-          <div className="card-base p-5 text-sm text-ink-secondary">No patient accounts registered yet.</div>
-        )}
-      </div>
-    );
-  }
-  const rows = [
-    ["A. Morgan", "alex.m***@example.com", "City General", "3", "Active", "2023"],
-    ["J. Smith", "john.s***@example.com", "City General", "2", "Active", "2024"],
-    ["M. Garcia", "maria.g***@example.com", "Riverside", "1", "Active", "2024"],
-    ["R. Chen", "robert.c***@example.com", "City General", "4", "Active", "2022"],
-  ];
-  return (
-    <div className="space-y-4">
-      <div><h1 className="page-title">Patients</h1><p className="page-sub mt-1">Minimal administrative directory. Contact details partially masked.</p></div>
-      <ResponsiveTable headers={["Patient", "Contact", "Hospital", "Visits", "Status", "Since"]}>
-        {rows.map((r, i) => (
-          <tr key={i} className="hover:bg-background/60">
-            <td className="td-cell font-bold">{r[0]}</td><td className="td-cell font-mono text-[0.78rem]">{r[1]}</td><td className="td-cell">{r[2]}</td><td className="td-cell">{r[3]}</td>
-            <td className="td-cell"><StatusBadge status="active" /></td><td className="td-cell">{r[5]}</td>
-          </tr>
-        ))}
-      </ResponsiveTable>
+      ) : null}
     </div>
   );
 }
 
 export function PlatformAppointmentsPage() {
-  const { appointments } = useAdmin();
+  const { appointments, loading, backendError } = useAdmin();
   return (
     <div className="space-y-4">
       <div><h1 className="page-title">Appointments</h1><p className="page-sub mt-1">All hospitals, with integration state.</p></div>
       <LiveBanner text="Live network bookings" />
-      <ResponsiveTable headers={["ID", "Patient", "Doctor", "Hospital", "When", "Status", "Sync"]}>
-        {appointments.map((a) => (
-          <tr key={a.id} className="hover:bg-background/60">
-            <td className="td-cell font-mono text-[0.78rem]">{a.id}</td>
-            <td className="td-cell font-bold">{a.patient}</td>
-            <td className="td-cell">{a.doctor}</td>
-            <td className="td-cell">{a.hospital}</td>
-            <td className="td-cell whitespace-nowrap">{a.date} · {a.time}</td>
-            <td className="td-cell"><StatusBadge status={a.status} /></td>
-            <td className="td-cell"><StatusBadge status={a.status === "sync_pending" ? "verifying" : "success"} /></td>
-          </tr>
-        ))}
-      </ResponsiveTable>
+      {loading && <p className="text-[0.83rem] text-ink-secondary">Loading appointments…</p>}
+      {backendError && (
+        <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">{backendError}</p>
+      )}
+      {appointments.length === 0 && !loading ? (
+        <div className="card-base"><EmptyState title="No appointments yet" body="Bookings created through the backend will appear here." /></div>
+      ) : appointments.length > 0 ? (
+        <ResponsiveTable headers={["ID", "Patient", "Doctor", "Hospital", "When", "Status", "Sync"]}>
+          {appointments.map((a) => (
+            <tr key={a.id} className="hover:bg-background/60">
+              <td className="td-cell font-mono text-[0.78rem]">{a.id}</td>
+              <td className="td-cell font-bold">{a.patient}</td>
+              <td className="td-cell">{a.doctor}</td>
+              <td className="td-cell">{a.hospital}</td>
+              <td className="td-cell whitespace-nowrap">{a.date} · {a.time}</td>
+              <td className="td-cell"><StatusBadge status={a.status} /></td>
+              <td className="td-cell"><StatusBadge status={a.status === "sync_pending" ? "verifying" : "success"} /></td>
+            </tr>
+          ))}
+        </ResponsiveTable>
+      ) : null}
     </div>
   );
 }
 
 export function PlatformAIPage() {
-  const { aiEvaluation, live } = useAdmin();
-  if (live && aiEvaluation) {
-    const avg = (ms: number | null) => (ms == null ? "—" : `${Math.round(ms)} ms`);
+  const { aiEvaluation, loading, backendError } = useAdmin();
+  const avg = (ms: number | null) => (ms == null ? "—" : `${Math.round(ms)} ms`);
+  if (loading && !aiEvaluation) {
     return (
       <div className="space-y-4">
         <div><h1 className="page-title">Platform AI Activity</h1><p className="page-sub mt-1">Capability executions across hospitals.</p></div>
         <LiveBanner text="Live capability aggregates" />
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-          <MetricCard label="Executions" value={aiEvaluation.executions_total.toLocaleString()} sub="all capabilities" />
-          <MetricCard label="Errors" value={String(aiEvaluation.errors_total)} sub="needs review" tone={aiEvaluation.errors_total > 0 ? "warning" : "success"} />
-          <MetricCard label="Error rate" value={`${(aiEvaluation.error_rate * 100).toFixed(1)}%`} sub="across network" tone={aiEvaluation.error_rate > 0.05 ? "warning" : "success"} />
-          <MetricCard label="Capabilities" value={String(aiEvaluation.by_tool.length)} sub="distinct tools" tone="teal" />
-        </div>
-        <ResponsiveTable headers={["Capability", "Calls", "Errors", "Avg latency"]}>
-          {aiEvaluation.by_tool.map((t) => (
-            <tr key={t.tool_name} className="hover:bg-background/60">
-              <td className="td-cell font-mono text-[0.78rem]">{t.tool_name}</td>
-              <td className="td-cell">{t.calls}</td>
-              <td className="td-cell">{t.errors}</td>
-              <td className="td-cell tabular-nums">{avg(t.avg_latency_ms)}</td>
-            </tr>
-          ))}
-        </ResponsiveTable>
+        <p className="text-[0.83rem] text-ink-secondary">Loading AI activity…</p>
+      </div>
+    );
+  }
+  if (backendError && !aiEvaluation) {
+    return (
+      <div className="space-y-4">
+        <div><h1 className="page-title">Platform AI Activity</h1><p className="page-sub mt-1">Capability executions across hospitals.</p></div>
+        <LiveBanner text="Live capability aggregates" />
+        <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">{backendError}</p>
+      </div>
+    );
+  }
+  if (!aiEvaluation) {
+    return (
+      <div className="space-y-4">
+        <div><h1 className="page-title">Platform AI Activity</h1><p className="page-sub mt-1">Capability executions across hospitals.</p></div>
+        <LiveBanner text="Live capability aggregates" />
+        <div className="card-base"><EmptyState title="No AI executions yet" body="Capability executions reported by the backend will appear here." /></div>
       </div>
     );
   }
   return (
     <div className="space-y-4">
       <div><h1 className="page-title">Platform AI Activity</h1><p className="page-sub mt-1">Capability executions across hospitals.</p></div>
+      <LiveBanner text="Live capability aggregates" />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-        <MetricCard label="Conversations" value="1,893" sub="7 days" />
-        <MetricCard label="Executions" value="6,412" sub="all capabilities" />
-        <MetricCard label="Error rate" value="2.1%" sub="needs review" tone="warning" />
-        <MetricCard label="Avg latency" value="612 ms" sub="per execution" tone="teal" />
+        <MetricCard label="Executions" value={aiEvaluation.executions_total.toLocaleString()} sub="all capabilities" />
+        <MetricCard label="Errors" value={String(aiEvaluation.errors_total)} sub="needs review" tone={aiEvaluation.errors_total > 0 ? "warning" : "success"} />
+        <MetricCard label="Error rate" value={`${(aiEvaluation.error_rate * 100).toFixed(1)}%`} sub="across network" tone={aiEvaluation.error_rate > 0.05 ? "warning" : "success"} />
+        <MetricCard label="Capabilities" value={String(aiEvaluation.by_tool.length)} sub="distinct tools" tone="teal" />
       </div>
-      <ResponsiveTable headers={["Time", "Hospital", "Intent", "Capability", "Status", "Duration"]}>
-        {AI_ACTIVITY.map((e) => (
-          <tr key={e.id} className="hover:bg-background/60">
-            <td className="td-cell">{e.time}</td><td className="td-cell">{e.hospital}</td><td className="td-cell font-semibold">{e.intent}</td>
-            <td className="td-cell font-mono text-[0.78rem]">{e.capability}</td>
-            <td className="td-cell"><StatusBadge status={e.status} /></td><td className="td-cell tabular-nums">{e.durationMs} ms</td>
+      <ResponsiveTable headers={["Capability", "Calls", "Errors", "Avg latency"]}>
+        {aiEvaluation.by_tool.map((t) => (
+          <tr key={t.tool_name} className="hover:bg-background/60">
+            <td className="td-cell font-mono text-[0.78rem]">{t.tool_name}</td>
+            <td className="td-cell">{t.calls}</td>
+            <td className="td-cell">{t.errors}</td>
+            <td className="td-cell tabular-nums">{avg(t.avg_latency_ms)}</td>
           </tr>
         ))}
       </ResponsiveTable>

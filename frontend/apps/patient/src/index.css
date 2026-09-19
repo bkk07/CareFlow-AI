@@ -65,6 +65,83 @@ body {
   }
 }
 
+/* AI chat bubbles render markdown (+ KaTeX). Keep it compact inside the bubble. */
+.chat-markdown {
+  overflow-wrap: anywhere;
+}
+.chat-markdown > *:first-child {
+  margin-top: 0;
+}
+.chat-markdown > *:last-child {
+  margin-bottom: 0;
+}
+.chat-markdown p {
+  margin: 0 0 0.5rem;
+}
+.chat-markdown p:last-child {
+  margin-bottom: 0;
+}
+.chat-markdown strong {
+  font-weight: 700;
+}
+.chat-markdown ol,
+.chat-markdown ul {
+  margin: 0.35rem 0 0.5rem;
+  padding-left: 1.25rem;
+}
+.chat-markdown ol {
+  list-style: decimal;
+}
+.chat-markdown ul {
+  list-style: disc;
+}
+.chat-markdown li {
+  margin: 0.2rem 0;
+}
+.chat-markdown li::marker {
+  font-weight: 600;
+}
+.chat-markdown code {
+  font-size: 0.82em;
+  background: rgba(18, 59, 93, 0.07);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+}
+.chat-markdown pre {
+  margin: 0.5rem 0;
+  padding: 0.6rem 0.7rem;
+  border-radius: 8px;
+  background: rgba(18, 59, 93, 0.06);
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+.chat-markdown pre code {
+  background: none;
+  padding: 0;
+}
+.chat-markdown table {
+  width: 100%;
+  margin: 0.5rem 0;
+  border-collapse: collapse;
+  font-size: 0.83rem;
+  display: block;
+  overflow-x: auto;
+}
+.chat-markdown th,
+.chat-markdown td {
+  border: 1px solid var(--border);
+  padding: 0.35rem 0.55rem;
+  text-align: left;
+  vertical-align: top;
+}
+.chat-markdown th {
+  background: rgba(18, 59, 93, 0.06);
+  font-weight: 700;
+}
+.chat-markdown tr:nth-child(even) td {
+  background: rgba(18, 59, 93, 0.025);
+}
+
 /* thin scrollbars for filter rows */
 .no-scrollbar::-webkit-scrollbar {
   display: none;

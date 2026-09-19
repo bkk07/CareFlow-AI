@@ -1,13 +1,11 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { CheckCircle2, ChevronRight, FlaskConical, Play } from "lucide-react";
-import { DOCTORS } from "../mock/data";
 import {
   checkAvailability as apiCheckAvailability,
   listAppointmentTypes as apiListTypes,
   searchDoctors as apiSearchDoctors,
 } from "../api";
-import { useAppState } from "../context/AppStateContext";
 import { Button } from "../components/common/ui";
 
 interface Step {
@@ -17,14 +15,14 @@ interface Step {
   latency: string;
 }
 
-const SIMULATED: Step[] = [
-  { id: "intent", label: "Intent detected", detail: "“cardiology this week” → specialty=Cardiology, range=7d", latency: "84 ms" },
-  { id: "context", label: "Context loaded", detail: "conversation=cf-8f21 · patient=p1 · preferences applied", latency: "31 ms" },
-  { id: "search", label: "Doctor search completed", detail: "2 cardiology results · City General Hospital", latency: "212 ms" },
-  { id: "avail", label: "Availability checked", detail: "Dr. Sarah Johnson · 9 open slots · Tomorrow 4:30 PM first", latency: "340 ms" },
-  { id: "create", label: "Appointment created (mock)", detail: "state=pending · idempotency_key=mock-9f2c", latency: "188 ms" },
-  { id: "verify", label: "External verification simulated", detail: "verify_external_appointment → match=true", latency: "260 ms" },
-  { id: "sync", label: "State synchronized", detail: "pending → confirmed · history written", latency: "44 ms" },
+const INITIAL: Step[] = [
+  { id: "intent", label: "Intent detected", detail: "press Run live to resolve intent", latency: "—" },
+  { id: "context", label: "Context loaded", detail: "press Run live to load session context", latency: "—" },
+  { id: "search", label: "Doctor search", detail: "not run yet", latency: "—" },
+  { id: "avail", label: "Availability check", detail: "not run yet", latency: "—" },
+  { id: "create", label: "Appointment create skipped", detail: "debug page never books — use Book to create a real visit", latency: "—" },
+  { id: "verify", label: "External verification (simulated)", detail: "verify_external_appointment → not executed from debug", latency: "—" },
+  { id: "sync", label: "State synchronized (simulated)", detail: "no writes were made", latency: "—" },
 ];
 
 function ms(t0: number): string {
@@ -32,9 +30,8 @@ function ms(t0: number): string {
 }
 
 export default function ChatDebugPage() {
-  const { live } = useAppState();
-  const [steps, setSteps] = useState<Step[]>(SIMULATED);
-  const [played, setPlayed] = useState<boolean[]>(SIMULATED.map(() => false));
+  const [steps, setSteps] = useState<Step[]>(INITIAL);
+  const [played, setPlayed] = useState<boolean[]>(INITIAL.map(() => false));
   const [running, setRunning] = useState(false);
 
   function reveal(i: number, patch?: Partial<Step>) {
@@ -48,17 +45,8 @@ export default function ChatDebugPage() {
 
   async function run() {
     setRunning(true);
-    setSteps(SIMULATED);
-    setPlayed(SIMULATED.map(() => false));
-    if (!live) {
-      SIMULATED.forEach((_, i) => {
-        setTimeout(() => {
-          reveal(i);
-          if (i === SIMULATED.length - 1) setRunning(false);
-        }, 450 * (i + 1));
-      });
-      return;
-    }
+    setSteps(INITIAL);
+    setPlayed(INITIAL.map(() => false));
     // Live: execute the read-only capabilities for real; booking + verify +
     // sync stay simulated so the debug page never writes data.
     try {
@@ -97,12 +85,11 @@ export default function ChatDebugPage() {
       } else {
         reveal(3, { label: "Availability checked (live)", detail: "no cardiology results to check", latency: "—" });
       }
-      reveal(4, { label: "Appointment create skipped", detail: "debug page never books — use Book to create a real visit", latency: "—" });
-      reveal(5, { label: "External verification (simulated)", detail: "verify_external_appointment → not executed from debug", latency: "—" });
-      reveal(6, { label: "State synchronized (simulated)", detail: "no writes were made", latency: "—" });
+      reveal(4);
+      reveal(5);
+      reveal(6);
     } catch {
-      reveal(2, { label: "Doctor search failed", detail: "backend error — showing simulated remainder", latency: "—" });
-      [3, 4, 5, 6].forEach((i, k) => setTimeout(() => reveal(i), 400 * (k + 1)));
+      reveal(2, { label: "Doctor search failed", detail: "backend error — check the connection and try again", latency: "—" });
     } finally {
       setRunning(false);
     }
@@ -113,15 +100,15 @@ export default function ChatDebugPage() {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <p className="text-[0.76rem] font-bold uppercase tracking-widest text-teal-dark flex items-center gap-1.5">
-            <FlaskConical size={14} /> Developer demo
+            <FlaskConical size={14} /> Developer tool
           </p>
           <h1 className="page-title mt-1">Chat debug</h1>
           <p className="page-sub mt-1">
-            {live ? "Live run: search + availability execute for real; writes stay simulated." : "Simulated capability timeline. No real tools, APIs, or verification run here."}
+            Live run: search + availability execute for real; writes stay simulated.
           </p>
         </div>
         <Button onClick={() => void run()} disabled={running}>
-          <Play size={15} /> {running ? "Running…" : live ? "Run live" : "Replay demo"}
+          <Play size={15} /> {running ? "Running…" : "Run live"}
         </Button>
       </div>
 
@@ -153,14 +140,14 @@ export default function ChatDebugPage() {
 
         <div className="space-y-3">
           <div className="card-base p-4">
-            <h3 className="font-bold text-ink text-sm">{live ? "Live context" : "Mock context"}</h3>
+            <h3 className="font-bold text-ink text-sm">Live context</h3>
             <dl className="mt-2 space-y-1.5 text-[0.8rem]">
               {[
-                ["Intent", "find_cardiology"],
-                ["Selected doctor", DOCTORS[0].name],
-                ["Selected slot", "Tomorrow · 4:30 PM"],
-                ["Action state", "awaiting_confirm"],
-                ["Verification", live ? "live reads only" : "simulated ✓"],
+                ["Intent", "find_cardiology (example query)"],
+                ["Selected doctor", "resolved on run"],
+                ["Selected slot", "resolved on run"],
+                ["Action state", "read-only (no writes)"],
+                ["Verification", "live reads only"],
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between gap-2">
                   <dt className="text-ink-secondary">{k}</dt>
@@ -170,13 +157,13 @@ export default function ChatDebugPage() {
             </dl>
           </div>
           <div className="card-base p-4">
-            <h3 className="font-bold text-ink text-sm">{live ? "Live capability execution" : "Mock capability execution"}</h3>
+            <h3 className="font-bold text-ink text-sm">Live capability execution</h3>
             <ul className="mt-2 space-y-1.5 text-[0.78rem] font-mono text-ink-secondary">
-              <li>search_doctors → {live ? "live" : "ok"}</li>
-              <li>check_availability → {live ? "live" : "ok"}</li>
-              <li>create_appointment → {live ? "skipped (no writes)" : "ok (idempotent)"}</li>
+              <li>search_doctors → live</li>
+              <li>check_availability → live</li>
+              <li>create_appointment → skipped (no writes)</li>
               <li>verify_external_appointment → simulated</li>
-              <li>synchronize_state → {live ? "not executed" : "confirmed"}</li>
+              <li>synchronize_state → not executed</li>
             </ul>
             <button className="mt-2 text-[0.8rem] font-bold text-healthcare flex items-center gap-1 hover:underline">
               View full trace <ChevronRight size={14} />

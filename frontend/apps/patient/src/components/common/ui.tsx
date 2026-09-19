@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { initials } from "../../mock/images";
+import { initials } from "../../lib/helpers";
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "primary" | "secondary" | "outline" | "ghost" | "danger";

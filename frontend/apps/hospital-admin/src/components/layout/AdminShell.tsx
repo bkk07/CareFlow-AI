@@ -15,7 +15,7 @@ import {
   Users,
   Workflow,
 } from "lucide-react";
-import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { useAdmin } from "../../store/AdminStore";
 import { Avatar } from "../common/ui";
@@ -58,10 +58,9 @@ function NavList({ items }: { items: typeof HOSPITAL_NAV }) {
 }
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
-  const { logout, unread, notifications, markAllRead, hospital, user, live } = useAdmin();
+  const { logout, unread, notifications, markAllRead, hospital, user, live, loading } = useAdmin();
   const [panelOpen, setPanelOpen] = useState(false);
   const navigate = useNavigate();
-  const location = useLocation();
 
   return (
     <div className="min-h-screen bg-background">
@@ -82,7 +81,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       <header className="md:pl-[252px] sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-border">
         <div className="max-w-shell mx-auto px-4 sm:px-6 h-[60px] flex items-center gap-3">
           <div className="min-w-0">
-            <p className="font-bold text-navy text-[0.9rem] truncate">{live && hospital ? hospital.name : "City General Hospital"}</p>
+            <p className="font-bold text-navy text-[0.9rem] truncate">{hospital?.name ?? (live ? "Hospital" : loading ? "Connecting…" : "Hospital")}</p>
             <p className="text-[0.72rem] text-ink-secondary leading-none">{user?.email ?? "Hospital Administrator"}</p>
           </div>
           <div className="flex-1" />
@@ -103,12 +102,16 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                       <p className="font-bold text-navy text-sm">Notifications</p>
                       <button onClick={markAllRead} className="text-[0.76rem] font-bold text-healthcare hover:underline">Mark all read</button>
                     </div>
-                    {notifications.slice(0, 5).map((n) => (
-                      <div key={n.id} className={`px-4 py-3 border-b border-border/60 text-sm ${n.unread ? "bg-healthcare-faint" : ""}`}>
-                        <p className="font-semibold text-[0.84rem]">{n.title}</p>
-                        <p className="text-ink-secondary text-[0.79rem] line-clamp-2">{n.body}</p>
-                      </div>
-                    ))}
+                    {notifications.length === 0 ? (
+                      <p className="px-4 py-5 text-sm text-ink-secondary text-center">No notifications yet.</p>
+                    ) : (
+                      notifications.slice(0, 5).map((n) => (
+                        <div key={n.id} className={`px-4 py-3 border-b border-border/60 text-sm ${n.unread ? "bg-healthcare-faint" : ""}`}>
+                          <p className="font-semibold text-[0.84rem]">{n.title}</p>
+                          <p className="text-ink-secondary text-[0.79rem] line-clamp-2">{n.body}</p>
+                        </div>
+                      ))
+                    )}
                   </motion.div>
                 </>
               )}
@@ -119,7 +122,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       </header>
 
       <div className="md:pl-[252px]">
-        <main key={location.pathname} className="shell-container pt-5">{children}</main>
+        <main className="shell-container pt-5">{children}</main>
       </div>
 
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-border px-2 pt-1.5 pb-[calc(0.4rem+env(safe-area-inset-bottom))] overflow-x-auto no-scrollbar" aria-label="Mobile">

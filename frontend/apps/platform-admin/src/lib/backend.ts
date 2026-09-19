@@ -172,8 +172,8 @@ export function mapPlatformIntegration(i: PlatformIntegration): Integration {
   const failed = (i.operations_by_status.failed ?? 0) + (i.operations_by_status.timed_out ?? 0);
   return {
     id: i.hospital_id,
-    name: `${i.hospital_name} · Mock EHR`,
-    env: "test",
+    name: i.hospital_name,
+    env: "production",
     status: i.open_reconciliations > 0 || failed > 0 ? "degraded" : "connected",
     lastSync: "—",
     requests: i.operations_total,

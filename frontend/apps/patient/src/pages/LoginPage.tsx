@@ -1,17 +1,16 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Eye, EyeOff, Lock, Mail, ShieldCheck, WifiOff } from "lucide-react";
+import { Eye, EyeOff, Lock, Mail, ShieldCheck } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { IMAGES } from "../mock/images";
 import { useAuth } from "../context/AuthContext";
-import { Button, SafeImage } from "../components/common/ui";
+import { Button } from "../components/common/ui";
 import { Logo } from "../components/layout/PatientShell";
 
 export default function LoginPage() {
-  const { login, register, loginMock, mode, authError } = useAuth();
+  const { login, register, mode, authError } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("alex.morgan@example.com");
-  const [password, setPassword] = useState("password123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [remember, setRemember] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -33,20 +32,10 @@ export default function LoginPage() {
       }
       navigate("/");
     } catch {
-      // Offline mock path resolves; real failures surface below.
-      if (mode === "mock") {
-        navigate("/");
-      } else {
-        setLocalError(authError ?? "Sign-in failed. Try again.");
-      }
+      setLocalError(authError ?? "Sign-in failed. Try again.");
     } finally {
       setBusy(false);
     }
-  }
-
-  function continueOffline() {
-    loginMock();
-    navigate("/");
   }
 
   const error = localError ?? authError;
@@ -60,9 +49,8 @@ export default function LoginPage() {
         className="w-full max-w-4xl bg-white border border-border rounded-2xl shadow-card overflow-hidden grid md:grid-cols-2"
       >
         {/* Left brand panel */}
-        <div className="relative hidden md:block">
-          <SafeImage src={IMAGES.loginHero} alt="Doctor consulting a patient" name="CareFlow AI" className="absolute inset-0 w-full h-full" />
-          <div className="absolute inset-0 bg-gradient-to-t from-navy-deep/90 via-navy/55 to-navy/10" aria-hidden />
+        <div className="relative hidden md:block bg-gradient-to-br from-navy-deep via-navy to-healthcare">
+          <div className="absolute inset-0 bg-gradient-to-t from-navy-deep/60 via-transparent to-transparent" aria-hidden />
           <div className="relative h-full flex flex-col justify-end p-8 text-white">
             <Logo light />
             <h2 className="text-[1.4rem] font-extrabold mt-4 leading-snug">Care that starts with listening.</h2>
@@ -86,13 +74,6 @@ export default function LoginPage() {
           <p className="text-ink-secondary text-sm mt-1">
             {creating ? "Register as a patient to book and manage visits." : "Sign in to manage your care with CareFlow AI."}
           </p>
-
-          {mode === "mock" && (
-            <p className="mt-3 flex items-start gap-2 text-[0.8rem] text-warning bg-warning-soft border border-warning/25 rounded-control px-3 py-2.5">
-              <WifiOff size={15} className="shrink-0 mt-0.5" />
-              Backend unreachable — continuing with demo data on this device.
-            </p>
-          )}
 
           <form onSubmit={(e) => void submit(e)} className="mt-6 space-y-4">
             <div>
@@ -173,12 +154,6 @@ export default function LoginPage() {
                 <>New to CareFlow AI? <button type="button" onClick={() => { setCreating(true); setLocalError(null); }} className="font-bold text-healthcare hover:underline">Create account</button></>
               )}
             </p>
-
-            {mode === "live" && (
-              <button type="button" onClick={continueOffline} className="w-full text-center text-[0.78rem] font-semibold text-ink-faint hover:text-ink-secondary">
-                Continue offline with demo data
-              </button>
-            )}
           </form>
 
           <div className="mt-6 flex items-start gap-2 bg-healthcare-faint border border-healthcare/20 rounded-control px-3.5 py-3 text-[0.8rem] text-navy leading-relaxed">
@@ -186,7 +161,7 @@ export default function LoginPage() {
             Your healthcare information stays private and secure.
           </div>
           <p className="text-center text-[0.72rem] text-ink-faint mt-4">
-            {mode === "live" ? "Connected to CareFlow AI backend." : mode === "mock" ? "Offline demo · data stays on this device." : "Checking backend connection…"}
+            {mode === "live" ? "Connected to CareFlow AI backend." : "Checking backend connection…"}
           </p>
         </div>
       </motion.div>

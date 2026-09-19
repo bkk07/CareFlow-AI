@@ -1,6 +1,6 @@
 import { Award, Clock, Globe, MapPin, Star } from "lucide-react";
 import type { Doctor } from "../../types";
-import { consultationModeLabel } from "../../mock/services";
+import { consultationModeLabel } from "../../lib/helpers";
 import { Button, SafeImage } from "../common/ui";
 import { Modal } from "../common/Modal";
 

@@ -83,6 +83,9 @@ def register_hospital(
         address=payload.address,
         contact_email=payload.contact_email.lower(),
         contact_phone=payload.contact_phone,
+        city=(payload.city or "").strip() or None,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
         status=HospitalStatus.submitted,
         submitted_at=_utcnow(),
     )

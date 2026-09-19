@@ -7,16 +7,15 @@ import { MetricCard, StatusBadge } from "../../components/common/ui";
 const LIFECYCLE = ["draft", "submitted", "under_review", "approved"] as const;
 
 export default function HospitalOverviewPage() {
-  const { appointments, doctors, questionnaires, hospital, overview, live, loading, operations, reconciliations } = useAdmin();
+  const { appointments, doctors, departments, questionnaires, hospital, overview, live, loading, operations, reconciliations } = useAdmin();
   const todayCount = appointments.filter((a) => a.date === "Today").length;
   const activeDocs = doctors.filter((d) => d.status === "active").length;
-  const hospitalName = hospital?.name ?? "City General Hospital";
+  const hospitalName = hospital?.name ?? (loading ? "Loading…" : "Hospital");
   const hospitalStatus = (hospital?.status ?? "approved") as (typeof LIFECYCLE)[number] | "rejected" | "suspended";
   const stageIdx = LIFECYCLE.indexOf(hospitalStatus as (typeof LIFECYCLE)[number]);
-  const attention = live
-    ? operations.filter((o) => ["failed", "unknown"].includes(o.status)).length +
-      reconciliations.filter((r) => r.resolution === "open").length
-    : operations.filter((o) => ["failed", "unknown"].includes(o.status)).length;
+  const attention =
+    operations.filter((o) => ["failed", "unknown"].includes(o.status)).length +
+    reconciliations.filter((r) => r.resolution === "open").length;
 
   return (
     <div className="space-y-5">
@@ -61,14 +60,14 @@ export default function HospitalOverviewPage() {
 
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-2.5" aria-label="Key metrics">
         {[
-          { label: "Doctors", value: live && overview ? `${overview.doctors_active} / ${overview.doctors_total}` : `${activeDocs} / ${doctors.length}`, sub: "active / total" },
-          { label: "Appointments today", value: String(todayCount), sub: "across departments" },
-          { label: "Upcoming", value: live && overview ? String(overview.upcoming_appointments) : String(appointments.length), sub: "scheduled" },
-          { label: "Open reconciliations", value: live && overview ? String(overview.pending_reconciliations) : String(reconciliations.filter((r) => r.resolution === "open").length), sub: "need attention", tone: "warning" as const },
-          { label: "Departments", value: "—", sub: "clinical units" },
-          { label: "Questionnaires", value: String(questionnaires.length), sub: "forms" },
+          { label: "Doctors", value: overview ? `${overview.doctors_active} / ${overview.doctors_total}` : loading && doctors.length === 0 ? "…" : `${activeDocs} / ${doctors.length}`, sub: "active / total" },
+          { label: "Appointments today", value: loading && appointments.length === 0 ? "…" : String(todayCount), sub: "across departments" },
+          { label: "Upcoming", value: overview ? String(overview.upcoming_appointments) : loading && appointments.length === 0 ? "…" : String(appointments.length), sub: "scheduled" },
+          { label: "Open reconciliations", value: overview ? String(overview.pending_reconciliations) : String(reconciliations.filter((r) => r.resolution === "open").length), sub: "need attention", tone: "warning" as const },
+          { label: "Departments", value: loading && departments.length === 0 ? "…" : String(departments.length), sub: "clinical units" },
+          { label: "Questionnaires", value: loading && questionnaires.length === 0 ? "…" : String(questionnaires.length), sub: "forms" },
           { label: "AI success rate", value: "—", sub: "last 24h", tone: "success" as const },
-          { label: "Integration", value: live ? "Live" : "Mock EHR", sub: live ? "connected" : "local simulation", tone: "warning" as const },
+          { label: "Integration", value: live ? "Live" : "…", sub: live ? "connected" : "connecting", tone: "warning" as const },
         ].map((m, i) => (
           <motion.div key={m.label} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}>
             <MetricCard label={m.label} value={m.value} sub={m.sub} tone={m.tone ?? "navy"} />
@@ -90,7 +89,7 @@ export default function HospitalOverviewPage() {
               </li>
             ))}
             {appointments.filter((a) => a.date === "Today").length === 0 && (
-              <li className="py-2 text-sm text-ink-secondary">No appointments today.</li>
+              <li className="py-2 text-sm text-ink-secondary">{loading ? "Loading appointments…" : "No appointments today."}</li>
             )}
           </ul>
         </div>

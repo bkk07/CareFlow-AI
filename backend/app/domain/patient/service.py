@@ -121,6 +121,9 @@ def update_contact(
         profile.full_name = name or None
     if "date_of_birth" in data:
         profile.date_of_birth = data["date_of_birth"]
+    if "city" in data:
+        city = (data["city"] or "").strip()
+        profile.city = city or None
     session.commit()
     session.refresh(profile)
     return profile

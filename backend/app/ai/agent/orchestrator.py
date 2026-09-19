@@ -9,6 +9,7 @@ never spin forever.
 
 import re
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from sqlalchemy.orm import Session
@@ -16,6 +17,11 @@ from sqlalchemy.orm import Session
 from app.ai.context.ai_context import get_ai_context, save_ai_context
 from app.ai.mcp_client.client import AgentToolClient
 from app.core.deps import RequestContext
+from app.domain.auth.models import Role
+from app.domain.doctor.models import Doctor
+from app.domain.hospital.models import Hospital
+from app.domain.hospital_config.models import Specialty
+from app.domain.patient.models import PatientProfile
 
 SYSTEM_PROMPT = """You are an administrative scheduling assistant for CareFlow AI. You may: find hospitals/doctors,
 check availability, book/reschedule/cancel, ask approved pre-visit questions,
@@ -31,6 +37,18 @@ How you work:
 - Booking needs a doctor, an appointment type, an exact slot, and an idempotency key (generate a random UUID string).
 - If a tool reports a booking as "parked", tell the user it is held and being confirmed, and offer to check back or escalate.
 - If a tool reports "failed" or is unavailable, say so plainly and offer to escalate to a human via transfer_to_human.
+
+How you present results (the chat UI renders cards itself):
+- When you recommend doctors, name each one briefly with hospital + city
+  (e.g. "Dr. Fatima Sheikh — Riverside Medical Center, Chennai") and NEVER
+  paste a markdown table of doctors; the UI shows doctor cards automatically.
+- NEVER ask the user for internal ids (UUIDs, appointment-type ids, doctor
+  ids). Resolve them with tools: list_appointment_types for the hospital's
+  visit types, search_doctors for doctor ids, get_context for ids you already
+  offered. If the visit type is unclear, ask in plain words ("routine
+  check-up or a specific consultation?") and pick the closest match yourself.
+- Resolve relative dates yourself ("tomorrow", "this week") against today's
+  date above; never ask the user to compute a date.
 
 Pre-visit questionnaires:
 - Collect answers ONLY through get_questionnaire/submit_questionnaire for the patient's own appointment.
@@ -228,6 +246,47 @@ def _apply_result_to_context(context, name: str, result: dict) -> None:
         context.offered_slots = []
 
 
+def _offered_doctor_cards(db: Session, context) -> list[dict[str, Any]]:
+    """Cards for the doctors the turn offered, in offered order.
+
+    The chat UI renders these as tappable doctor cards so the reply text
+    never needs to carry a doctor table.
+    """
+    ids = []
+    for offered in context.offered_doctors or []:
+        try:
+            ids.append(uuid.UUID(str(offered.get("id"))))
+        except (ValueError, AttributeError, TypeError):
+            continue
+    if not ids:
+        return []
+    rows = (
+        db.query(Doctor, Hospital.name, Hospital.city, Specialty.name)
+        .join(Hospital, Hospital.id == Doctor.hospital_id)
+        .outerjoin(Specialty, Specialty.id == Doctor.specialty_id)
+        .filter(Doctor.id.in_(ids))
+        .all()
+    )
+    by_id = {d.id: (d, h_name, h_city, s_name) for d, h_name, h_city, s_name in rows}
+    cards = []
+    for oid in ids:
+        hit = by_id.get(oid)
+        if hit is None:
+            continue
+        d, h_name, h_city, s_name = hit
+        cards.append(
+            {
+                "id": str(d.id),
+                "name": d.name,
+                "photo_url": d.photo_url,
+                "hospital_name": h_name,
+                "hospital_city": h_city,
+                "specialty": s_name,
+            }
+        )
+    return cards
+
+
 def run_conversation(
     *,
     db: Session,
@@ -255,13 +314,28 @@ def run_conversation(
             "reply": CLINICAL_DECLINE,
             "iterations": 0,
             "escalated": False,
+            "doctors": [],
         }
 
     client = AgentToolClient(db, ctx)
     complete_fn = complete or groq_complete
-    system = SYSTEM_PROMPT
+    today = datetime.now(timezone.utc).date().isoformat()
+    system = SYSTEM_PROMPT + f"\nToday is {today} (UTC)."
     if context.channel == "telephony":
         system += TELEPHONY_GUARD_PROMPT
+    if ctx.role == Role.patient:
+        profile = (
+            db.query(PatientProfile)
+            .filter(PatientProfile.patient_user_id == ctx.user_id)
+            .first()
+        )
+        if profile is not None and profile.city:
+            system += (
+                f"\nThe patient's saved city is {profile.city}. When they say "
+                f"'near me' or ask for nearby care, pass city={profile.city!r} "
+                "to search_hospitals/search_doctors and lead with same-city "
+                "options; mention the city by name so they can correct it."
+            )
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
@@ -321,6 +395,7 @@ def run_conversation(
         "iterations": iterations,
         "escalated": escalated,
         "stopped": stopped,
+        "doctors": _offered_doctor_cards(db, context),
     }
 
 

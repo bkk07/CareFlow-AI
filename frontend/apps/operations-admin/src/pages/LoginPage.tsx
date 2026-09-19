@@ -6,10 +6,10 @@ import { useAdmin } from "../store/AdminStore";
 import { Button } from "../components/common/ui";
 
 export default function LoginPage() {
-  const { login, loginMock, backendError, mode } = useAdmin();
+  const { login, backendError, mode } = useAdmin();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("ops@careflow.ai");
-  const [password, setPassword] = useState("password123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,16 +21,11 @@ export default function LoginPage() {
     try {
       await login(email, password);
       navigate("/ops");
-    } catch {
-      setError(backendError ?? "Sign-in failed. Check your credentials or use the offline demo.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : (backendError ?? "Sign-in failed. Check your credentials and retry."));
     } finally {
       setBusy(false);
     }
-  }
-
-  function useDemo() {
-    loginMock();
-    navigate("/ops");
   }
 
   return (
@@ -42,12 +37,12 @@ export default function LoginPage() {
             <h2 className="text-[1.45rem] font-extrabold mt-3 leading-snug">Every failure, recoverable.</h2>
             <p className="text-white/80 text-sm mt-2">Unknown outcomes, reconciliation, retries, and human escalation — one recovery workspace.</p>
           </div>
-          <p className="flex items-center gap-2 text-[0.8rem] text-white/80"><LifeBuoy size={15} /> 3 operations currently need attention</p>
+          <p className="flex items-center gap-2 text-[0.8rem] text-white/80"><LifeBuoy size={15} /> Live backend required for operations data</p>
         </div>
         <div className="p-6 sm:p-8">
           <h1 className="text-[1.45rem] font-extrabold text-navy">Operations sign in</h1>
           <p className="text-sm text-ink-secondary mt-1">
-            {mode === "mock" ? "Offline demo — sign in with mock data." : "Sign in with your operator account."}
+            {mode === "checking" ? "Checking backend connection…" : "Sign in with your operator account."}
           </p>
           <form onSubmit={(e) => void submit(e)} className="mt-4 space-y-4">
             <div>
@@ -72,13 +67,10 @@ export default function LoginPage() {
                 {error ?? backendError}
               </p>
             )}
-            <Button type="submit" size="lg" className="w-full" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</Button>
-            <button type="button" onClick={useDemo} className="w-full text-center text-[0.83rem] font-bold text-healthcare hover:underline">
-              Continue with offline demo data
-            </button>
+            <Button type="submit" size="lg" className="w-full" disabled={busy || mode === "checking"}>{busy ? "Signing in…" : "Sign in"}</Button>
           </form>
           <p className="flex items-start gap-2 text-[0.77rem] text-ink-secondary bg-healthcare-faint border border-healthcare/20 rounded-control px-3 py-2.5 mt-5">
-            <ShieldCheck size={14} className="shrink-0 mt-0.5 text-healthcare" /> Demo only — all data is local mock data, no backend involved.
+            <ShieldCheck size={14} className="shrink-0 mt-0.5 text-healthcare" /> Live backend sign-in only — hospital operators and platform admins.
           </p>
         </div>
       </motion.div>

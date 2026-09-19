@@ -21,12 +21,22 @@ class ChatIn(BaseModel):
     conversation_id: str | None = None
 
 
+class DoctorCardOut(BaseModel):
+    id: str
+    name: str
+    photo_url: str | None = None
+    hospital_name: str
+    hospital_city: str | None = None
+    specialty: str | None = None
+
+
 class ChatOut(BaseModel):
     conversation_id: str
     reply: str
     iterations: int
     escalated: bool
     stopped: bool = False
+    doctors: list[DoctorCardOut] = []
 
 
 @router.post("/chat", response_model=ChatOut)

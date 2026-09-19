@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRight, CheckCircle2, Search } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { APPOINTMENT_TYPES, DOCTORS, HOSPITALS, SPECIALTIES } from "../mock/data";
 import {
   checkAvailability as apiCheckAvailability,
   createAppointment as apiCreateAppointment,
+  fetchContact as apiFetchContact,
   listAppointmentTypes as apiListTypes,
   listSpecialties as apiListSpecialties,
   searchDoctors as apiSearchDoctors,
@@ -18,7 +18,7 @@ import {
   mapHospitalResult,
   mapSlot,
 } from "../lib/backend";
-import { consultationModeLabel, mockBookAppointment, mockCheckAvailability, mockDelay, mockFindDoctors, nextSevenDays } from "../mock/services";
+import { consultationModeLabel, nextSevenDays, readPosition, type GeoCoords } from "../lib/helpers";
 import { useAppState } from "../context/AppStateContext";
 import { useAuth } from "../context/AuthContext";
 import { DoctorCard } from "../components/doctor/cards";
@@ -34,7 +34,7 @@ type Step = "search" | "availability" | "review" | "success";
 export default function BookPage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { addAppointment, pushNotification, refresh, live } = useAppState();
+  const { pushNotification, refresh, live } = useAppState();
   const { user } = useAuth();
   const preset = (location.state as { doctorId?: string; hospitalId?: string; query?: string } | null) ?? {};
 
@@ -44,9 +44,13 @@ export default function BookPage() {
   const [hospitalId, setHospitalId] = useState<string>(preset.hospitalId ?? "all");
   const [mode, setMode] = useState("any");
   const [doctors, setDoctors] = useState<Doctor[]>([]);
-  const [hospitals, setHospitals] = useState<Hospital[]>(HOSPITALS);
-  const [specialtyOptions, setSpecialtyOptions] = useState<string[]>(SPECIALTIES);
+  const [hospitals, setHospitals] = useState<Hospital[]>([]);
+  const [specialtyOptions, setSpecialtyOptions] = useState<string[]>([]);
   const [liveTypes, setLiveTypes] = useState<ApiAppointmentType[]>([]);
+  const [myCity, setMyCity] = useState<string | null>(null);
+  const [geo, setGeo] = useState<GeoCoords | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [geoError, setGeoError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const rawSlots = useRef<Record<string, Slot>>({});
@@ -58,7 +62,7 @@ export default function BookPage() {
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotsError, setSlotsError] = useState(false);
   const [selected, setSelected] = useState<TimeSlot | null>(null);
-  const [typeId, setTypeId] = useState(APPOINTMENT_TYPES[1].id);
+  const [typeId, setTypeId] = useState("");
   const [consultMode, setConsultMode] = useState<Appointment["consultationMode"]>("in_person");
   const [booking, setBooking] = useState(false);
   const [bookingError, setBookingError] = useState<string | null>(null);
@@ -69,59 +73,46 @@ export default function BookPage() {
     return d ? `${d.label}, ${d.sub}` : dayKey;
   }, [days, dayKey]);
 
-  async function loadDoctors() {
+  async function loadDoctors(cityOverride?: string | null) {
     setLoading(true);
     setError(false);
+    const city = cityOverride !== undefined ? cityOverride : myCity;
     try {
-      if (live) {
-        const [foundHospitals, foundDoctors] = await Promise.all([
-          apiSearchHospitals(""),
-          apiSearchDoctors({
-            query: query.trim() || undefined,
-            specialty: specialty !== "All" ? specialty : undefined,
-            hospital_id: hospitalId !== "all" ? hospitalId : undefined,
-          }),
-        ]);
-        const mappedHospitals = foundHospitals.map(mapHospitalResult);
-        setHospitals(mappedHospitals);
-        const mapped = foundDoctors.map(mapDoctorResult);
-        const filtered = mode === "any" ? mapped : mapped.filter((d) => d.consultationModes.includes(mode as Appointment["consultationMode"]));
-        setDoctors(filtered);
-        const derived = Array.from(new Set(foundDoctors.map((d) => d.specialty).filter((s): s is string => !!s))).sort();
-        if (hospitalId !== "all") {
-          try {
-            const dir = await apiListSpecialties(hospitalId);
-            setSpecialtyOptions(dir.map((s) => s.name));
-          } catch {
-            setSpecialtyOptions(derived);
-          }
-        } else {
+      const [foundHospitals, foundDoctors] = await Promise.all([
+        apiSearchHospitals("", city ?? undefined, geo ?? undefined),
+        apiSearchDoctors({
+          query: query.trim() || undefined,
+          specialty: specialty !== "All" ? specialty : undefined,
+          hospital_id: hospitalId !== "all" ? hospitalId : undefined,
+          city: city ?? undefined,
+          latitude: geo?.latitude,
+          longitude: geo?.longitude,
+        }),
+      ]);
+      const mappedHospitals = foundHospitals.map(mapHospitalResult);
+      setHospitals(mappedHospitals);
+      const mapped = foundDoctors.map(mapDoctorResult);
+      const filtered = mode === "any" ? mapped : mapped.filter((d) => d.consultationModes.includes(mode as Appointment["consultationMode"]));
+      setDoctors(filtered);
+      const derived = Array.from(new Set(foundDoctors.map((d) => d.specialty).filter((s): s is string => !!s))).sort();
+      if (hospitalId !== "all") {
+        try {
+          const dir = await apiListSpecialties(hospitalId);
+          setSpecialtyOptions(dir.map((s) => s.name));
+        } catch {
           setSpecialtyOptions(derived);
         }
-        if (preset.doctorId && !activeDoctor) {
-          const hit = mapped.find((d) => d.id === preset.doctorId) ?? null;
-          if (hit) {
-            setActiveDoctor(hit);
-            setConsultMode(hit.consultationModes[0]);
-            setStep("availability");
-          } else {
-            setStep("search");
-          }
-        }
       } else {
-        const res = await mockFindDoctors({ query, specialty, hospitalId, mode });
-        setDoctors(res);
-        setHospitals(HOSPITALS);
-        setSpecialtyOptions(SPECIALTIES);
-        if (preset.doctorId && !activeDoctor) {
-          const hit = DOCTORS.find((d) => d.id === preset.doctorId) ?? null;
-          if (hit) {
-            setActiveDoctor(hit);
-            setConsultMode(hit.consultationModes[0]);
-            setStep("availability");
-          } else {
-            setStep("search");
-          }
+        setSpecialtyOptions(derived);
+      }
+      if (preset.doctorId && !activeDoctor) {
+        const hit = mapped.find((d) => d.id === preset.doctorId) ?? null;
+        if (hit) {
+          setActiveDoctor(hit);
+          setConsultMode(hit.consultationModes[0]);
+          setStep("availability");
+        } else {
+          setStep("search");
         }
       }
     } catch {
@@ -131,25 +122,48 @@ export default function BookPage() {
     }
   }
 
+  function useMyLocation() {
+    setLocating(true);
+    setGeoError(null);
+    readPosition()
+      .then((g) => {
+        setGeo(g);
+        setLocating(false);
+      })
+      .catch((e: unknown) => {
+        setGeoError(e instanceof Error ? e.message : "Could not read your location.");
+        setLocating(false);
+      });
+  }
+
   useEffect(() => {
-    void loadDoctors();
+    if (!live) return;
+    // Saved city first (taken once), then search so nearby ranks correctly.
+    apiFetchContact()
+      .then((c) => {
+        setMyCity(c.city ?? null);
+        void loadDoctors(c.city ?? null);
+      })
+      .catch(() => {
+        setMyCity(null);
+        void loadDoctors(null);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live]);
+
+  // Re-rank by distance as soon as the patient shares a position.
+  useEffect(() => {
+    if (live && geo && step === "search") void loadDoctors();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geo]);
 
   // Live availability: resolve the visit type for the doctor's hospital, then
   // ask the backend for real open slots on the chosen day.
   useEffect(() => {
-    if (step !== "availability" || !activeDoctor) return;
+    if (step !== "availability" || !activeDoctor || !live) return;
     setSlotsLoading(true);
     setSlotsError(false);
     setSelected(null);
-    if (!live) {
-      mockCheckAvailability(activeDoctor.id, dayKey)
-        .then(setSlots)
-        .catch(() => setSlotsError(true))
-        .finally(() => setSlotsLoading(false));
-      return;
-    }
     (async () => {
       try {
         const types = await apiListTypes(activeDoctor.hospitalId);
@@ -196,40 +210,22 @@ export default function BookPage() {
     setBooking(true);
     setBookingError(null);
     try {
-      if (live && user) {
-        const raw = rawSlots.current[selected.id];
-        if (!raw) throw new Error("slot-missing");
-        await apiCreateAppointment({
-          patient_id: user.id,
-          doctor_id: activeDoctor.id,
-          appointment_type_id: typeId,
-          slot_start: raw.start,
-          slot_end: raw.end,
-        });
-        await refresh();
-        pushNotification({
-          category: "appointments",
-          title: "Appointment requested",
-          body: `${activeDoctor.specialty} with ${activeDoctor.name} · ${dayLabel} at ${selected.start}.`,
-          unread: true,
-        });
-      } else {
-        await mockDelay(null, 900);
-        const appt = mockBookAppointment({
-          doctorId: activeDoctor.id,
-          dateLabel: dayLabel,
-          time: selected.start,
-          mode: consultMode,
-          typeId,
-        });
-        addAppointment({ ...appt, status: "confirmed", verificationStage: "confirmed" });
-        pushNotification({
-          category: "appointments",
-          title: "Appointment confirmed",
-          body: `${activeDoctor.specialty} with ${activeDoctor.name} · ${dayLabel} at ${selected.start}.`,
-          unread: true,
-        });
-      }
+      const raw = rawSlots.current[selected.id];
+      if (!raw || !user) throw new Error("slot-missing");
+      await apiCreateAppointment({
+        patient_id: user.id,
+        doctor_id: activeDoctor.id,
+        appointment_type_id: typeId,
+        slot_start: raw.start,
+        slot_end: raw.end,
+      });
+      await refresh();
+      pushNotification({
+        category: "appointments",
+        title: "Appointment requested",
+        body: `${activeDoctor.specialty} with ${activeDoctor.name} · ${dayLabel} at ${selected.start}.`,
+        unread: true,
+      });
       setBooking(false);
       setStep("success");
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -239,9 +235,7 @@ export default function BookPage() {
     }
   }
 
-  const typeOptions = live && liveTypes.length > 0
-    ? liveTypes.map((t) => ({ id: t.id, name: t.name, durationMinutes: t.duration_minutes }))
-    : APPOINTMENT_TYPES;
+  const typeOptions = liveTypes.map((t) => ({ id: t.id, name: t.name, durationMinutes: t.duration_minutes }));
   const activeType = typeOptions.find((t) => t.id === typeId) ?? typeOptions[0];
 
   return (
@@ -260,17 +254,50 @@ export default function BookPage() {
         })}
       </div>
 
-      {live && (
+      <div className="flex flex-wrap items-center gap-2">
         <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">
           Live availability from connected hospitals
         </p>
-      )}
+          {myCity ? (
+            <p className="text-[0.78rem] font-semibold text-navy bg-background border border-border rounded-control px-3 py-2 w-fit">
+              Showing care near {myCity}
+            </p>
+          ) : (
+            <button
+              onClick={() => navigate("/profile")}
+              className="text-[0.78rem] font-semibold text-healthcare bg-healthcare-faint border border-healthcare/25 rounded-control px-3 py-2 w-fit hover:underline"
+            >
+              Set your city for nearby suggestions
+            </button>
+          )}
+      </div>
 
-      {step === "search" && (
+          {step === "search" && (
         <>
           <div>
             <h1 className="page-title">Find the care you need</h1>
             <p className="page-sub mt-1">Search doctors and hospitals, then check live availability.</p>
+            <div className="flex flex-wrap items-center gap-2 mt-2">
+              {geo ? (
+                <>
+                  <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-1.5 w-fit">
+                    Ranked by distance from you
+                  </p>
+                  <button onClick={() => { setGeo(null); }} className="text-[0.78rem] font-semibold text-ink-secondary hover:text-healthcare hover:underline">
+                    Clear location
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={useMyLocation}
+                  disabled={locating}
+                  className="text-[0.78rem] font-semibold text-healthcare bg-healthcare-faint border border-healthcare/25 rounded-control px-3 py-1.5 hover:underline disabled:opacity-60"
+                >
+                  {locating ? "Reading location…" : "Use my location for nearby care"}
+                </button>
+              )}
+            </div>
+            {geoError && <p role="alert" className="text-[0.78rem] font-semibold text-danger mt-2">{geoError}</p>}
           </div>
 
           <div className="card-base p-4 sm:p-5">

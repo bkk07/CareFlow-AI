@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 from app.domain.auth.models import Role
 from app.domain.hospital.models import HospitalStatus
@@ -15,8 +15,17 @@ class HospitalCreateIn(BaseModel):
     address: str = Field(min_length=1, max_length=500)
     contact_email: EmailStr
     contact_phone: str = Field(min_length=1, max_length=50)
+    city: str | None = Field(default=None, max_length=120)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
     admin_email: EmailStr
     admin_password: str = Field(min_length=8, max_length=128)
+
+    @model_validator(mode="after")
+    def _coords_come_in_pairs(self) -> "HospitalCreateIn":
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("latitude and longitude must be provided together")
+        return self
 
 
 class ReviewDecisionIn(BaseModel):
@@ -29,6 +38,9 @@ class HospitalOut(BaseModel):
     address: str
     contact_email: str
     contact_phone: str
+    city: str | None
+    latitude: float | None
+    longitude: float | None
     status: HospitalStatus
     submitted_at: datetime | None
     reviewed_at: datetime | None
@@ -51,6 +63,15 @@ class HospitalUpdateIn(BaseModel):
     address: str | None = Field(default=None, min_length=1, max_length=500)
     contact_email: EmailStr | None = None
     contact_phone: str | None = Field(default=None, min_length=1, max_length=50)
+    city: str | None = Field(default=None, max_length=120)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+
+    @model_validator(mode="after")
+    def _coords_come_in_pairs(self) -> "HospitalUpdateIn":
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("latitude and longitude must be provided together")
+        return self
 
 
 class StaffOut(BaseModel):

@@ -14,6 +14,7 @@ export default function ProfilePage() {
   const [name, setName] = useState(patient.name);
   const [phone, setPhone] = useState(patient.phone);
   const [address, setAddress] = useState(patient.address);
+  const [city, setCity] = useState(contact?.city ?? "");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -30,8 +31,8 @@ export default function ProfilePage() {
     setSaveError(null);
     try {
       if (live) {
-        // Backend stores the verified identity (name/phone); address stays local.
-        await updateContactInfo({ full_name: name, phone });
+        // Backend stores the verified identity (name/phone/city); address stays local.
+        await updateContactInfo({ full_name: name, phone, city: city || null });
       }
       setEditing(false);
     } catch {
@@ -57,7 +58,7 @@ export default function ProfilePage() {
               <span className="text-[0.75rem] font-bold bg-success-soft text-success rounded-full px-2.5 py-1">{completed} completed visits</span>
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={() => { setName(patient.name); setPhone(patient.phone); setAddress(patient.address); setSaveError(null); setEditing(true); }}>
+            <Button variant="outline" size="sm" onClick={() => { setName(patient.name); setPhone(patient.phone); setAddress(patient.address); setCity(contact?.city ?? ""); setSaveError(null); setEditing(true); }}>
             <Edit3 size={15} /> Edit profile
           </Button>
         </div>
@@ -90,6 +91,13 @@ export default function ProfilePage() {
               <dt className="text-ink-secondary flex items-center gap-1"><MapPin size={13} /> Address</dt>
               <dd className="font-bold text-ink text-right max-w-[60%]">{address}</dd>
             </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-ink-secondary flex items-center gap-1"><MapPin size={13} /> City</dt>
+              <dd className="font-bold text-ink text-right max-w-[60%]">
+                {live ? (contact?.city || city || "Not set") : (city || "Not set")}
+              </dd>
+            </div>
+            <p className="text-[0.75rem] text-ink-faint">Your city powers nearby doctor and hospital suggestions — set it once.</p>
             <div className="flex justify-between gap-3">
               <dt className="text-ink-secondary">Emergency</dt>
               <dd className="font-bold text-ink text-right max-w-[60%]">{patient.emergencyContact}</dd>
@@ -137,6 +145,7 @@ export default function ProfilePage() {
           <label className="block text-[0.83rem] font-bold">Full name<input value={name} onChange={(e) => setName(e.target.value)} className="input-base mt-1" /></label>
           <label className="block text-[0.83rem] font-bold">Phone<input value={phone} onChange={(e) => setPhone(e.target.value)} className="input-base mt-1" placeholder="+1 555 010 0000" /></label>
           <label className="block text-[0.83rem] font-bold">Address<input value={address} onChange={(e) => setAddress(e.target.value)} className="input-base mt-1" /></label>
+          <label className="block text-[0.83rem] font-bold">City — for nearby suggestions<input value={city} onChange={(e) => setCity(e.target.value)} className="input-base mt-1" placeholder="e.g. Bengaluru" /></label>
           {saveError && (
             <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">
               {saveError}

@@ -21,14 +21,12 @@ import {
   setAccessToken,
   suspendHospital as apiSuspend,
   type AIEvaluation,
-  type ApiHospital,
   type CurrentUser,
   type OpsMetrics,
   type PlatformAnalytics,
   type PlatformOverview,
 } from "../api";
 import {
-  formatDateTime,
   mapAppointment,
   mapAudit,
   mapDoctor,
@@ -46,11 +44,8 @@ import type {
   NotificationItem,
   Workflow,
 } from "../types";
-import { ALL_HOSPITALS, ADMIN_NOTIFICATIONS, INITIAL_AUDIT } from "../mock/platform";
-import { INITIAL_APPOINTMENTS, INITIAL_DOCTORS } from "../mock/hospital";
-import { WORKFLOWS } from "../mock/ops";
 
-export type BackendMode = "checking" | "live" | "mock";
+export type BackendMode = "checking" | "live";
 
 export interface PatientRow {
   id: string;
@@ -61,12 +56,11 @@ export interface PatientRow {
 
 interface AdminStore {
   authed: boolean;
-  /** Real platform-admin sign-in when reachable, mock fallback offline. */
-  login: (email?: string, password?: string) => Promise<void>;
-  loginMock: () => void;
+  /** Platform-admin sign-in via backend JWT. */
+  login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   mode: BackendMode;
-  /** True when lists below come from the backend (false = mock seeds). */
+  /** True when the session is an authenticated live backend session. */
   live: boolean;
   loading: boolean;
   backendError: string | null;
@@ -94,7 +88,6 @@ interface AdminStore {
 const Ctx = createContext<AdminStore | null>(null);
 let seq = 1000;
 const nid = (p: string) => `${p}-${seq++}`;
-const MOCK_KEY = "careflow_platform_mock";
 
 export function AdminProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<BackendMode>("checking");
@@ -102,26 +95,22 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [liveLoaded, setLiveLoaded] = useState(false);
 
   const live = mode === "live" && authed && user?.role === "platform_admin";
 
-  const [mockHospitals, setMockHospitals] = useState(ALL_HOSPITALS);
-  const [mockAudit] = useState(INITIAL_AUDIT);
-
-  const [liveHospitals, setLiveHospitals] = useState<Hospital[]>([]);
-  const [liveDoctors, setLiveDoctors] = useState<Doctor[]>([]);
-  const [livePatients, setLivePatients] = useState<PatientRow[]>([]);
-  const [liveAppointments, setLiveAppointments] = useState<Appointment[]>([]);
+  const [hospitals, setHospitals] = useState<Hospital[]>([]);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [patients, setPatients] = useState<PatientRow[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [aiEvaluation, setAiEvaluation] = useState<AIEvaluation | null>(null);
-  const [liveAudit, setLiveAudit] = useState<AuditEvent[]>([]);
+  const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [overview, setOverview] = useState<PlatformOverview | null>(null);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [analytics, setAnalytics] = useState<PlatformAnalytics | null>(null);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [metrics, setMetrics] = useState<OpsMetrics | null>(null);
 
-  const [notifications, setNotifications] = useState<NotificationItem[]>(ADMIN_NOTIFICATIONS);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
   const fail = useCallback((message: string): Error => {
     setBackendError(message);
@@ -133,56 +122,55 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setBackendError(null);
     try {
-      const [hospitals, doctors, patients, appointments, aiEval, audit, over, integ, analytic, flows, mets] =
+      const [hospitalRows, doctorRows, patientRes, appointmentRows, aiEval, auditRes, over, integ, analytic, flows, mets] =
         await Promise.all([
-          apiHospitals().catch(() => [] as ApiHospital[]),
-          apiDoctors().catch(() => []),
-          apiPatients().catch(() => ({ patients: [] })),
-          apiAppointments().catch(() => []),
-          apiAIEval().catch(() => null),
-          apiAudit().catch(() => ({ events: [] })),
-          apiOverview().catch(() => null),
-          apiIntegrations().catch(() => null),
-          apiAnalytics().catch(() => null),
-          apiWorkflows().catch(() => []),
-          apiMetrics().catch(() => null),
+          apiHospitals(),
+          apiDoctors(),
+          apiPatients(),
+          apiAppointments(),
+          apiAIEval(),
+          apiAudit(),
+          apiOverview(),
+          apiIntegrations(),
+          apiAnalytics(),
+          apiWorkflows(),
+          apiMetrics(),
         ]);
-      const hospitalName = (id: string) => hospitals.find((h) => h.id === id)?.name ?? id.slice(0, 8);
-      const doctorName = (id: string) => doctors.find((d) => d.id === id)?.name ?? id.slice(0, 8);
-      setLiveHospitals(
-        hospitals.map((h) => {
-          const docs = doctors.filter((d) => d.hospital_id === h.id);
+      const hospitalName = (id: string) => hospitalRows.find((h) => h.id === id)?.name ?? id.slice(0, 8);
+      const doctorName = (id: string) => doctorRows.find((d) => d.id === id)?.name ?? id.slice(0, 8);
+      setHospitals(
+        hospitalRows.map((h) => {
+          const docs = doctorRows.filter((d) => d.hospital_id === h.id);
           return mapHospital(h, docs.length, docs.filter((d) => d.status === "active").length, 0);
         }),
       );
-      setLiveDoctors(doctors.map((d) => mapDoctor(d, hospitalName(d.hospital_id))));
-      setLivePatients(patients.patients.map(mapPatient));
-      setLiveAppointments(
-        appointments.map((a) => mapAppointment(a, hospitalName(a.hospital_id), doctorName(a.doctor_id))),
+      setDoctors(doctorRows.map((d) => mapDoctor(d, hospitalName(d.hospital_id))));
+      setPatients(patientRes.patients.map(mapPatient));
+      setAppointments(
+        appointmentRows.map((a) => mapAppointment(a, hospitalName(a.hospital_id), doctorName(a.doctor_id))),
       );
-      if (aiEval) setAiEvaluation(aiEval);
+      setAiEvaluation(aiEval);
       const actorName = (id: string | null) => {
         if (!id) return "system";
-        const doc = doctors.find((d) => d.user_id === id);
+        const doc = doctorRows.find((d) => d.user_id === id);
         return doc?.name ?? id.slice(0, 8);
       };
-      setLiveAudit(audit.events.map((e) => mapAudit(e, actorName(e.actor_user_id))));
-      if (over) setOverview(over);
-      if (integ) setIntegrations(integ.integrations.map(mapPlatformIntegration));
-      if (analytic) setAnalytics(analytic);
+      setAudit(auditRes.events.map((e) => mapAudit(e, actorName(e.actor_user_id))));
+      setOverview(over);
+      setIntegrations(integ.integrations.map(mapPlatformIntegration));
+      setAnalytics(analytic);
       setWorkflows(flows.map(mapWorkflow));
-      if (mets) setMetrics(mets);
-      setLiveLoaded(true);
+      setMetrics(mets);
+    } catch {
+      setBackendError("Could not load platform data. Check the backend connection and retry.");
     } finally {
       setLoading(false);
     }
   }, [live]);
 
   useEffect(() => {
-    if (live && !liveLoaded) void refreshAll();
-    if (!live && liveLoaded) setLiveLoaded(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live]);
+    if (live) void refreshAll();
+  }, [live, refreshAll]);
 
   useEffect(() => {
     let cancelled = false;
@@ -190,12 +178,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       const reachable = await probeBackend();
       if (cancelled) return;
       if (!reachable) {
-        try {
-          if (localStorage.getItem(MOCK_KEY) === "1") setAuthed(true);
-        } catch {
-          /* private mode */
-        }
-        setMode("mock");
+        setMode("live");
         return;
       }
       const token = restoreAccessToken();
@@ -222,65 +205,47 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const login = useCallback(async (email?: string, password?: string) => {
+  const login = useCallback(async (email: string, password: string) => {
     setBackendError(null);
-    if (email && password) {
-      const reachable = await probeBackend();
-      if (!reachable) throw fail("Backend is unreachable — try the offline demo.");
-      try {
-        await apiLogin(email, password);
-        const me = await apiMe();
-        if (me.role !== "platform_admin") {
-          setAccessToken(null);
-          throw fail("This console is for platform administrators.");
-        }
-        setUser(me);
-        setAuthed(true);
-        setMode("live");
-        return;
-      } catch (e) {
-        if (e instanceof Error && (e.message.startsWith("Backend") || e.message.startsWith("This console"))) throw e;
-        throw fail("Sign-in failed. Check your email and password.");
+    const reachable = await probeBackend();
+    if (!reachable) throw fail("Backend is unreachable. Start the backend and retry.");
+    try {
+      await apiLogin(email, password);
+      const me = await apiMe();
+      if (me.role !== "platform_admin") {
+        setAccessToken(null);
+        throw fail("This console is for platform administrators.");
       }
+      setUser(me);
+      setAuthed(true);
+      setMode("live");
+    } catch (e) {
+      if (e instanceof Error && (e.message.startsWith("Backend") || e.message.startsWith("This console"))) throw e;
+      throw fail("Sign-in failed. Check your email and password.");
     }
-    try {
-      localStorage.setItem(MOCK_KEY, "1");
-    } catch {
-      /* noop */
-    }
-    setMode("mock");
-    setAuthed(true);
   }, [fail]);
-
-  const loginMock = useCallback(() => {
-    try {
-      localStorage.setItem(MOCK_KEY, "1");
-    } catch {
-      /* noop */
-    }
-    setMode("mock");
-    setAuthed(true);
-  }, []);
 
   const logout = useCallback(() => {
     setAccessToken(null);
-    try {
-      localStorage.removeItem(MOCK_KEY);
-    } catch {
-      /* noop */
-    }
     setUser(null);
     setAuthed(false);
     setBackendError(null);
-    setLiveLoaded(false);
+    setHospitals([]);
+    setDoctors([]);
+    setPatients([]);
+    setAppointments([]);
+    setAiEvaluation(null);
+    setAudit([]);
+    setOverview(null);
+    setIntegrations([]);
+    setAnalytics(null);
+    setWorkflows([]);
+    setMetrics(null);
+    setNotifications([]);
   }, []);
 
   const reviewHospital = useCallback(async (id: string, decision: "approved" | "rejected", reason?: string) => {
-    if (!live) {
-      setMockHospitals((p) => p.map((h) => (h.id === id ? { ...h, status: decision } : h)));
-      pushNotification(decision === "approved" ? "Hospital approved" : "Hospital rejected", `${id} → ${decision}`);
-      return;
-    }
+    if (!live) throw fail("Not authenticated. Sign in to review hospitals.");
     try {
       if (decision === "approved") await apiApprove(id);
       else await apiReject(id, reason || "Rejected after platform review");
@@ -292,10 +257,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   }, [live, refreshAll, fail]);
 
   const suspendHospital = useCallback(async (id: string) => {
-    if (!live) {
-      setMockHospitals((p) => p.map((h) => (h.id === id ? { ...h, status: "suspended" } : h)));
-      return;
-    }
+    if (!live) throw fail("Not authenticated. Sign in to manage hospitals.");
     await apiSuspend(id).catch(() => { throw fail("Could not suspend hospital."); });
     await refreshAll();
   }, [live, refreshAll, fail]);
@@ -305,31 +267,27 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   }, []);
   const markAllRead = useCallback(() => setNotifications((prev) => prev.map((n) => ({ ...n, unread: false }))), []);
 
-  const hospitals = live && liveLoaded ? liveHospitals : mockHospitals;
-  const audit = live && liveLoaded ? liveAudit : mockAudit;
-
   const value = useMemo(
     () => ({
       authed,
       login,
-      loginMock,
       logout,
       mode,
-      live: live && liveLoaded,
+      live,
       loading,
       backendError,
       user,
       refreshAll,
       hospitals,
-      doctors: live && liveLoaded ? liveDoctors : INITIAL_DOCTORS,
-      patients: live && liveLoaded ? livePatients : [],
-      appointments: live && liveLoaded ? liveAppointments : INITIAL_APPOINTMENTS,
+      doctors,
+      patients,
+      appointments,
       aiEvaluation,
       audit,
       overview,
       integrations,
       analytics,
-      workflows: live && liveLoaded ? workflows : WORKFLOWS,
+      workflows,
       metrics,
       reviewHospital,
       suspendHospital,
@@ -338,8 +296,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       markAllRead,
       pushNotification,
     }),
-    [authed, login, loginMock, logout, mode, live, liveLoaded, loading, backendError, user,
-      refreshAll, hospitals, liveDoctors, livePatients, liveAppointments, aiEvaluation, audit,
+    [authed, login, logout, mode, live, loading, backendError, user,
+      refreshAll, hospitals, doctors, patients, appointments, aiEvaluation, audit,
       overview, integrations, analytics, workflows, metrics, reviewHospital, suspendHospital,
       notifications, markAllRead, pushNotification],
   );
@@ -351,5 +309,3 @@ export function useAdmin(): AdminStore {
   if (!ctx) throw new Error("useAdmin must be used inside AdminProvider");
   return ctx;
 }
-
-export { formatDateTime };

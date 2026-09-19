@@ -1,15 +1,15 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { Building2, Eye, EyeOff, Lock, Mail, ShieldCheck } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAdmin } from "../store/AdminStore";
 import { Button } from "../components/common/ui";
 
 export default function LoginPage() {
-  const { login, loginMock, backendError, mode } = useAdmin();
+  const { login, backendError } = useAdmin();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("admin@citygeneral.org");
-  const [password, setPassword] = useState("password123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,16 +21,11 @@ export default function LoginPage() {
     try {
       await login(email, password);
       navigate("/");
-    } catch {
-      setError(backendError ?? "Sign-in failed. Check your credentials or use the offline demo.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : (backendError ?? "Sign-in failed. Check your credentials."));
     } finally {
       setBusy(false);
     }
-  }
-
-  function useDemo() {
-    loginMock();
-    navigate("/");
   }
 
   return (
@@ -47,7 +42,7 @@ export default function LoginPage() {
         <div className="p-6 sm:p-8">
           <h1 className="text-[1.45rem] font-extrabold text-navy">Hospital sign in</h1>
           <p className="text-sm text-ink-secondary mt-1">
-            {mode === "mock" ? "Offline demo — sign in with mock data." : "Sign in with your administrator account."}
+            Sign in with your administrator account.
           </p>
           <form onSubmit={(e) => void submit(e)} className="mt-4 space-y-4">
             <div>
@@ -73,12 +68,12 @@ export default function LoginPage() {
               </p>
             )}
             <Button type="submit" size="lg" className="w-full" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</Button>
-            <button type="button" onClick={useDemo} className="w-full text-center text-[0.83rem] font-bold text-healthcare hover:underline">
-              Continue with offline demo data
-            </button>
           </form>
+          <p className="text-center text-[0.83rem] text-ink-secondary mt-4">
+            New hospital? <Link to="/register" className="font-bold text-healthcare hover:underline">Register for review</Link>
+          </p>
           <p className="flex items-start gap-2 text-[0.77rem] text-ink-secondary bg-healthcare-faint border border-healthcare/20 rounded-control px-3 py-2.5 mt-5">
-            <ShieldCheck size={14} className="shrink-0 mt-0.5 text-healthcare" /> Demo only — all data is local mock data, no backend involved.
+            <ShieldCheck size={14} className="shrink-0 mt-0.5 text-healthcare" /> Backend sign-in only — your session uses a hospital-admin JWT.
           </p>
         </div>
       </motion.div>

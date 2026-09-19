@@ -44,6 +44,10 @@ export interface CurrentUser {
 export interface Hospital {
   id: string;
   name: string;
+  city: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  distance_km: number | null;
 }
 
 export interface DoctorResult {
@@ -51,7 +55,11 @@ export interface DoctorResult {
   name: string;
   hospital_id: string;
   hospital_name: string;
+  hospital_city: string | null;
+  hospital_latitude: number | null;
+  hospital_longitude: number | null;
   specialty: string | null;
+  distance_km: number | null;
 }
 
 export interface Specialty {
@@ -160,11 +168,22 @@ export async function mcpCall<T>(tool: string, input: Record<string, unknown>): 
   return data.result as T;
 }
 
-export async function searchHospitals(query: string): Promise<Hospital[]> {
-  const result = await mcpCall<{ hospitals: Hospital[] }>(
-    "search_hospitals",
-    query ? { query } : {},
-  );
+export interface GeoPoint {
+  latitude: number;
+  longitude: number;
+  radius_km?: number;
+}
+
+export async function searchHospitals(query: string, city?: string, geo?: GeoPoint): Promise<Hospital[]> {
+  const input: Record<string, unknown> = {};
+  if (query) input.query = query;
+  if (city) input.city = city;
+  if (geo) {
+    input.latitude = geo.latitude;
+    input.longitude = geo.longitude;
+    if (geo.radius_km) input.radius_km = geo.radius_km;
+  }
+  const result = await mcpCall<{ hospitals: Hospital[] }>("search_hospitals", input);
   return result.hospitals;
 }
 
@@ -172,11 +191,19 @@ export async function searchDoctors(args: {
   hospital_id?: string;
   specialty?: string;
   query?: string;
+  city?: string;
+  latitude?: number;
+  longitude?: number;
+  radius_km?: number;
 }): Promise<DoctorResult[]> {
   const input: Record<string, unknown> = {};
   if (args.hospital_id) input.hospital_id = args.hospital_id;
   if (args.specialty) input.specialty = args.specialty;
   if (args.query) input.query = args.query;
+  if (args.city) input.city = args.city;
+  if (args.latitude !== undefined) input.latitude = args.latitude;
+  if (args.longitude !== undefined) input.longitude = args.longitude;
+  if (args.radius_km !== undefined) input.radius_km = args.radius_km;
   const result = await mcpCall<{ doctors: DoctorResult[] }>("search_doctors", input);
   return result.doctors;
 }
@@ -287,6 +314,7 @@ export interface Contact {
   phone: string | null;
   full_name: string | null;
   date_of_birth: string | null;
+  city: string | null;
   updated_at: string;
 }
 
@@ -298,6 +326,7 @@ export async function saveContact(args: {
   full_name?: string | null;
   phone?: string | null;
   date_of_birth?: string | null;
+  city?: string | null;
 }): Promise<Contact> {
   return (await api.put("/patients/me/contact", args)).data;
 }
@@ -339,12 +368,22 @@ export async function fetchNotifications(): Promise<Notification[]> {
   return (await api.get("/notifications")).data;
 }
 
+export interface ChatDoctorCard {
+  id: string;
+  name: string;
+  photo_url: string | null;
+  hospital_name: string;
+  hospital_city: string | null;
+  specialty: string | null;
+}
+
 export interface ChatReply {
   conversation_id: string;
   reply: string;
   iterations: number;
   escalated: boolean;
   stopped: boolean;
+  doctors: ChatDoctorCard[];
 }
 
 export async function postChat(message: string, conversationId?: string | null): Promise<ChatReply> {

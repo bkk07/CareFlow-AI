@@ -1,5 +1,5 @@
-import { AnimatePresence, MotionConfig, motion } from "framer-motion";
-import { Navigate, Route, BrowserRouter as Router, Routes, useLocation } from "react-router-dom";
+import { MotionConfig } from "framer-motion";
+import { Navigate, Outlet, Route, BrowserRouter as Router, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ScheduleProvider } from "./context/ScheduleContext";
 import { DoctorShell } from "./components/layout/DoctorShell";
@@ -14,38 +14,33 @@ import QuestionnairesPage from "./pages/QuestionnairesPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import ProfilePage from "./pages/ProfilePage";
 
-function Protected({ children }: { children: React.ReactNode }) {
+function ProtectedLayout() {
   const { isAuthenticated } = useAuth();
   if (!isAuthenticated) return <Navigate to="/login" replace />;
-  return <DoctorShell>{children}</DoctorShell>;
+  return (
+    <DoctorShell>
+      <Outlet />
+    </DoctorShell>
+  );
 }
 
-function AnimatedRoutes() {
-  const location = useLocation();
+function AppRoutes() {
   return (
-    <AnimatePresence mode="wait">
-      <motion.div
-        key={location.pathname}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -6 }}
-        transition={{ duration: 0.2 }}
-      >
-        <Routes location={location}>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/" element={<Protected><DashboardPage /></Protected>} />
-          <Route path="/today" element={<Protected><TodayPage /></Protected>} />
-          <Route path="/upcoming" element={<Protected><UpcomingPage /></Protected>} />
-          <Route path="/calendar" element={<Protected><CalendarPage /></Protected>} />
-          <Route path="/availability" element={<Protected><AvailabilityPage /></Protected>} />
-          <Route path="/appointments/:id" element={<Protected><AppointmentDetailPage /></Protected>} />
-          <Route path="/questionnaires" element={<Protected><QuestionnairesPage /></Protected>} />
-          <Route path="/notifications" element={<Protected><NotificationsPage /></Protected>} />
-          <Route path="/profile" element={<Protected><ProfilePage /></Protected>} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </motion.div>
-    </AnimatePresence>
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route element={<ProtectedLayout />}>
+        <Route path="/" element={<DashboardPage />} />
+        <Route path="/today" element={<TodayPage />} />
+        <Route path="/upcoming" element={<UpcomingPage />} />
+        <Route path="/calendar" element={<CalendarPage />} />
+        <Route path="/availability" element={<AvailabilityPage />} />
+        <Route path="/appointments/:id" element={<AppointmentDetailPage />} />
+        <Route path="/questionnaires" element={<QuestionnairesPage />} />
+        <Route path="/notifications" element={<NotificationsPage />} />
+        <Route path="/profile" element={<ProfilePage />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
 
@@ -55,7 +50,7 @@ export default function App() {
       <AuthProvider>
         <ScheduleProvider>
           <Router>
-            <AnimatedRoutes />
+            <AppRoutes />
           </Router>
         </ScheduleProvider>
       </AuthProvider>

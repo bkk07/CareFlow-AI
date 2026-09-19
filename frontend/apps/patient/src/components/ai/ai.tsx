@@ -1,9 +1,33 @@
 import { motion } from "framer-motion";
 import { Bot, User } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { DOCTORS } from "../../mock/data";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import type { ChatMessage } from "../../types";
 import { Button, SafeImage } from "../common/ui";
+
+/** AI replies are markdown (+ LaTeX math); patient messages stay plain text. */
+function AssistantMarkdown({ text }: { text: string }) {
+  return (
+    <div className="chat-markdown">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={{
+          a: ({ ...props }) => (
+            // eslint-disable-next-line jsx-a11y/anchor-has-content
+            <a {...props} target="_blank" rel="noreferrer" className="underline" />
+          ),
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
+}
 
 export function ChatBubble({ message }: { message: ChatMessage }) {
   const isPatient = message.from === "patient";
@@ -30,18 +54,13 @@ export function ChatBubble({ message }: { message: ChatMessage }) {
               : "bg-white border border-border shadow-subtle rounded-bl-md"
           }`}
         >
-          {message.text}
+          {isPatient ? message.text : <AssistantMarkdown text={message.text} />}
         </div>
-        {message.cards && message.cards.length > 0 && (
+        {message.doctors && message.doctors.length > 0 && (
           <div className="mt-2.5 space-y-2 text-left">
-            {message.cards.map((c, i) => {
-              if (c.kind === "doctor") {
-                const d = DOCTORS.find((x) => x.id === c.doctorId);
-                if (!d) return null;
-                return <DoctorResultCard key={i} doctorId={d.id} />;
-              }
-              return <AvailabilityCard key={i} doctorId={c.doctorId} />;
-            })}
+            {message.doctors.map((d) => (
+              <LiveDoctorCard key={d.id} doctor={d} />
+            ))}
           </div>
         )}
         <p className="text-[0.7rem] text-ink-faint mt-1">{message.time}</p>
@@ -70,42 +89,36 @@ export function TypingIndicator() {
   );
 }
 
-function DoctorResultCard({ doctorId }: { doctorId: string }) {
+function LiveDoctorCard({
+  doctor,
+}: {
+  doctor: NonNullable<ChatMessage["doctors"]>[number];
+}) {
   const navigate = useNavigate();
-  const d = DOCTORS.find((x) => x.id === doctorId)!;
+  const where = [doctor.hospital_name, doctor.hospital_city]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <div className="bg-white border border-border rounded-card p-3.5 shadow-subtle flex gap-3">
-      <SafeImage src={d.photo} alt={d.name} name={d.name} className="w-12 h-12 rounded-full border border-border shrink-0" />
+      <SafeImage
+        src={doctor.photo_url ?? ""}
+        alt={doctor.name}
+        name={doctor.name}
+        className="w-12 h-12 rounded-full border border-border shrink-0"
+      />
       <div className="min-w-0 flex-1">
-        <p className="font-bold text-[0.88rem] text-ink">{d.name}</p>
-        <p className="text-[0.78rem] text-ink-secondary">{d.specialty} · {d.hospitalName}</p>
-        <p className="text-[0.78rem] font-semibold text-success mt-0.5">{d.nextAvailable}</p>
-        <Button size="sm" className="mt-2" onClick={() => navigate("/book", { state: { doctorId: d.id } })}>
-          Select
+        <p className="font-bold text-[0.88rem] text-ink">{doctor.name}</p>
+        <p className="text-[0.78rem] text-ink-secondary">
+          {doctor.specialty ?? "Physician"}
+          {where ? ` · ${where}` : ""}
+        </p>
+        <Button
+          size="sm"
+          className="mt-2"
+          onClick={() => navigate("/book", { state: { doctorId: doctor.id } })}
+        >
+          View availability
         </Button>
-      </div>
-    </div>
-  );
-}
-
-function AvailabilityCard({ doctorId }: { doctorId: string }) {
-  const navigate = useNavigate();
-  const d = DOCTORS.find((x) => x.id === doctorId)!;
-  const slots = ["Tomorrow · 2:30 PM", "Tomorrow · 4:30 PM", "Fri · 10:00 AM"];
-  return (
-    <div className="bg-white border border-border rounded-card p-3.5 shadow-subtle">
-      <p className="font-bold text-[0.88rem] text-ink">Available appointments found</p>
-      <p className="text-[0.78rem] text-ink-secondary">{d.name} · {d.hospitalName}</p>
-      <div className="flex flex-wrap gap-1.5 mt-2">
-        {slots.map((s) => (
-          <button
-            key={s}
-            onClick={() => navigate("/book", { state: { doctorId: d.id } })}
-            className="text-[0.78rem] font-semibold border border-healthcare/30 rounded-full px-2.5 py-1 hover:bg-healthcare-soft hover:border-healthcare transition"
-          >
-            {s}
-          </button>
-        ))}
       </div>
     </div>
   );

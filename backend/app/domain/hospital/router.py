@@ -90,6 +90,8 @@ def update_hospital(
     data = body.model_dump(exclude_unset=True)
     if "contact_email" in data:
         data["contact_email"] = data["contact_email"].lower()
+    if "city" in data:
+        data["city"] = (data["city"] or "").strip() or None
     for field, value in data.items():
         setattr(hospital, field, value)
     try:

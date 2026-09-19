@@ -231,6 +231,9 @@ export interface Hospital {
   address: string;
   contact_email: string;
   contact_phone: string;
+  city: string | null;
+  latitude: number | null;
+  longitude: number | null;
   status: string;
   submitted_at: string | null;
   reviewed_at: string | null;
@@ -240,13 +243,37 @@ export interface Hospital {
   updated_at: string;
 }
 
+export interface HospitalRegistration {
+  name: string;
+  address: string;
+  contact_email: string;
+  contact_phone: string;
+  city?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  admin_email: string;
+  admin_password: string;
+}
+
+export async function registerHospital(body: HospitalRegistration): Promise<Hospital> {
+  return (await api.post("/hospitals", body)).data;
+}
+
 export async function getHospital(hospitalId: string): Promise<Hospital> {
   return (await api.get(`/hospitals/${hospitalId}`)).data;
 }
 
 export async function updateHospital(
   hospitalId: string,
-  patch: { name?: string; address?: string; contact_email?: string; contact_phone?: string },
+  patch: {
+    name?: string;
+    address?: string;
+    contact_email?: string;
+    contact_phone?: string;
+    city?: string | null;
+    latitude?: number | null;
+    longitude?: number | null;
+  },
 ): Promise<Hospital> {
   return (await api.put(`/hospitals/${hospitalId}`, patch)).data;
 }

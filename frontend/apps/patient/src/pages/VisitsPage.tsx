@@ -10,8 +10,7 @@ import {
   type Slot,
 } from "../api";
 import { formatSlotDate, formatSlotTime, mapSlot, coerceQuestionnaireAnswers } from "../lib/backend";
-import { mockCheckAvailability, nextSevenDays } from "../mock/services";
-import { QUESTIONNAIRES } from "../mock/data";
+import { nextSevenDays } from "../lib/helpers";
 import { useAppState } from "../context/AppStateContext";
 import { AppointmentCard } from "../components/appointment/AppointmentCard";
 import { AppointmentDetailModal } from "../components/appointment/AppointmentDetailModal";
@@ -41,7 +40,7 @@ function mapApiQuestions(q: ApiQuestionnaire): QuestionnaireQuestion[] {
 
 export default function VisitsPage() {
   const location = useLocation();
-  const { appointments, updateAppointment, cancelAppointment, pushNotification, live } = useAppState();
+  const { appointments, cancelAppointment, pushNotification, live } = useAppState();
   const [tab, setTab] = useState<Tab>("upcoming");
   const [detailId, setDetailId] = useState<string | null>(null);
   const [rescheduleId, setRescheduleId] = useState<string | null>(null);
@@ -55,10 +54,9 @@ export default function VisitsPage() {
 
   // Deep-link intents from Home/cards
   useEffect(() => {
-    const s = location.state as { rescheduleId?: string; cancelId?: string; openQuestionnaire?: boolean } | null;
+    const s = location.state as { rescheduleId?: string; cancelId?: string } | null;
     if (s?.rescheduleId) setRescheduleId(s.rescheduleId);
     if (s?.cancelId) setCancelId(s.cancelId);
-    if (s?.openQuestionnaire && !live && QUESTIONNAIRES[0]) setQuestionnaireFor(QUESTIONNAIRES[0].appointmentId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -169,25 +167,7 @@ export default function VisitsPage() {
       <section className="card-base p-5">
         <h2 className="section-title">Questionnaires</h2>
         <p className="text-[0.83rem] text-ink-secondary mt-1">Administrative pre-visit forms — never a diagnosis.</p>
-        {!live ? (
-          <div className="mt-3 space-y-2.5">
-            {QUESTIONNAIRES.map((q) => (
-              <div key={q.id} className="border border-border rounded-control p-3.5 flex flex-col sm:flex-row sm:items-center gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-[0.9rem] text-ink">{q.name}</p>
-                  <p className="text-[0.78rem] text-ink-secondary">{q.dueLabel}</p>
-                  <div className="h-1.5 bg-background rounded-full mt-2 overflow-hidden">
-                    <div className="h-full bg-teal rounded-full" style={{ width: `${(q.progress.done / q.progress.total) * 100}%` }} />
-                  </div>
-                  <p className="text-[0.75rem] text-ink-secondary mt-1">{q.progress.done} of {q.progress.total} completed</p>
-                </div>
-                <Button variant="outline" size="sm" onClick={() => setQuestionnaireFor(q.appointmentId)}>
-                  {q.status === "pending" ? "Start" : "Continue"}
-                </Button>
-              </div>
-            ))}
-          </div>
-        ) : upcomingForForms.length === 0 ? (
+        {upcomingForForms.length === 0 ? (
           <p className="text-[0.83rem] text-ink-secondary mt-3">Book a visit first — its pre-visit form will appear here.</p>
         ) : (
           <div className="mt-3 space-y-2.5">
@@ -218,18 +198,6 @@ export default function VisitsPage() {
         appointment={rescheduleAppt}
         open={!!rescheduleAppt}
         onClose={() => setRescheduleId(null)}
-        onDone={(patch) => {
-          if (rescheduleAppt) {
-            updateAppointment(rescheduleAppt.id, patch);
-            pushNotification({
-              category: "appointments",
-              title: "Appointment rescheduled",
-              body: `${rescheduleAppt.specialty} with ${rescheduleAppt.doctorName} moved to ${patch.date} at ${patch.time}.`,
-              unread: true,
-            });
-          }
-          setRescheduleId(null);
-        }}
       />
 
       <Modal open={!!cancelAppt} onClose={() => setCancelId(null)} title="Cancel appointment">
@@ -257,10 +225,8 @@ export default function VisitsPage() {
         )}
       </Modal>
 
-      <Modal open={!!questionnaireFor} onClose={() => setQuestionnaireFor(null)} title={live ? `Pre-visit form${questionnaireAppt ? ` · ${questionnaireAppt.doctorName}` : ""}` : QUESTIONNAIRES[0].name} wide>
-        {!live || !questionnaireFor ? (
-          <QuestionnaireFlow questions={QUESTIONNAIRES[0].questions} onComplete={() => undefined} />
-        ) : quLoading ? (
+      <Modal open={!!questionnaireFor} onClose={() => setQuestionnaireFor(null)} title={`Pre-visit form${questionnaireAppt ? ` · ${questionnaireAppt.doctorName}` : ""}`} wide>
+        {quLoading ? (
           <p className="text-sm text-ink-secondary py-8 text-center">Loading your form…</p>
         ) : quError || !quForm ? (
           <div className="py-6 text-center">
@@ -271,6 +237,7 @@ export default function VisitsPage() {
           <QuestionnaireFlow
             questions={mapApiQuestions(quForm)}
             onComplete={(answers) => {
+              if (!questionnaireFor) return;
               void submitQuestionnaireAnswers(questionnaireFor, coerceQuestionnaireAnswers(quForm, answers))
                 .then(() => {
                   pushNotification({
@@ -293,12 +260,10 @@ function RescheduleModal({
   appointment,
   open,
   onClose,
-  onDone,
 }: {
   appointment: Appointment | null;
   open: boolean;
   onClose: () => void;
-  onDone: (patch: Partial<Appointment>) => void;
 }) {
   const { live, rescheduleLive, pushNotification } = useAppState();
   const days = nextSevenDays();
@@ -319,12 +284,6 @@ function RescheduleModal({
     setSaveError(null);
     setLoadError(null);
     setLoading(true);
-    if (!live) {
-      mockCheckAvailability(appointment.doctorId, dayKey)
-        .then(setSlots)
-        .finally(() => setLoading(false));
-      return;
-    }
     // Live: resolve the visit type, then ask for real open slots.
     fetchMyAppointment(appointment.id)
       .then((detail) =>
@@ -359,31 +318,16 @@ function RescheduleModal({
     setSaving(true);
     setSaveError(null);
     try {
-      if (live) {
-        const raw = rawById[selected.id];
-        if (!raw) throw new Error("slot-missing");
-        await rescheduleLive(appointment.id, raw.start, raw.end);
-        pushNotification({
-          category: "appointments",
-          title: "Appointment rescheduled",
-          body: `${appointment.specialty} with ${appointment.doctorName} moved to ${formatSlotDate(raw.start)} at ${formatSlotTime(raw.start)}.`,
-          unread: true,
-        });
-        onClose();
-        return;
-      }
-      await new Promise((r) => setTimeout(r, 800));
-      setStep(2);
-      setTimeout(() => {
-        onDone({
-          date: `${dayLabel.label}, ${dayLabel.sub}`,
-          time: selected.start,
-          slotStart: selected.start,
-          status: "rescheduled",
-          verificationStage: "confirmed",
-        });
-        setStep(0);
-      }, 1400);
+      const raw = rawById[selected.id];
+      if (!raw) throw new Error("slot-missing");
+      await rescheduleLive(appointment.id, raw.start, raw.end);
+      pushNotification({
+        category: "appointments",
+        title: "Appointment rescheduled",
+        body: `${appointment.specialty} with ${appointment.doctorName} moved to ${formatSlotDate(raw.start)} at ${formatSlotTime(raw.start)}.`,
+        unread: true,
+      });
+      onClose();
     } catch {
       setSaveError("Could not move this visit — the slot may be taken. Pick another time.");
     } finally {
@@ -394,7 +338,7 @@ function RescheduleModal({
   return (
     <Modal open={open} onClose={onClose} title="Reschedule appointment" wide>
       <div className="flex gap-1.5 mb-4">
-        {["Current", "New time", "Done"].map((l, i) => (
+        {["Current", "New time"].map((l, i) => (
           <span key={l} className={`text-[0.75rem] font-bold border rounded-full px-2.5 py-1 ${step >= i ? "bg-navy text-white border-navy" : "bg-white text-ink-faint border-border"}`}>
             {i + 1} · {l}
           </span>
@@ -440,14 +384,6 @@ function RescheduleModal({
               {saving ? "Confirming…" : "Review change"}
             </Button>
           </div>
-        </div>
-      )}
-
-      {step === 2 && (
-        <div className="text-center py-6">
-          <div className="w-14 h-14 mx-auto rounded-full bg-success-soft text-success flex items-center justify-center font-bold text-2xl">✓</div>
-          <h3 className="font-bold text-ink mt-3">Appointment updated</h3>
-          <p className="text-sm text-ink-secondary">Your new time is held and confirmed (mock).</p>
         </div>
       )}
     </Modal>

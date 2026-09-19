@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { doctorInitials } from "../../mock/doctors";
+import { doctorInitials } from "../../lib/helpers";
 
 export function Button({
   variant = "primary",

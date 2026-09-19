@@ -23,13 +23,6 @@ import {
   persistRead,
 } from "../lib/backend";
 import { useAuth } from "./AuthContext";
-import {
-  INITIAL_APPOINTMENTS,
-  INITIAL_BLOCKS,
-  INITIAL_NOTIFICATIONS,
-  INITIAL_RULES,
-  QUESTIONNAIRES,
-} from "../mock/schedule";
 import type {
   Appointment,
   AvailabilityRule,
@@ -39,22 +32,22 @@ import type {
 } from "../types";
 
 interface ScheduleState {
-  /** True when the backend drives this store (false = offline mock data). */
+  /** True when the backend drives this store. Always backend-driven when authenticated. */
   live: boolean;
   loading: boolean;
+  error: string | null;
   appointments: Appointment[];
   rules: AvailabilityRule[];
   blocks: BlockedSlot[];
   notifications: NotificationItem[];
   questionnaires: Questionnaire[];
   unreadCount: number;
-  /** Calendar on/off — backend `calendars.is_active` when live. */
+  /** Calendar on/off — backend `calendars.is_active`. */
   accepting: boolean;
   setAccepting: (on: boolean) => Promise<void>;
   refresh: () => Promise<void>;
   toggleRule: (id: string) => Promise<void>;
   updateRule: (id: string, patch: Partial<AvailabilityRule>) => Promise<void>;
-  addBlock: (b: Omit<BlockedSlot, "id">) => Promise<void>;
   addLiveBlock: (date: string, start: string, end: string, reason: BlockedSlot["reason"]) => Promise<void>;
   deleteBlock: (id: string) => Promise<void>;
   markRead: (id: string) => void;
@@ -88,26 +81,28 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
   const hospitalId = profile?.hospital_id ?? null;
   const doctorId = profile?.id ?? null;
 
-  const [appointments, setAppointments] = useState<Appointment[]>(INITIAL_APPOINTMENTS);
-  const [rules, setRules] = useState<AvailabilityRule[]>(INITIAL_RULES);
-  const [blocks, setBlocks] = useState<BlockedSlot[]>(INITIAL_BLOCKS);
-  const [notifications, setNotifications] = useState<NotificationItem[]>(INITIAL_NOTIFICATIONS);
-  const [questionnaires, setQuestionnaires] = useState<Questionnaire[]>(QUESTIONNAIRES);
-  const [accepting, setAcceptingState] = useState(true);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [rules, setRules] = useState<AvailabilityRule[]>([]);
+  const [blocks, setBlocks] = useState<BlockedSlot[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [questionnaires, setQuestionnaires] = useState<Questionnaire[]>([]);
+  const [accepting, setAcceptingState] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [liveLoaded, setLiveLoaded] = useState(false);
   const ruleCache = useRef(new Map<string, ApiRule>());
 
   const refresh = useCallback(async () => {
     if (!live || !hospitalId || !doctorId) return;
     setLoading(true);
+    setError(null);
     try {
       const [today, upcoming, calendar, notes, inbox] = await Promise.all([
-        apiMyAppointments("today").catch(() => []),
-        apiMyAppointments("upcoming").catch(() => []),
-        apiMyCalendar().catch(() => null),
-        apiNotifications().catch(() => []),
-        apiInbox().catch(() => []),
+        apiMyAppointments("today"),
+        apiMyAppointments("upcoming"),
+        apiMyCalendar(),
+        apiNotifications(),
+        apiInbox(),
       ]);
       const hospitalName = "My hospital";
       const mapped = [...today, ...upcoming]
@@ -116,43 +111,39 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
       // Deduplicate: an appointment can appear in both ranges.
       const seen = new Set<string>();
       setAppointments(mapped.filter((a) => (seen.has(a.id) ? false : (seen.add(a.id), true))));
-      if (calendar) {
-        for (const r of calendar.rules) ruleCache.current.set(r.id, r);
-        setRules(mapRules(calendar.rules));
-        setBlocks(mapBlocks(calendar.blocks));
-        setAcceptingState(calendar.calendar.is_active);
-      }
+      for (const r of calendar.rules) ruleCache.current.set(r.id, r);
+      setRules(mapRules(calendar.rules));
+      setBlocks(mapBlocks(calendar.blocks));
+      setAcceptingState(calendar.calendar.is_active);
       setNotifications(notes.map(mapNotification));
       setQuestionnaires(inbox.map(mapQuestionnaireItem));
       setLiveLoaded(true);
     } catch {
-      // Backend dropped mid-session: keep last-known data on screen.
+      setError("Could not load your schedule. Check your connection and try again.");
     } finally {
       setLoading(false);
     }
   }, [live, hospitalId, doctorId]);
 
-  // When a live session starts, swap mock seeds for backend data.
+  // When a live session starts, load backend data. Empty until it arrives.
   useEffect(() => {
     if (live && !liveLoaded) void refresh();
-    if (!live && liveLoaded) {
+    if (!live) {
       setLiveLoaded(false);
-      setAppointments(INITIAL_APPOINTMENTS);
-      setRules(INITIAL_RULES);
-      setBlocks(INITIAL_BLOCKS);
-      setNotifications(INITIAL_NOTIFICATIONS);
-      setQuestionnaires(QUESTIONNAIRES);
-      setAcceptingState(true);
+      setAppointments([]);
+      setRules([]);
+      setBlocks([]);
+      setNotifications([]);
+      setQuestionnaires([]);
+      setAcceptingState(false);
+      setError(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live]);
 
   const setAccepting = useCallback(
     async (on: boolean) => {
-      if (!live || !hospitalId || !doctorId) {
-        setAcceptingState(on);
-        return;
-      }
+      if (!live || !hospitalId || !doctorId) throw new Error("schedule-not-live");
       setAcceptingState(on);
       try {
         await apiUpdateCalendar(hospitalId, doctorId, on);
@@ -166,10 +157,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
 
   const toggleRule = useCallback(
     async (id: string) => {
-      if (!live || !hospitalId || !doctorId) {
-        setRules((prev) => prev.map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r)));
-        return;
-      }
+      if (!live || !hospitalId || !doctorId) throw new Error("schedule-not-live");
       const row = rules.find((r) => r.id === id);
       if (!row) return;
       if (row.enabled) {
@@ -199,10 +187,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
 
   const updateRule = useCallback(
     async (id: string, patch: Partial<AvailabilityRule>) => {
-      if (!live || !hospitalId || !doctorId) {
-        setRules((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-        return;
-      }
+      if (!live || !hospitalId || !doctorId) throw new Error("schedule-not-live");
       const row = rules.find((r) => r.id === id);
       if (!row) return;
       const next = { ...row, ...patch };
@@ -230,33 +215,9 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     [live, hospitalId, doctorId, rules, refresh],
   );
 
-  const addBlock = useCallback(
-    async (b: Omit<BlockedSlot, "id">) => {
-      if (!live || !hospitalId || !doctorId) {
-        const id = `b-${Date.now()}`;
-        setBlocks((prev) => [...prev, { ...b, id }]);
-        return;
-      }
-      // Mock-shaped block in live mode should not happen (AvailabilityPage
-      // uses addLiveBlock); fall back to a same-day window.
-      const today = new Date().toISOString().slice(0, 10);
-      await apiCreateBlock(hospitalId, doctorId, {
-        start_datetime: combineDateTime(today, "12:00"),
-        end_datetime: combineDateTime(today, "13:00"),
-        reason: blockReasonToApi(b.reason),
-      });
-      await refresh();
-    },
-    [live, hospitalId, doctorId, refresh],
-  );
-
   const addLiveBlock = useCallback(
     async (date: string, start: string, end: string, reason: BlockedSlot["reason"]) => {
-      if (!live || !hospitalId || !doctorId) {
-        const id = `b-${Date.now()}`;
-        setBlocks((prev) => [...prev, { id, date, start, end, reason }]);
-        return;
-      }
+      if (!live || !hospitalId || !doctorId) throw new Error("schedule-not-live");
       await apiCreateBlock(hospitalId, doctorId, {
         start_datetime: combineDateTime(date, start),
         end_datetime: combineDateTime(date, end),
@@ -269,13 +230,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
 
   const deleteBlock = useCallback(
     async (id: string) => {
-      // Backend ids are UUIDs; mock seeds (`b1..`) and mock adds
-      // (`b-<timestamp>`) never look like UUIDs.
-      const isMockId = /^b\d*$/.test(id) || /^b-\d+$/.test(id);
-      if (!live || !hospitalId || !doctorId || isMockId) {
-        setBlocks((prev) => prev.filter((b) => b.id !== id));
-        return;
-      }
+      if (!live || !hospitalId || !doctorId) throw new Error("schedule-not-live");
       setBlocks((prev) => prev.filter((b) => b.id !== id));
       try {
         await apiDeleteBlock(hospitalId, doctorId, id);
@@ -305,6 +260,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     () => ({
       live,
       loading,
+      error,
       appointments,
       rules,
       blocks,
@@ -316,7 +272,6 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
       refresh,
       toggleRule,
       updateRule,
-      addBlock,
       addLiveBlock,
       deleteBlock,
       markRead,
@@ -325,6 +280,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     [
       live,
       loading,
+      error,
       appointments,
       rules,
       blocks,
@@ -336,7 +292,6 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
       refresh,
       toggleRule,
       updateRule,
-      addBlock,
       addLiveBlock,
       deleteBlock,
       markRead,

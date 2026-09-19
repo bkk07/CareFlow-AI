@@ -11,7 +11,7 @@ import {
   Sparkles,
   User,
 } from "lucide-react";
-import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { useAppState } from "../../context/AppStateContext";
@@ -55,7 +55,6 @@ export function PatientShell({ children }: { children: React.ReactNode }) {
   const { unreadCount, notifications, markAllRead } = useAppState();
   const [panelOpen, setPanelOpen] = useState(false);
   const navigate = useNavigate();
-  const location = useLocation();
 
   function doLogout() {
     logout();
@@ -178,7 +177,7 @@ export function PatientShell({ children }: { children: React.ReactNode }) {
 
       {/* Content */}
       <div className="md:pl-[248px]">
-        <main key={location.pathname} className="shell-container pt-5 sm:pt-7">
+        <main className="shell-container pt-5 sm:pt-7">
           {children}
         </main>
         <footer className="hidden md:block border-t border-border bg-white">

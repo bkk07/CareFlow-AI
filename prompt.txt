@@ -1,0 +1,159 @@
+FIGMA DESIGN PROMPT — CareFlow AI (healthcare scheduling platform)
+====================================================================
+Paste this whole file into Figma (or Figma Make / Figma AI) as the
+design brief. It describes all three apps and every screen + feature
+that is implemented in the product and must be designed.
+
+1) PRODUCT OVERVIEW
+-------------------
+CareFlow AI is a real, working healthcare appointment platform with
+three frontends sharing one design language:
+  A. PATIENT app — find doctors, book visits, manage visits, inbox,
+     AI assistant (text + voice), preferences, profile.
+  B. HOSPITAL ADMIN console — run one hospital: catalog, scheduling,
+     appointments, AI oversight, integration health, analytics,
+     operations (reconciliation). A PLATFORM ADMIN view oversees ALL
+     hospitals (doctors, patients, appointments, AI evaluation, audit).
+  C. DOCTOR console — today's agenda, upcoming visits, availability
+     calendar (working rules, blocked slots, pause calendar).
+
+Tone: calm, clinical, trustworthy. No playful illustration; clean
+cards, generous whitespace, confident teal brand. Everything must look
+like a real realtime product (Zocdoc / Doctolib quality bar).
+
+2) DESIGN SYSTEM (apply to all three apps)
+------------------------------------------
+Colors:
+  Brand deep teal: #063c3b (ink) / #084f4e (dark) / #0b6e6d (primary)
+  Brand tints: #e1f0ef (soft) / #eef6f5 (faint)
+  Ink: #102a2b, soft #33484a, muted #5d7071, faint #8ba0a1
+  Background: #edf3f3 with a soft top glow; cards #ffffff
+  Lines: #d9e4e4, soft #e8efef
+  Success green #1c7a35 on #e2f3e7 | Warning amber #96690f on #faf0d3
+  Danger red #b3261e on #fae4e1 | Info blue #2456a6 on #e3edf9
+Typography: Inter (400/500/600/700/800), antialiased, tight balanced
+  headlines (letter-spacing -0.015em), tabular numerals for all times.
+Shape: radius 8px small / 12px controls / 16px cards; soft layered
+  shadows; 3px focus ring in brand teal on every interactive element.
+Components to build as variants: Button (primary/danger/ghost,
+  sm/default/lg, loading spinner state), Input/Select/Textarea (+error),
+  Card, Status Pill (confirmed, cancelled, failed, sync_pending,
+  reconciliation_required, rescheduled, sent, open + all admin states),
+  Table (sticky uppercase header, hover rows, numeric right-align),
+  Slot button (default/hover/selected), Step pills (todo/active/done),
+  Empty state (icon medallion + title + guidance + CTA), Skeleton rows,
+  Banner (error/notice/success/warn), Chat bubbles (patient/agent +
+  typing indicator), Avatar (initials), KPI stat card, Tabs, Sidebar
+  nav (grouped, sliding active highlight), Login split-card
+  (brand panel + form panel, stacks on mobile).
+Iconography: 24px stroke icons (2px, round caps — lucide idiom):
+  search, calendar, clock, check, check-circle, X, chevrons, arrows,
+  bell, user, mic, chat, building, alert-triangle, info, logout, plus,
+  retry, send, form, sliders, activity. Never use emoji as icons.
+Motion (for prototypes): fast entrances (0.25–0.3s, 10–16px rise),
+  springy presses and pop-ins, staggered lists (0.04s), a sliding
+  active pill in nav/sidebar (shared-element transition), shimmer
+  skeletons, reduced-motion fallback that disables it all.
+
+3) APP A — PATIENT (top nav: Find care, My visits, Inbox, Assistant,
+   Voice, Preferences, Profile + user chip + Log out)
+----------------------------------------------------------------------
+  3.1 Login: split card — left brand panel (logo, headline, 3 trust
+      bullets), right email+password form with loading/error states.
+  3.2 Home: dark-teal hero (headline, subcopy, trust row: hospital
+      count / Live availability / Free), overlapping search card
+      (specialty input + hospital dropdown + Search button), "Your
+      upcoming visits" strip, doctor result cards (avatar initials,
+      name, specialty + hospital, green "Next: <slot>" hint, "Book
+      visit" CTA), empty-result state with assistant CTA.
+  3.3 Book (3-step wizard: Visit type > Time > Confirm): doctor
+      header, step pills, visit-type dropdown, week pager (Prev/Next
+      week), DAY-COLUMN slot grid (one column per day, tabular times,
+      selected = filled teal), sticky "Confirm your visit" summary
+      card + big Confirm button (loading state), success notice
+      ("Booked! See you soon.") and held-slot notice for pending
+      confirmation, then auto-advance to My visits.
+  3.4 My visits: "Upcoming visits (n)" list (status pill + datetime +
+      Manage), "Past visits" section, empty state; visit DETAIL panel
+      (pill, full datetime, state history timeline, Cancel visit,
+      Reschedule with start/end pickers, pre-visit QUESTIONNAIRE form:
+      yes/no, multi-choice, text, required validation, draft + submit,
+      completion state).
+  3.5 Inbox: notification list (type, channel, status incl. failed
+      with error, timestamps), unread count in nav, "All caught up"
+      empty state.
+  3.6 Assistant (chat): message thread (patient right teal / agent
+      left white), typing indicator, send box, escalation notice when
+      handed to a human.
+  3.7 Voice: big mic button (idle / pulsing live ring + expanding
+      ring), Interrupt + Hang up controls, live transcript bubbles.
+  3.8 Preferences: preferred hospital, doctor, visit type, time of
+      day, consultation mode + save with success feedback.
+  3.9 Profile: account details + CONTACT panel for the phone channel
+      (phone number, full name, date of birth) used by call
+      verification.
+  Every screen needs: loading (skeleton), empty, error, and success
+  variants.
+
+4) APP B — HOSPITAL ADMIN (dark-teal sidebar: brand, user, grouped
+   tabs, sliding active highlight, Log out; content area with page
+   title + subcopy, KPI cards, tables, detail drawers)
+--------------------------------------------------------------------------
+  4.1 Login: same split-card, "Hospital operations" brand copy.
+  4.2 Overview: KPI cards (active doctors, upcoming visits, pending
+      confirmations, open issues), charts/summaries, state-filtered
+      appointment list.
+  4.3 Departments / Specialties / Visit types: CRUD tables (create,
+      rename, delete with confirm), validation errors.
+  4.4 Doctors: roster table (active/paused), activate/deactivate,
+      per-doctor availability RULES editor (weekday, start/end,
+      recurrence) — this powers the patient slot grid.
+  4.5 Appointments: filterable table (state, doctor, patient, date),
+      detail drawer (full state-history timeline), cancel flow.
+  4.6 AI activity: capability-execution feed (tool name, status,
+      latency, correlation id, actor, error) — the AI oversight view.
+  4.7 Integration: mock-EHR health (mapping counts, last operations,
+      fault-mode indicator).
+  4.8 Analytics: booking success rate, bookings by state,
+      reconciliation queue depth, AI latency (avg/p50/p95 + per-tool).
+  4.9 Operations: reconciliation work queue (open/retrying/resolved/
+      escalated) with Retry and Resolve flows + operator notes.
+  4.10 PLATFORM ADMIN (cross-hospital): Doctors, Patients,
+      Appointments tables (all tenants), AI evaluation view, AUDIT
+      LOG table (actor, action, entity, tenant, correlation id,
+      timestamp, metadata).
+
+5) APP C — DOCTOR (same sidebar shell; tabs: Today, Upcoming,
+   Calendar)
+--------------------------------------------------------------
+  5.1 Login: split-card, "Your practice, organized" copy.
+  5.2 Today / Upcoming: agenda lists (time, patient, visit type,
+      state pill), appointment detail (patient info, state history,
+      questionnaire answers read-only).
+  5.3 Calendar: weekly availability rules editor, blocked-slot
+      creator (date ranges), calendar Activate/Pause toggle.
+
+6) GLOBAL PATTERNS
+------------------
+  Booking is idempotent: double-submits never duplicate (design
+  disabled/loading states, not just copy). Vendor failures park
+  visibly: "slot held while we confirm" + reconciliation pill, never
+  a dead end. Every destructive action confirms first. Datetimes
+  always show the PATIENT'S local timezone grouped under the local
+  day. Status is always a pill, never bare text.
+  Responsive: 1120px container; sidebar collapses to top bar <=900px;
+  login stacks <=960px; tables compress <=640px; topbar user chip
+  hides on small screens.
+  Accessibility: visible focus rings, labeled inputs, aria-live for
+  async lists and confirmations, AA contrast, full keyboard flow for
+  search > slot > confirm, prefers-reduced-motion support.
+
+7) DELIVERABLES
+--------------
+  One Figma file, three sections (Patient / Hospital admin / Doctor):
+  design-token styles, component library with variants for everything
+  in section 2, all screens in sections 3–5 incl. loading/empty/error
+  variants, and clickable prototypes for: patient search-to-booked,
+  reschedule + cancel, questionnaire submit, admin reconciliation
+  retry, doctor calendar edit. Annotate the realtime touchpoints
+  (slot freshness, inbox polling, voice streaming, call verification).

@@ -85,6 +85,8 @@ class PatientProfile(Base):
     phone: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Patient's saved city, captured once and reused for "nearby" suggestions.
+    city: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

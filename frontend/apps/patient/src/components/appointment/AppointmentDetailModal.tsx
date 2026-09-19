@@ -1,12 +1,10 @@
-import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, CalendarDays, CheckCircle2, Clock, Info } from "lucide-react";
+import { motion } from "framer-motion";
+import { ArrowLeft, CalendarDays, CheckCircle2, Clock } from "lucide-react";
 import type { Appointment } from "../../types";
-import { consultationModeLabel } from "../../mock/services";
+import { consultationModeLabel } from "../../lib/helpers";
 import { Button, SafeImage, StatusBadge } from "../common/ui";
 import { Modal } from "../common/Modal";
 import { AppointmentTimeline } from "./AppointmentCard";
-import { QuestionnaireFlow } from "../questionnaire/QuestionnaireFlow";
-import { QUESTIONNAIRES } from "../../mock/data";
 import { useEffect, useState } from "react";
 
 export function AppointmentDetailModal({
@@ -22,13 +20,11 @@ export function AppointmentDetailModal({
   onReschedule?: (a: Appointment) => void;
   onCancel?: (a: Appointment) => void;
 }) {
-  const [showQ, setShowQ] = useState(false);
   if (!appointment) return null;
   const live = ["confirmed", "pending", "rescheduled", "sync_pending"].includes(appointment.status);
-  const q = QUESTIONNAIRES.find((x) => x.appointmentId === appointment.id) ?? QUESTIONNAIRES[0];
 
   return (
-    <Modal open={open} onClose={() => { setShowQ(false); onClose(); }} title="Appointment details" wide>
+    <Modal open={open} onClose={onClose} title="Appointment details" wide>
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <StatusBadge status={appointment.status} />
         <span className="text-[0.8rem] text-ink-secondary">Booking {appointment.id.toUpperCase()}</span>
@@ -71,23 +67,8 @@ export function AppointmentDetailModal({
       <div className="flex flex-wrap gap-2 mt-4">
         {live && onReschedule && <Button variant="outline" size="sm" onClick={() => onReschedule(appointment)}>Reschedule</Button>}
         {live && onCancel && <Button variant="ghost" size="sm" className="text-danger hover:bg-danger-soft" onClick={() => onCancel(appointment)}>Cancel</Button>}
-        <Button variant="outline" size="sm" onClick={() => setShowQ((v) => !v)}>
-          {showQ ? "Hide questionnaire" : "View questionnaire"}
-        </Button>
         <Button variant="ghost" size="sm">Add to calendar</Button>
       </div>
-
-      <AnimatePresence>
-        {showQ && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-            <div className="mt-4 border-t border-border pt-4">
-              <p className="font-bold text-ink text-sm">{q.name}</p>
-              <p className="text-[0.8rem] text-ink-secondary mb-3">{q.dueLabel}</p>
-              <QuestionnaireFlow questions={q.questions} onComplete={() => undefined} />
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </Modal>
   );
 }
@@ -112,7 +93,7 @@ export function BookingSuccessPanel({ onDone }: { onDone: () => void }) {
       </motion.div>
       <h3 className="text-xl font-extrabold text-navy mt-4">Appointment request submitted</h3>
       <p className="text-sm text-ink-secondary mt-1 max-w-md mx-auto">
-        Your slot is held while we confirm with the clinic. This is a frontend preview — no real system was contacted.
+        Your slot is held while we confirm with the clinic. Track its status under Visits.
       </p>
       <ol className="max-w-sm mx-auto mt-5 space-y-2 text-left">
         {steps.map((s, i) => (
@@ -130,7 +111,6 @@ export function BookingSuccessPanel({ onDone }: { onDone: () => void }) {
         ))}
       </ol>
       <Button onClick={onDone} className="mt-5">View appointment</Button>
-      <p className="text-[0.75rem] text-ink-faint mt-3 flex items-center justify-center gap-1"><Info size={13} /> Demo flow — mock confirmation only.</p>
     </motion.div>
   );
 }

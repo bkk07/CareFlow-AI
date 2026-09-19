@@ -236,10 +236,11 @@ def test_registry_lists_eighteen_tools(client, tool_factory):
     assert resp.status_code == 200
     names = {t["name"] for t in resp.json()["tools"]}
     assert names == set(server._TOOLS.keys())
-    assert len(names) == 18
+    assert len(names) == 19
     assert "create_appointment" in names
     assert "transfer_to_human" in names
     assert "verify_caller_identity" in names
+    assert "list_appointment_types" in names
 
 
 def test_mcp_requires_auth(client, tool_factory):
@@ -385,6 +386,76 @@ def test_search_doctors_active_and_specialty(client, tool_factory):
     assert "Dr. Inactive" not in [
         d["name"] for d in resp_all.json()["result"]["doctors"]
     ]
+
+
+def test_list_appointment_types_tool(client, tool_factory):
+    setup = seed_setup(client, tag="listtypes")
+    resp = client.post(
+        "/mcp/call",
+        json={
+            "tool": "list_appointment_types",
+            "input": {"hospital_id": setup["hid"]},
+        },
+        headers=setup["patient"]["headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    types = resp.json()["result"]["appointment_types"]
+    assert types == [
+        {
+            "id": setup["type"]["id"],
+            "name": f"Consult listtypes",
+            "duration_minutes": 30,
+        }
+    ]
+
+
+def test_chat_reply_carries_doctor_cards(client, db, tool_factory):
+    setup = seed_setup(client, tag="chatcards")
+    ctx = patient_ctx(setup)
+    complete = scripted(
+        {
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "name": "search_doctors",
+                    "arguments": {"specialty": "Cardiology chatcards"},
+                }
+            ],
+        },
+        {"content": "Dr. chatcards is available this week.", "tool_calls": []},
+    )
+    result = orchestrator.run_conversation(
+        db=db,
+        ctx=ctx,
+        conversation_id="conv-chatcards",
+        user_message="Find me a cardiologist",
+        complete=complete,
+    )
+    assert result["doctors"] == [
+        {
+            "id": setup["doctor"]["id"],
+            "name": "Dr. chatcards",
+            "photo_url": None,
+            "hospital_name": "Hospital chatcards",
+            "hospital_city": None,
+            "specialty": "Cardiology chatcards",
+        }
+    ]
+    # The HTTP chat contract accepts the enriched payload.
+    from app.ai.router import ChatOut
+
+    body = ChatOut(**result)
+    assert body.doctors[0].id == setup["doctor"]["id"]
+    http_resp = client.post(
+        "/mcp/call",
+        json={"tool": "search_doctors", "input": {}},
+        headers=setup["patient"]["headers"],
+    )
+    assert any(
+        d["hospital_city"] is None
+        for d in http_resp.json()["result"]["doctors"]
+    )
 
 
 def test_check_availability_returns_real_slots(client, tool_factory):

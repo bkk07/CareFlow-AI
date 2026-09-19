@@ -47,6 +47,7 @@ class ContactOut(BaseModel):
     phone: str | None
     full_name: str | None
     date_of_birth: date | None
+    city: str | None
     updated_at: datetime
 
 
@@ -54,6 +55,7 @@ class ContactUpdateIn(BaseModel):
     phone: str | None = Field(default=None, max_length=32)
     full_name: str | None = Field(default=None, max_length=255)
     date_of_birth: date | None = Field(default=None)
+    city: str | None = Field(default=None, max_length=120)
 
 
 class PatientAppointmentOut(BaseModel):

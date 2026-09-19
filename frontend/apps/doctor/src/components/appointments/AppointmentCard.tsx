@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 import { ArrowRight, Building2, Clock, Phone, Video } from "lucide-react";
 import { Link } from "react-router-dom";
-import { consultationModeLabel } from "../../mock/services";
+import { consultationModeLabel } from "../../lib/helpers";
 import type { Appointment } from "../../types";
 import { Avatar, StatusBadge } from "../common/ui";
 
