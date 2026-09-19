@@ -379,6 +379,7 @@ export interface DoctorDetail extends Doctor {
   default_duration_minutes: number;
   external_provider_id: string | null;
   user_id: string | null;
+  login_email: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -394,9 +395,23 @@ export async function createDoctor(
     specialty_id?: string | null;
     department_id?: string | null;
     experience_years?: number;
+    languages?: string[];
+    consultation_types?: string[];
   },
 ): Promise<DoctorDetail> {
   return (await api.post(`/hospitals/${hospitalId}/doctors`, body)).data;
+}
+
+export async function inviteDoctorLogin(
+  hospitalId: string,
+  doctorId: string,
+  body: { email: string; password: string },
+): Promise<DoctorDetail> {
+  return (await api.post(`/hospitals/${hospitalId}/doctors/${doctorId}/invite`, body)).data;
+}
+
+export async function removeDoctorLogin(hospitalId: string, doctorId: string): Promise<DoctorDetail> {
+  return (await api.delete(`/hospitals/${hospitalId}/doctors/${doctorId}/login`)).data;
 }
 
 export async function activateDoctor(hospitalId: string, id: string): Promise<DoctorDetail> {

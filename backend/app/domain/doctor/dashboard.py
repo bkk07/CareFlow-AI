@@ -38,7 +38,9 @@ def get_linked_doctor(session: Session, ctx: RequestContext) -> Doctor:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Doctor profile belongs to another hospital",
         )
-    return doctor
+    from app.domain.doctor import service as doctor_service
+
+    return doctor_service.attach_login_email(session, doctor)
 
 
 def _day_bounds_utc(now: datetime) -> tuple[datetime, datetime]:

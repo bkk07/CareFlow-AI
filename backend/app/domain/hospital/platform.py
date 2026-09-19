@@ -19,6 +19,7 @@ from app.domain.appointment.models import Appointment, AppointmentState
 from app.domain.appointment.schemas import AppointmentOut
 from app.domain.auth.models import Role, User
 from app.domain.doctor.models import Doctor, DoctorStatus
+from app.domain.doctor import service as doctor_service
 from app.domain.doctor.schemas import DoctorOut
 from app.domain.hospital.models import Hospital, HospitalStatus
 from app.domain.scheduling.availability import as_utc
@@ -51,7 +52,7 @@ def platform_list_doctors(
     query = db.query(Doctor).order_by(Doctor.name)
     if hospital_id is not None:
         query = query.filter(Doctor.hospital_id == hospital_id)
-    return query.all()
+    return doctor_service.attach_login_emails(db, query.all())
 
 
 @router.get("/platform/patients")

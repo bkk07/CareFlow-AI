@@ -20,6 +20,7 @@ import {
   getHospital as apiGetHospital,
   getQuestionnaireDetail as apiQuestionDetail,
   inviteStaff as apiInviteStaff,
+  inviteDoctorLogin as apiInviteDoctorLogin,
   listAppointments as apiAppointments,
   listAppointmentTypes as apiTypes,
   listDepartments as apiDepartments,
@@ -35,6 +36,7 @@ import {
   me as apiMe,
   probeBackend,
   renameDepartment as apiRenameDepartment,
+  removeDoctorLogin as apiRemoveDoctorLogin,
   resolveEscalation as apiResolveEscalation,
   resolveReconciliation as apiResolveRecord,
   restoreAccessToken,
@@ -135,8 +137,17 @@ interface AdminStore {
   addType: (t: Omit<AppointmentType, "id" | "status">) => Promise<void>;
   deleteType: (id: string) => Promise<void>;
   toggleType: (id: string) => void;
-  createDoctor: (input: { name: string; specialty_id?: string | null; department_id?: string | null }) => Promise<void>;
+  createDoctor: (input: {
+    name: string;
+    specialty_id?: string | null;
+    department_id?: string | null;
+    experience_years?: number;
+    languages?: string[];
+    consultation_types?: string[];
+  }) => Promise<void>;
   setDoctorStatus: (id: string, status: Doctor["status"]) => Promise<void>;
+  inviteDoctorLogin: (id: string, email: string, password: string) => Promise<void>;
+  removeDoctorLogin: (id: string) => Promise<void>;
   cancelAppointment: (id: string) => Promise<void>;
   createQuestionnaire: (name: string) => Promise<void>;
   duplicateQuestionnaire: (id: string) => Promise<void>;
@@ -516,12 +527,35 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     name: string;
     specialty_id?: string | null;
     department_id?: string | null;
+    experience_years?: number;
+    languages?: string[];
+    consultation_types?: string[];
   }) => {
     if (!live || !hospitalId) throw fail("Sign in — creating doctors needs the backend.");
     await apiCreateDoctor(hospitalId, input).catch(() => {
       throw fail("Could not create doctor. Check specialty/department.");
     });
     await refreshAll();
+  }, [live, hospitalId, refreshAll, fail]);
+
+  const inviteDoctorLogin = useCallback(async (id: string, email: string, password: string) => {
+    if (!live || !hospitalId) throw fail("Sign in — managing doctor logins needs the backend.");
+    await apiInviteDoctorLogin(hospitalId, id, { email, password }).catch((e: unknown) => {
+      const detail = (e as { response?: { data?: { detail?: unknown }; status?: number } })?.response;
+      if (detail?.status === 409) throw fail("Email already registered or doctor already has a login.");
+      throw fail("Could not create login. Check the email and password (min 8 characters).");
+    });
+    await refreshAll();
+    log("Doctor login created", id);
+  }, [live, hospitalId, refreshAll, fail]);
+
+  const removeDoctorLogin = useCallback(async (id: string) => {
+    if (!live || !hospitalId) throw fail("Sign in — managing doctor logins needs the backend.");
+    await apiRemoveDoctorLogin(hospitalId, id).catch(() => {
+      throw fail("Could not remove login.");
+    });
+    await refreshAll();
+    log("Doctor login removed", id);
   }, [live, hospitalId, refreshAll, fail]);
 
   const setDoctorStatus = useCallback(async (id: string, status: Doctor["status"]) => {
@@ -702,6 +736,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       toggleType,
       createDoctor,
       setDoctorStatus,
+      inviteDoctorLogin,
+      removeDoctorLogin,
       cancelAppointment,
       createQuestionnaire,
       duplicateQuestionnaire,
@@ -738,7 +774,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     [role, authed, login, logout, mode, live, loading, backendError, user, hospital,
       refreshAll, updateHospital, departments, specialties, types, doctors, appointments, questionnaires, staff,
       addDepartment, renameDepartment, deleteDepartment, toggleDepartment, addSpecialty, deleteSpecialty,
-      toggleSpecialty, addType, deleteType, toggleType, createDoctor, setDoctorStatus, cancelAppointment,
+      toggleSpecialty, addType, deleteType, toggleType, createDoctor, setDoctorStatus, inviteDoctorLogin,
+      removeDoctorLogin, cancelAppointment,
       createQuestionnaire, duplicateQuestionnaire, toggleQuestionnaire, fetchQuestionnaireDetail,
       inviteStaff, deactivateStaff, hospitals, audit, operations, reconciliations, escalations,
       liveWorkflows, liveAI, liveIntegrationRows, overview, analytics, integration,

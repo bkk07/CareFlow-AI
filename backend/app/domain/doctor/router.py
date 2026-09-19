@@ -16,6 +16,7 @@ from app.domain.doctor.schemas import (
     DoctorAppointmentOut,
     DoctorCalendarOut,
     DoctorCreateIn,
+    DoctorInviteIn,
     DoctorOut,
     DoctorQuestionnaireItemOut,
     DoctorSelfUpdateIn,
@@ -34,12 +35,13 @@ def list_doctors(
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(require_role(Role.hospital_admin)),
 ):
-    return (
+    rows = (
         hospital_scoped_query(Doctor, ctx, db)
         .filter(Doctor.hospital_id == hospital.id)
         .order_by(Doctor.name)
         .all()
     )
+    return service.attach_login_emails(db, rows)
 
 
 @router.post(
@@ -109,6 +111,43 @@ def deactivate_doctor(
 ):
     doctor = service.get_doctor_or_404(db, hospital, doctor_id)
     return service.deactivate(db, doctor)
+
+
+@router.post(
+    "/hospitals/{hospital_id}/doctors/{doctor_id}/invite",
+    response_model=DoctorOut,
+    status_code=201,
+)
+def invite_doctor_login(
+    doctor_id: uuid.UUID,
+    body: DoctorInviteIn,
+    hospital: Hospital = Depends(require_managed_hospital),
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(require_role(Role.hospital_admin)),
+):
+    """Create a doctor-portal login and link it to this profile.
+
+    Hospital-admin only, scoped to the managed (approved) hospital.
+    """
+    del ctx
+    doctor = service.get_doctor_or_404(db, hospital, doctor_id)
+    return service.invite_login(db, hospital, doctor, body.email, body.password)
+
+
+@router.delete(
+    "/hospitals/{hospital_id}/doctors/{doctor_id}/login",
+    response_model=DoctorOut,
+)
+def remove_doctor_login(
+    doctor_id: uuid.UUID,
+    hospital: Hospital = Depends(require_managed_hospital),
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(require_role(Role.hospital_admin)),
+):
+    """Unlink the portal login and deactivate it (offboarding)."""
+    del ctx
+    doctor = service.get_doctor_or_404(db, hospital, doctor_id)
+    return service.remove_login(db, hospital, doctor)
 
 
 _doctor = require_role(Role.doctor)

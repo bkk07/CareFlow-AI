@@ -13,7 +13,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.domain.doctor.models import Doctor, DoctorStatus
-from app.domain.doctor.schemas import DoctorCreateIn, DoctorUpdateIn
+from app.domain.doctor.schemas import DoctorCreateIn, DoctorInviteIn, DoctorUpdateIn
+from app.core.security import hash_password
 from app.domain.auth.models import Role, User
 from app.domain.hospital.models import Hospital
 from app.domain.hospital_config.models import (
@@ -58,7 +59,30 @@ def get_doctor_or_404(session: Session, hospital: Hospital, doctor_id: uuid.UUID
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Doctor not found"
         )
+    attach_login_email(session, doctor)
     return doctor
+
+
+def attach_login_email(session: Session, doctor: Doctor) -> Doctor:
+    """Populate the transient `login_email` used by DoctorOut."""
+    email = None
+    if doctor.user_id is not None:
+        user = session.get(User, doctor.user_id)
+        email = user.email if user is not None else None
+    doctor.login_email = email  # type: ignore[attr-defined]
+    return doctor
+
+
+def attach_login_emails(session: Session, doctors: list[Doctor]) -> list[Doctor]:
+    """Batched version for roster listing (single users query)."""
+    ids = {d.user_id for d in doctors if d.user_id is not None}
+    emails: dict = {}
+    if ids:
+        rows = session.query(User.id, User.email).filter(User.id.in_(ids)).all()
+        emails = {uid: email for uid, email in rows}
+    for doctor in doctors:
+        doctor.login_email = emails.get(doctor.user_id)  # type: ignore[attr-defined]
+    return doctors
 
 
 def _resolve_login(
@@ -102,6 +126,7 @@ def create_doctor(
             "external_provider_id or user link is already assigned in this hospital"
         ) from None
     session.refresh(doctor)
+    attach_login_email(session, doctor)
     return doctor
 
 
@@ -129,6 +154,7 @@ def update_doctor(
             "external_provider_id or user link is already assigned in this hospital"
         ) from None
     session.refresh(doctor)
+    attach_login_email(session, doctor)
     return doctor
 
 
@@ -165,6 +191,7 @@ def activate(session: Session, hospital: Hospital, doctor: Doctor) -> Doctor:
     doctor.status = DoctorStatus.active
     session.commit()
     session.refresh(doctor)
+    attach_login_email(session, doctor)
     return doctor
 
 
@@ -174,4 +201,55 @@ def deactivate(session: Session, doctor: Doctor) -> Doctor:
     doctor.status = DoctorStatus.inactive
     session.commit()
     session.refresh(doctor)
+    attach_login_email(session, doctor)
+    return doctor
+
+
+def invite_login(
+    session: Session, hospital: Hospital, doctor: Doctor, email: str, password: str
+) -> Doctor:
+    """Create a portal login for the doctor and link it, atomically.
+
+    The login is scoped to this hospital; the doctor signs into the
+    doctor portal with this email + password.
+    """
+    if doctor.user_id is not None:
+        raise _conflict("This doctor already has a portal login")
+    user = User(
+        email=email.lower(),
+        password_hash=hash_password(password),
+        role=Role.doctor,
+        hospital_id=hospital.id,
+        is_active=True,
+    )
+    session.add(user)
+    try:
+        session.flush()  # surface duplicate-email before linking
+        doctor.user_id = user.id
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise _conflict("Email is already registered") from None
+    session.refresh(doctor)
+    attach_login_email(session, doctor)
+    return doctor
+
+
+def remove_login(session: Session, hospital: Hospital, doctor: Doctor) -> Doctor:
+    """Unlink the portal login and deactivate it (offboarding).
+
+    The user row is kept for audit history but can no longer sign in.
+    """
+    if doctor.user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This doctor has no portal login",
+        )
+    user = session.get(User, doctor.user_id)
+    if user is not None and user.hospital_id == hospital.id:
+        user.is_active = False
+    doctor.user_id = None
+    session.commit()
+    session.refresh(doctor)
+    attach_login_email(session, doctor)
     return doctor

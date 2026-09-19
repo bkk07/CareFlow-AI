@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.domain.appointment.schemas import AppointmentOut
 from app.domain.doctor.models import DoctorStatus
@@ -58,9 +58,21 @@ class DoctorOut(BaseModel):
     default_duration_minutes: int
     external_provider_id: str | None
     user_id: uuid.UUID | None
+    # Linked login's email for roster display. Populated by the service
+    # layer as a transient attribute (never a column); None = no login yet.
+    login_email: str | None = None
     status: DoctorStatus
     created_at: datetime
     updated_at: datetime
+
+
+class DoctorInviteIn(BaseModel):
+    """Create a portal login for a doctor and link it in one step."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
 
 
 class DoctorSelfUpdateIn(BaseModel):

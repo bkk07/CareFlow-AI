@@ -7,7 +7,7 @@ import { Modal } from "../../components/common/Modal";
 import type { Doctor } from "../../types";
 
 export default function DoctorsPage() {
-  const { doctors, specialties, departments, setDoctorStatus, createDoctor, live, loading, backendError, refreshAll } = useAdmin();
+  const { doctors, specialties, departments, setDoctorStatus, createDoctor, inviteDoctorLogin, removeDoctorLogin, live, loading, backendError, refreshAll } = useAdmin();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [selected, setSelected] = useState<Doctor | null>(null);
@@ -16,7 +16,24 @@ export default function DoctorsPage() {
   const [newName, setNewName] = useState("");
   const [newSpecialty, setNewSpecialty] = useState("");
   const [newDepartment, setNewDepartment] = useState("");
+  const [newExperience, setNewExperience] = useState("0");
+  const [newLanguages, setNewLanguages] = useState("English");
+  const [newModes, setNewModes] = useState<string[]>(["in_person", "video"]);
+  const [inviteFor, setInviteFor] = useState<Doctor | null>(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [invitePassword, setInvitePassword] = useState("");
+  const [removeLoginFor, setRemoveLoginFor] = useState<Doctor | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const MODES = [
+    { id: "in_person", label: "In person" },
+    { id: "video", label: "Video" },
+    { id: "phone", label: "Phone" },
+  ];
+
+  function toggleMode(m: string) {
+    setNewModes((prev) => (prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]));
+  }
 
   async function run(fn: () => Promise<void>) {
     setError(null);
@@ -53,7 +70,7 @@ export default function DoctorsPage() {
           <h1 className="page-title">Doctors</h1>
           <p className="page-sub mt-1">{doctors.length} doctors · {doctors.filter((d) => d.status === "active").length} active.</p>
         </div>
-        <Button size="sm" onClick={() => { setNewName(""); setNewSpecialty(specialties[0]?.id ?? ""); setNewDepartment(departments[0]?.id ?? ""); setCreateOpen(true); }}><Plus size={15} /> Add doctor</Button>
+        <Button size="sm" onClick={() => { setNewName(""); setNewSpecialty(specialties[0]?.id ?? ""); setNewDepartment(departments[0]?.id ?? ""); setNewExperience("0"); setNewLanguages("English"); setNewModes(["in_person", "video"]); setCreateOpen(true); }}><Plus size={15} /> Add doctor</Button>
       </div>
 
       {live && (
@@ -79,7 +96,7 @@ export default function DoctorsPage() {
       {visible.length === 0 ? (
         <div className="card-base"><EmptyState title="No doctors found" body={doctors.length === 0 ? "No doctors registered yet — add your first doctor." : "Try a different search or status filter."} action={doctors.length === 0 ? <Button size="sm" variant="outline" onClick={() => void refreshAll()}>Refresh</Button> : undefined} /></div>
       ) : (
-        <ResponsiveTable headers={["Doctor", "Specialty", "Department", "Exp.", "Modes", "Status", "Availability", "Actions"]}>
+        <ResponsiveTable headers={["Doctor", "Specialty", "Department", "Exp.", "Modes", "Status", "Availability", "Login", "Actions"]}>
           {visible.map((d) => (
             <tr key={d.id} className="hover:bg-background/60 transition">
               <td className="td-cell">
@@ -94,13 +111,19 @@ export default function DoctorsPage() {
               <td className="td-cell text-ink-secondary text-[0.8rem]">{d.modes.join(", ")}</td>
               <td className="td-cell"><StatusBadge status={d.status} /></td>
               <td className="td-cell text-ink-secondary text-[0.8rem]">{d.availability}</td>
+              <td className="td-cell text-ink-secondary text-[0.8rem]">{d.loginEmail ?? "—"}</td>
               <td className="td-cell">
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <button onClick={() => setSelected(d)} className="text-[0.78rem] font-bold text-healthcare hover:underline">View</button>
                   {d.status !== "active" ? (
                     <button onClick={() => setConfirm({ id: d.id, to: "active" })} className="text-[0.78rem] font-bold text-success hover:underline">Activate</button>
                   ) : (
                     <button onClick={() => setConfirm({ id: d.id, to: "inactive" })} className="text-[0.78rem] font-bold text-ink-secondary hover:text-danger">Deactivate</button>
+                  )}
+                  {d.loginEmail ? (
+                    <button onClick={() => setRemoveLoginFor(d)} className="text-[0.78rem] font-bold text-ink-secondary hover:text-danger">Remove login</button>
+                  ) : (
+                    <button onClick={() => { setInviteFor(d); setInviteEmail(""); setInvitePassword(""); }} className="text-[0.78rem] font-bold text-healthcare hover:underline">Create login</button>
                   )}
                 </div>
               </td>
@@ -127,6 +150,7 @@ export default function DoctorsPage() {
                 ["Languages", selected.languages.join(", ")],
                 ["Consultation", selected.modes.join(", ")],
                 ["Hospital", selected.hospital],
+                ["Portal login", selected.loginEmail ?? "No login yet"],
                 ["Weekly load", `${selected.appointmentsWeek} appointments`],
               ].map(([k, v], i) => (
                 <div key={k} className={`flex justify-between gap-3 px-4 py-2.5 ${i % 2 ? "bg-background/60" : "bg-white"}`}>
@@ -143,6 +167,13 @@ export default function DoctorsPage() {
                 <Button className="flex-1" onClick={() => void run(async () => { await setDoctorStatus(selected.id, "active"); setSelected(null); })}>Activate doctor</Button>
               ) : (
                 <Button variant="outline" className="flex-1" onClick={() => void run(async () => { await setDoctorStatus(selected.id, "inactive"); setSelected(null); })}>Deactivate</Button>
+              )}
+            </div>
+            <div className="flex gap-2">
+              {selected.loginEmail ? (
+                <Button variant="outline" className="flex-1" onClick={() => { setSelected(null); setRemoveLoginFor(selected); }}>Remove portal login</Button>
+              ) : (
+                <Button variant="outline" className="flex-1" onClick={() => { setSelected(null); setInviteFor(selected); setInviteEmail(""); setInvitePassword(""); }}>Create portal login</Button>
               )}
             </div>
           </div>
@@ -174,12 +205,58 @@ export default function DoctorsPage() {
               {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
           </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block text-[0.83rem] font-bold">Experience (years)<input type="number" min={0} value={newExperience} onChange={(e) => setNewExperience(e.target.value)} className="input-base mt-1" /></label>
+            <label className="block text-[0.83rem] font-bold">Languages (comma separated)<input value={newLanguages} onChange={(e) => setNewLanguages(e.target.value)} placeholder="English, Hindi" className="input-base mt-1" /></label>
+          </div>
+          <div>
+            <p className="text-[0.83rem] font-bold">Consultation modes</p>
+            <div className="flex gap-2 mt-1.5">
+              {MODES.map((m) => (
+                <label key={m.id} className={`flex-1 text-[0.8rem] font-bold border rounded-control py-2 text-center cursor-pointer transition ${newModes.includes(m.id) ? "bg-navy text-white border-navy" : "bg-white border-border hover:border-healthcare"}`}>
+                  <input type="checkbox" className="sr-only" checked={newModes.includes(m.id)} onChange={() => toggleMode(m.id)} />
+                  {m.label}
+                </label>
+              ))}
+            </div>
+          </div>
           <Button className="w-full" disabled={!newName.trim()} onClick={() => void run(async () => {
-            await createDoctor({ name: newName.trim(), specialty_id: newSpecialty || null, department_id: newDepartment || null });
+            const exp = Math.max(0, parseInt(newExperience, 10) || 0);
+            const langs = newLanguages.split(",").map((l) => l.trim()).filter(Boolean);
+            await createDoctor({
+              name: newName.trim(),
+              specialty_id: newSpecialty || null,
+              department_id: newDepartment || null,
+              experience_years: exp,
+              languages: langs,
+              consultation_types: newModes,
+            });
             setCreateOpen(false);
           })}>Add doctor</Button>
         </div>
       </Modal>
+
+      <Modal open={!!inviteFor} onClose={() => setInviteFor(null)} title={`Create portal login${inviteFor ? ` · ${inviteFor.name}` : ""}`}>
+        <div className="space-y-3">
+          <p className="text-[0.83rem] text-ink-secondary">The doctor signs into the doctor portal with this email and password. Location and hospital scope come from your hospital record — nothing to enter.</p>
+          <label className="block text-[0.83rem] font-bold">Login email<input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="doctor@hospital.org" className="input-base mt-1" /></label>
+          <label className="block text-[0.83rem] font-bold">Password (min 8 characters)<input type="password" value={invitePassword} onChange={(e) => setInvitePassword(e.target.value)} className="input-base mt-1" minLength={8} /></label>
+          <Button className="w-full" disabled={!inviteEmail.trim() || invitePassword.length < 8} onClick={() => inviteFor && void run(async () => {
+            await inviteDoctorLogin(inviteFor.id, inviteEmail.trim(), invitePassword);
+            setInviteFor(null);
+          })}>Create login</Button>
+        </div>
+      </Modal>
+
+      <ConfirmDialog
+        open={!!removeLoginFor}
+        onClose={() => setRemoveLoginFor(null)}
+        title="Remove portal login"
+        body={`The login${removeLoginFor?.loginEmail ? ` (${removeLoginFor.loginEmail})` : ""} will be deactivated and unlinked. The doctor profile and history stay.`}
+        confirmLabel="Remove login"
+        danger
+        onConfirm={() => removeLoginFor && void run(async () => { await removeDoctorLogin(removeLoginFor.id); setRemoveLoginFor(null); })}
+      />
     </div>
   );
 }

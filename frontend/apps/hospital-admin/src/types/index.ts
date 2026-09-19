@@ -57,6 +57,7 @@ export interface Doctor {
   qualifications: string;
   languages: string[];
   hospital: string;
+  loginEmail: string | null;
 }
 
 export type AppointmentStatus =

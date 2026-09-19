@@ -131,6 +131,7 @@ export function mapDoctor(
     qualifications: quals,
     languages: d.languages,
     hospital: hospitalName,
+    loginEmail: d.login_email ?? null,
   };
 }
 
