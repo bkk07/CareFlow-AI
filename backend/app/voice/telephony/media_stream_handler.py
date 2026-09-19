@@ -78,13 +78,19 @@ STOP_WORDS = ("stop", "stop talking", "hold on", "wait")
 
 GREETING_KNOWN = (
     "Hello {name}, thanks for calling CareFlow. "
-    "For your security, please say your full name and date of birth."
+    "For your security, please say your full name and date of birth; "
+    "this call may be recorded."
 )
 GREETING_UNKNOWN = (
     "Thanks for calling CareFlow. "
-    "Please say your full name and date of birth so I can find your record."
+    "Please say your full name and date of birth so I can find your record; "
+    "this call may be recorded."
 )
 SILENCE_REPROMPT = "Are you still there?"
+SILENCE_CLOSING = (
+    "I haven't heard you, so I'll end the call here. "
+    "The care team will follow up."
+)
 SILENCE_END_REASON = "silence"
 
 
@@ -307,6 +313,9 @@ async def _on_silence(
             stream_sid,
             escalation_id,
         )
+        # Parity with the web channel (ended:silence): tell the caller why
+        # the call is ending before hanging up.
+        await _speak(ws, session, stream_sid, SILENCE_CLOSING)
         return True
     finally:
         if owned:

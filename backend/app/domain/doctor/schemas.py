@@ -116,8 +116,16 @@ class DoctorAppointmentOut(BaseModel):
     slot_start: datetime
     slot_end: datetime
     state: str
+    consultation_mode: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class DoctorQuestionPrompt(BaseModel):
+    """Question id -> prompt so the portal shows text, not UUIDs."""
+
+    id: uuid.UUID
+    prompt: str
 
 
 class DoctorQuestionnaireItemOut(BaseModel):
@@ -130,6 +138,7 @@ class DoctorQuestionnaireItemOut(BaseModel):
     slot_end: datetime
     state: str
     responses: list[ResponseOut]
+    questions: list[DoctorQuestionPrompt] = Field(default_factory=list)
 
 
 class DoctorCalendarOut(BaseModel):

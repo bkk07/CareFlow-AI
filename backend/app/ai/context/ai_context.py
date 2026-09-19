@@ -34,6 +34,11 @@ class AIContext(BaseModel):
     offered_slots: list[dict[str, str]] = Field(default_factory=list)
     offered_doctors: list[dict[str, str]] = Field(default_factory=list)
     pending_clarification: str | None = None
+    # P0 confirm-gate: a proposed booking waiting for the patient's
+    # explicit "yes". Set when the assistant attempts create_appointment
+    # without confirmation; cleared on successful booking.
+    pending_booking: dict[str, str] | None = None
+    awaiting_confirmation: bool = False
     last_appointment_id: str | None = None
     history: list[dict[str, str]] = Field(default_factory=list)
     # Phase 14 telephony: "web" everywhere else; "telephony" unlocks

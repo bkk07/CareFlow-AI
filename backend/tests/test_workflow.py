@@ -165,6 +165,11 @@ def test_reschedule_and_cancel_notify(client, db, eager_tasks):
 
 def test_chat_booking_notifies(client, db, eager_tasks):
     from app.ai.agent import orchestrator
+    from app.ai.context.ai_context import (
+        clear_ai_context,
+        get_ai_context,
+        save_ai_context,
+    )
     from app.core.deps import RequestContext
 
     setup = seed_setup(client, tag="wfchat")
@@ -174,6 +179,13 @@ def test_chat_booking_notifies(client, db, eager_tasks):
         role=Role.patient,
         hospital_id=None,
     )
+    # Confirmation turn: the slot was offered on a previous turn, so the
+    # P0 confirm gate allows the booking after the patient's "yes".
+    clear_ai_context("conv-wfchat")
+    prior = get_ai_context("conv-wfchat")
+    prior.offered_doctors = [{"id": setup["doctor"]["id"], "name": "Dr. wfchat"}]
+    prior.offered_slots = [{"start": start, "end": end}]
+    save_ai_context(prior)
     complete = scripted(
         {
             "content": None,
@@ -197,7 +209,7 @@ def test_chat_booking_notifies(client, db, eager_tasks):
         db=db,
         ctx=ctx,
         conversation_id="conv-wfchat",
-        user_message="Book Monday morning please",
+        user_message="Yes, book Monday morning please",
         complete=complete,
     )
     assert result["reply"] == "Booked."

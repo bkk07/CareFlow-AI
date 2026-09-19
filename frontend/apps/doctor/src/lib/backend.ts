@@ -111,6 +111,9 @@ export function mapDoctorAppointment(
   hospitalName: string,
 ): Appointment {
   const group = dayGroupFor(a.slot_start);
+  const mode = a.consultation_mode === "video" || a.consultation_mode === "phone"
+    ? a.consultation_mode
+    : "in_person";
   return {
     id: a.id,
     patient: {
@@ -129,7 +132,7 @@ export function mapDoctorAppointment(
     sortKey: a.slot_start,
     type: a.appointment_type_name || "Visit",
     durationMinutes: 30,
-    mode: "in_person",
+    mode,
     status: mapAppointmentState(a.state),
     questionnaire: "not_assigned",
     department: "",
@@ -278,10 +281,13 @@ export function mapQuestionnaireItem(item: DoctorQuestionnaireItem): Questionnai
   const status =
     done.length > 0 ? "completed" : item.responses.length > 0 ? "in_progress" : "assigned";
   const last = done.length > 0 ? done[done.length - 1] : null;
+  const promptById = new Map(
+    (item.questions ?? []).map((q) => [q.id, q.prompt]),
+  );
   const answers =
     last != null
-      ? Object.entries(last.answers ?? {}).map(([question, response]) => ({
-          question,
+      ? Object.entries(last.answers ?? {}).map(([qid, response]) => ({
+          question: promptById.get(qid) ?? "Question",
           response: typeof response === "string" ? response : JSON.stringify(response),
         }))
       : [];

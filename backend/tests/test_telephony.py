@@ -523,9 +523,20 @@ def test_full_call_verifies_then_books(client, db, tool_factory, telephony_env):
     cid = f"call-{uuid.uuid4().hex[:8]}"
     telephony_env["stt"].texts = [
         "My name is Telephone Testerson, born January second 1990",
-        "Book Monday morning",
+        "Yes, book Monday morning",
     ]
     start = datetime.fromisoformat(f"{MONDAY}T09:00:00+00:00")
+    # Confirmation turn: seed the previously offered slot so the P0
+    # confirm gate allows the booking after the patient says yes.
+    prior = get_ai_context(cid)
+    prior.offered_doctors = [{"id": setup["doctor"]["id"], "name": "Dr. callbook"}]
+    prior.offered_slots = [
+        {
+            "start": start.isoformat(),
+            "end": (start + timedelta(minutes=30)).isoformat(),
+        }
+    ]
+    save_ai_context(prior)
     telephony.set_agent_complete(
         scripted(
             {

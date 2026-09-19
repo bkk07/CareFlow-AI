@@ -24,7 +24,14 @@ import {
 } from "./pages/ops/OpsPages";
 
 function ProtectedLayout() {
-  const { authed } = useAdmin();
+  const { authed, mode } = useAdmin();
+  if (mode === "checking") {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-ink-secondary text-sm">
+        Restoring your session…
+      </div>
+    );
+  }
   if (!authed) return <Navigate to="/login" replace />;
   return (
     <AdminShell>

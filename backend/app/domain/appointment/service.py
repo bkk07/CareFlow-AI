@@ -102,6 +102,11 @@ def assert_slot_available(
     """
     if end <= start:
         raise _unprocessable("slot_end must be after slot_start")
+    offered = list(doctor.available_durations or [])
+    if offered and appointment_type.duration_minutes not in offered:
+        raise _unprocessable(
+            f"Doctor does not offer {appointment_type.duration_minutes}-minute visits"
+        )
     windows = scheduling_service.get_available_slots(
         doctor.id,
         appointment_type.id,
@@ -114,6 +119,23 @@ def assert_slot_available(
     )
     if Window(as_utc(start), as_utc(end)) not in windows:
         raise _conflict("Slot is not available")
+
+
+def _normalize_consultation_mode(
+    doctor: Doctor, consultation_mode: str | None
+) -> str | None:
+    """Validate the requested visit mode against the doctor's configured
+    consultation types. Doctors with no configured types accept anything
+    (back-compat for older profiles); otherwise the mode must be offered."""
+    if consultation_mode is None:
+        return None
+    mode = consultation_mode.strip()
+    if not mode:
+        return None
+    offered = [str(m) for m in (doctor.consultation_types or [])]
+    if offered and mode not in offered:
+        raise _unprocessable(f"Doctor does not offer '{mode}' visits")
+    return mode
 
 
 def _release_block(
@@ -158,6 +180,7 @@ def create_appointment(
     actor_user_id: uuid.UUID,
     integration: IntegrationService,
     correlation_id: uuid.UUID | None = None,
+    consultation_mode: str | None = None,
 ) -> tuple[Appointment, bool]:
     """Book an appointment; returns (appointment, created).
 
@@ -186,6 +209,7 @@ def create_appointment(
         )
     if doctor.status != DoctorStatus.active:
         raise _unprocessable("Doctor is not active")
+    mode = _normalize_consultation_mode(doctor, consultation_mode)
     start, end = _to_utc(slot_start), _to_utc(slot_end)
     assert_slot_available(
         session, doctor=doctor, appointment_type=appointment_type, start=start, end=end
@@ -207,6 +231,7 @@ def create_appointment(
         state=AppointmentState.pending,
         idempotency_key=idempotency_key,
         correlation_id=correlation_id,
+        consultation_mode=mode,
     )
     session.add(appointment)
     try:

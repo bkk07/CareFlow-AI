@@ -160,6 +160,7 @@ def _appointment_display(
         slot_start=appointment.slot_start,
         slot_end=appointment.slot_end,
         state=appointment.state,
+        consultation_mode=appointment.consultation_mode,
         created_at=appointment.created_at,
         updated_at=appointment.updated_at,
     )

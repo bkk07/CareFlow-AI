@@ -37,11 +37,17 @@ def test_booking_is_remembered_for_the_next_turn(client, db, ehr_stub):
     ctx = patient_ctx(setup)
     cid = "unit-ctx-book"
     clear_ai_context(cid)
+    # Confirmation turn: the slot was offered previously, so the confirm
+    # gate allows the booking after the patient's explicit "yes".
+    prior = get_ai_context(cid)
+    prior.offered_doctors = [{"id": setup["doctor"]["id"], "name": "Dr. uctxbook"}]
+    prior.offered_slots = [{"start": start, "end": end}]
+    save_ai_context(prior)
     first = orchestrator.run_conversation(
         db=db,
         ctx=ctx,
         conversation_id=cid,
-        user_message="book me Monday morning",
+        user_message="Yes, book me Monday morning",
         complete=scripted(
             {
                 "content": None,

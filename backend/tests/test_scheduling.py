@@ -123,8 +123,9 @@ def test_weekly_rule_yields_expected_slots(client):
     assert monday.status_code == 200
     slots = monday.json()
     assert len(slots) == 16  # 8h × 30min
-    assert slots[0]["start"] == "2026-09-14T09:00:00Z"
-    assert slots[-1]["end"] == "2026-09-14T17:00:00Z"
+    # Rules are IST wall time: 09:00-17:00 IST == 03:30-11:30 UTC.
+    assert slots[0]["start"] == "2026-09-14T03:30:00Z"
+    assert slots[-1]["end"] == "2026-09-14T11:30:00Z"
 
     tuesday = get_slots(
         client, hosp, doctor["id"], appt_type["id"],
@@ -164,8 +165,8 @@ def test_blocked_slot_subtraction_and_naive_rejected(client):
     block = client.post(
         f"/hospitals/{hosp['id']}/doctors/{did}/blocked-slots",
         json={
-            "start_datetime": "2026-09-14T10:00:00Z",
-            "end_datetime": "2026-09-14T11:00:00Z",
+            "start_datetime": "2026-09-14T04:30:00Z",
+            "end_datetime": "2026-09-14T05:30:00Z",
             "reason": "leave",
         },
         headers=hosp["owner"],
@@ -174,8 +175,8 @@ def test_blocked_slot_subtraction_and_naive_rejected(client):
     after = get_slots(client, hosp, did, appt_type["id"]).json()
     assert len(after) == 4
     assert all(
-        s["end"] <= "2026-09-14T10:00:00Z"
-        or s["start"] >= "2026-09-14T11:00:00Z"
+        s["end"] <= "2026-09-14T04:30:00Z"
+        or s["start"] >= "2026-09-14T05:30:00Z"
         for s in after
     )
 
@@ -263,7 +264,8 @@ def test_changing_working_hours_updates_slots(client):
     )
     slots = get_slots(client, hosp, doctor["id"], appt_type["id"]).json()
     assert len(slots) == 4
-    assert slots[0]["start"] == "2026-09-14T10:00:00Z"
+    # 10:00 IST == 04:30 UTC.
+    assert slots[0]["start"] == "2026-09-14T04:30:00Z"
 
 
 def test_inactive_calendar_and_doctor_yield_no_slots(client):

@@ -30,6 +30,20 @@ class DoctorCardOut(BaseModel):
     specialty: str | None = None
 
 
+class SlotOut(BaseModel):
+    start: str
+    end: str
+
+
+class PendingBookingOut(BaseModel):
+    kind: str = "create"
+    doctor_id: str | None = None
+    appointment_type_id: str | None = None
+    slot_start: str | None = None
+    slot_end: str | None = None
+    appointment_id: str | None = None
+
+
 class ChatOut(BaseModel):
     conversation_id: str
     reply: str
@@ -37,6 +51,8 @@ class ChatOut(BaseModel):
     escalated: bool
     stopped: bool = False
     doctors: list[DoctorCardOut] = []
+    slots: list[SlotOut] = []
+    pending_booking: PendingBookingOut | None = None
 
 
 @router.post("/chat", response_model=ChatOut)

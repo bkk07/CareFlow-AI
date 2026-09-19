@@ -34,7 +34,7 @@ from app.domain.questionnaire.schemas import (
 router = APIRouter(tags=["questionnaires"])
 
 _admin = require_role(Role.hospital_admin)
-_answerer = require_role(Role.patient, Role.hospital_admin)
+_answerer = require_role(Role.patient, Role.hospital_admin, Role.doctor)
 _viewer = require_role(Role.patient, Role.hospital_admin, Role.platform_admin, Role.doctor)
 
 

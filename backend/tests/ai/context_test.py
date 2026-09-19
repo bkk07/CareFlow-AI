@@ -1,7 +1,7 @@
 """ai/context: the model sees the booking when the patient says "that one"."""
 
 from app.ai.agent import orchestrator
-from app.ai.context.ai_context import clear_ai_context, get_ai_context
+from app.ai.context.ai_context import clear_ai_context, get_ai_context, save_ai_context
 from tests.test_mcp_agent import patient_ctx, scripted, seed_setup, slot_iso
 
 
@@ -11,11 +11,17 @@ def test_follow_up_turn_sees_prior_booking(client, db, ehr_stub):
     ctx = patient_ctx(setup)
     cid = "conv-aictx"
     clear_ai_context(cid)
+    # Confirmation turn: the slot was offered previously, so the gate
+    # allows the booking after the patient's explicit "yes".
+    prior = get_ai_context(cid)
+    prior.offered_doctors = [{"id": setup["doctor"]["id"], "name": "Dr. aictx"}]
+    prior.offered_slots = [{"start": start, "end": end}]
+    save_ai_context(prior)
     orchestrator.run_conversation(
         db=db,
         ctx=ctx,
         conversation_id=cid,
-        user_message="book me Monday morning",
+        user_message="Yes, book me Monday morning",
         complete=scripted(
             {
                 "content": None,

@@ -77,6 +77,9 @@ function periodFor(iso: string): TimeSlot["period"] {
 /** Backend appointment (enriched view) -> portal Appointment card model. */
 export function mapPatientAppointment(a: PatientAppointment): Appointment {
   const status = mapAppointmentState(a.state);
+  const mode = a.consultation_mode === "video" || a.consultation_mode === "phone"
+    ? a.consultation_mode
+    : "in_person";
   return {
     id: a.id,
     doctorId: a.doctor_id,
@@ -91,7 +94,7 @@ export function mapPatientAppointment(a: PatientAppointment): Appointment {
     slotStart: a.slot_start,
     slotEnd: a.slot_end,
     durationMinutes: a.duration_minutes,
-    consultationMode: "in_person",
+    consultationMode: mode,
     appointmentType: a.appointment_type_name,
     status,
     location: `${a.hospital_name}${a.department ? ` · ${a.department}` : ""}`,
@@ -160,7 +163,17 @@ export function mapSlot(s: Slot, index: number): TimeSlot {
 
 /** Backend doctor search hit -> Doctor card model (directory has no photos/bios). */
 export function mapDoctorResult(d: DoctorResult): Doctor {
-  const modes: ConsultationMode[] = ["in_person", "video"];
+  const VALID_MODES: ConsultationMode[] = ["in_person", "video", "phone"];
+  const rawModes = Array.isArray(d.consultation_types) ? d.consultation_types : [];
+  const modes: ConsultationMode[] = rawModes.filter((m): m is ConsultationMode =>
+    (VALID_MODES as string[]).includes(m),
+  );
+  // Fall back only when the backend sent nothing — otherwise show the
+  // doctor's real consultation settings (the "original doctor availability").
+  const consultationModes = modes.length > 0 ? modes : (["in_person", "video"] as ConsultationMode[]);
+  const durations = Array.isArray(d.available_durations)
+    ? [...new Set(d.available_durations.filter((n) => typeof n === "number" && n > 0))].sort((a, b) => a - b)
+    : [];
   const where = d.hospital_city ? `${d.hospital_name} · ${d.hospital_city}` : d.hospital_name;
   return {
     id: d.id,
@@ -174,7 +187,8 @@ export function mapDoctorResult(d: DoctorResult): Doctor {
     hospitalId: d.hospital_id,
     hospitalName: d.distance_km != null ? `${where} · ${d.distance_km.toFixed(1)} km away` : where,
     photo: "",
-    consultationModes: modes,
+    consultationModes,
+    availableDurations: durations,
     rating: 0,
     reviewsCount: 0,
     nextAvailable: "Check availability",

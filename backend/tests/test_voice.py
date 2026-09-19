@@ -159,6 +159,7 @@ def test_partial_transcript_runs_no_tools(client, db, voice_env):
 
 
 def test_full_booking_flow_by_voice(client, db, voice_env):
+    from app.ai.context.ai_context import get_ai_context, save_ai_context
     from app.mcp_server.tools import _base as tool_base
 
     setup = seed_setup(client, tag="voicebook")
@@ -187,10 +188,24 @@ def test_full_booking_flow_by_voice(client, db, voice_env):
         )
         token = setup["patient"]["headers"]["Authorization"].split(" ", 1)[1]
         with client.websocket_connect(f"/voice/ws?token={token}") as ws:
-            read_until(ws, {"ready"})
+            ready, _ = read_until(ws, {"ready"})
+            # Confirmation turn: seed the previously offered slot so the
+            # P0 confirm gate allows the booking after the patient says yes.
+            prior = get_ai_context(ready["conversation_id"])
+            prior.offered_doctors = [
+                {"id": setup["doctor"]["id"], "name": "Dr. voicebook"}
+            ]
+            prior.offered_slots = [
+                {
+                    "start": create_args["slot_start"],
+                    "end": create_args["slot_end"],
+                }
+            ]
+            save_ai_context(prior)
+            voice_env["stt"].text = "Yes, book Monday morning"
             ws.send_text(audio_msg(make_tone(0.4) + make_silence(0.8)))
             final, seen = read_until(ws, {"final"})
-            assert final["text"] == "book monday morning"
+            assert final["text"] == "Yes, book Monday morning"
             agent, seen2 = read_until(ws, {"agent_text"})
             assert "Monday morning" in agent["text"]
             audio, _ = read_until(ws, {"audio_out"})

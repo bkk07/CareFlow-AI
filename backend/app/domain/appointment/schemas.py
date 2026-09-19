@@ -15,6 +15,7 @@ class AppointmentCreateIn(BaseModel):
     slot_start: datetime
     slot_end: datetime
     idempotency_key: str = Field(min_length=1, max_length=100)
+    consultation_mode: str | None = Field(default=None, max_length=20)
 
 
 class RescheduleIn(BaseModel):
@@ -50,6 +51,7 @@ class AppointmentOut(BaseModel):
     state: AppointmentState
     external_id: str | None
     idempotency_key: str
+    consultation_mode: str | None = None
     correlation_id: uuid.UUID
     created_at: datetime
     updated_at: datetime

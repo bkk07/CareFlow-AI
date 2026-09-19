@@ -157,6 +157,7 @@ def book_appointment(
         idempotency_key=body.idempotency_key,
         actor_user_id=ctx.user_id,
         integration=integration,
+        consultation_mode=body.consultation_mode,
     )
     if appointment.state == AppointmentState.failed:
         raise HTTPException(
@@ -251,6 +252,7 @@ def get_appointment(
         state=appointment.state,
         external_id=appointment.external_id,
         idempotency_key=appointment.idempotency_key,
+        consultation_mode=appointment.consultation_mode,
         correlation_id=appointment.correlation_id,
         created_at=appointment.created_at,
         updated_at=appointment.updated_at,

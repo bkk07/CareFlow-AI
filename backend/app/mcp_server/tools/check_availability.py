@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.deps import RequestContext
 from app.domain.appointment import service as appointment_service
 from app.domain.auth.models import Role
-from app.domain.doctor.models import Doctor
+from app.domain.doctor.models import Doctor, DoctorStatus
 from app.domain.hospital.service import assert_hospital_approved, get_hospital_or_404
 from app.domain.scheduling import service as scheduling_service
 from app.integration.integration_service import IntegrationService
@@ -44,11 +44,23 @@ def run(
     doctor = db.get(Doctor, input.doctor_id)
     if doctor is None:
         raise CapabilityValidationError("Doctor not found")
+    if doctor.status != DoctorStatus.active:
+        raise CapabilityValidationError("Doctor is not currently seeing patients")
     hospital = get_hospital_or_404(db, doctor.hospital_id)
     assert_hospital_approved(hospital)
     appt_type = appointment_service.get_scoped_type(
         db, hospital, input.appointment_type_id
     )
+    offered = list(doctor.available_durations or [])
+    if offered and appt_type.duration_minutes not in offered:
+        raise CapabilityValidationError(
+            f"Doctor does not offer {appt_type.duration_minutes}-minute visits"
+        )
+    calendar = scheduling_service.get_or_create_calendar(db, doctor.id)
+    if not calendar.is_active:
+        raise CapabilityValidationError(
+            "Doctor is not currently accepting appointments (calendar paused)"
+        )
     windows = scheduling_service.get_available_slots(
         doctor.id,
         appt_type.id,

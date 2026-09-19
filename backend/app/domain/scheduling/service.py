@@ -205,7 +205,15 @@ def reserve_slot(
     """
     if end <= start:
         raise SlotConflictError("end must be after start")
+    doctor = session.get(Doctor, doctor_id)
+    if doctor is not None and doctor.status != DoctorStatus.active:
+        raise SlotConflictError("Doctor is not active")
     get_or_create_calendar(session, doctor_id)
+    calendar = (
+        session.query(Calendar).filter(Calendar.doctor_id == doctor_id).first()
+    )
+    if calendar is not None and not calendar.is_active:
+        raise SlotConflictError("Doctor is not accepting appointments")
     _lock_doctor_calendar(session, doctor_id)
     if _overlapping_block(session, doctor_id, start, end) is not None:
         raise SlotConflictError("Slot overlaps an existing block")

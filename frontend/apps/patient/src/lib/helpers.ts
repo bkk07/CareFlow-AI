@@ -12,7 +12,12 @@ export function nextSevenDays(): { key: string; label: string; sub: string }[] {
   for (let i = 0; i < 7; i++) {
     const d = new Date(now);
     d.setDate(now.getDate() + i);
-    const key = d.toISOString().slice(0, 10);
+    // Local YYYY-MM-DD (not UTC): backend date_from/date_to are calendar
+    // dates, so the key must match the patient's local day to show the
+    // doctor's original working hours for the right day.
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const key = `${d.getFullYear()}-${mm}-${dd}`;
     const label = i === 0 ? "Today" : i === 1 ? "Tomorrow" : d.toLocaleDateString("en-US", { weekday: "short" });
     const sub = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
     days.push({ key, label, sub });

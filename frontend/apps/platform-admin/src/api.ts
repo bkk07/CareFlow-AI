@@ -6,36 +6,107 @@ const baseURL =
 
 export const api = axios.create({ baseURL });
 
+const TOKEN_KEY = "careflow_platform_token";
+const REFRESH_KEY = "careflow_platform_refresh";
+
+function safeGet(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeSet(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* private mode */
+  }
+}
+
+function safeRemove(key: string) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* noop */
+  }
+}
+
 export function setAccessToken(token: string | null) {
   if (token) {
     api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
-    try {
-      localStorage.setItem("careflow_platform_token", token);
-    } catch {
-      /* private mode */
-    }
+    safeSet(TOKEN_KEY, token);
   } else {
     delete api.defaults.headers.common["Authorization"];
-    try {
-      localStorage.removeItem("careflow_platform_token");
-    } catch {
-      /* noop */
-    }
+    safeRemove(TOKEN_KEY);
+    safeRemove(REFRESH_KEY);
   }
 }
 
 export function restoreAccessToken(): string | null {
-  let token: string | null = null;
-  try {
-    token = localStorage.getItem("careflow_platform_token");
-  } catch {
-    token = null;
-  }
+  const token = safeGet(TOKEN_KEY);
   if (token) {
     api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
   }
   return token;
 }
+
+function saveTokens(access: string, refresh: string) {
+  setAccessToken(access);
+  safeSet(REFRESH_KEY, refresh);
+}
+
+// Silent refresh: on 401 try one refresh with the stored refresh token
+// (2-day expiry) before surfacing the error, so users are not bounced
+// to login while their refresh token is still valid.
+let refreshInFlight: Promise<string | null> | null = null;
+async function refreshAccessToken(): Promise<string | null> {
+  if (!refreshInFlight) {
+    const rt = safeGet(REFRESH_KEY);
+    if (!rt) return null;
+    refreshInFlight = (async () => {
+      try {
+        const { data } = await axios.post(`${baseURL}/auth/refresh`, {
+          refresh_token: rt,
+        });
+        saveTokens(data.access_token, data.refresh_token);
+        return data.access_token as string;
+      } catch {
+        setAccessToken(null);
+        return null;
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+  }
+  return refreshInFlight;
+}
+
+api.interceptors.response.use(
+  (res) => res,
+  async (error) => {
+    const original = error?.config;
+    const status = error?.response?.status;
+    const url: string = original?.url ?? "";
+    if (
+      status === 401 &&
+      original &&
+      !original._retry &&
+      !url.includes("/auth/login") &&
+      !url.includes("/auth/refresh")
+    ) {
+      original._retry = true;
+      const fresh = await refreshAccessToken();
+      if (fresh) {
+        original.headers = original.headers ?? {};
+        original.headers["Authorization"] = `Bearer ${fresh}`;
+        return api(original);
+      }
+    }
+    return Promise.reject(error);
+  },
+);
 
 export async function probeBackend(timeoutMs = 4000): Promise<boolean> {
   try {
@@ -218,7 +289,7 @@ export interface AuditEvent {
 
 export async function login(email: string, password: string): Promise<void> {
   const { data } = await api.post("/auth/login", { email, password });
-  setAccessToken(data.access_token);
+  saveTokens(data.access_token, data.refresh_token);
 }
 
 export async function me(): Promise<CurrentUser> {

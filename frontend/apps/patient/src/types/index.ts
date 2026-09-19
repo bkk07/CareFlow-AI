@@ -35,6 +35,7 @@ export interface Doctor {
   hospitalName: string;
   photo: string;
   consultationModes: ConsultationMode[];
+  availableDurations: number[];
   rating: number;
   reviewsCount: number;
   nextAvailable: string;
@@ -149,6 +150,20 @@ export interface ChatMessage {
     hospital_city: string | null;
     specialty: string | null;
   }[];
+  /** Offered time slots for this turn — tap to confirm (nothing books until confirmed). */
+  slots?: {
+    start: string;
+    end: string;
+  }[];
+  /** Proposal awaiting the patient's explicit yes/no. */
+  pendingBooking?: {
+    kind: string;
+    doctor_id: string | null;
+    appointment_type_id: string | null;
+    slot_start: string | null;
+    slot_end: string | null;
+    appointment_id: string | null;
+  } | null;
 }
 
 export interface PatientProfile {

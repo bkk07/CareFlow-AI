@@ -222,8 +222,8 @@ def patient_ctx(setup) -> RequestContext:
     )
 
 
-def slot_iso(day=MONDAY, hour=9):
-    start = datetime.fromisoformat(f"{day}T{hour:02d}:00:00+00:00")
+def slot_iso(day=MONDAY, hour=9, minutes=0):
+    start = datetime.fromisoformat(f"{day}T{hour:02d}:{minutes:02d}:00+00:00")
     return start.isoformat(), (start + timedelta(minutes=30)).isoformat()
 
 
@@ -478,7 +478,8 @@ def test_check_availability_returns_real_slots(client, tool_factory):
     assert resp.status_code == 200
     slots = resp.json()["result"]["slots"]
     assert len(slots) == 16  # 8h / 30min
-    assert slots[0]["start"] == start
+    # Rules are IST wall time: 09:00 IST == 03:30 UTC.
+    assert slots[0]["start"] == day + "T03:30:00+00:00"
 
 
 def test_lookup_patient_self_only(client, tool_factory):
@@ -639,10 +640,17 @@ def scripted(*steps):
 
 
 def test_chat_books_cardiologist_end_to_end(client, db, tool_factory):
+    """Two-turn booking: turn 1 finds + proposes, turn 2 confirms + books.
+
+    The P0 confirm gate forbids one-shot booking — create_appointment only
+    runs after the patient explicitly confirms a previously offered slot.
+    """
     setup = seed_setup(client, tag="chatbook")
-    start, end = slot_iso()
+    # First offered slot (rules are IST: 09:00 IST == 03:30 UTC), so the
+    # confirm gate recognises it (only the first 10 slots are remembered).
+    start, end = slot_iso(hour=3, minutes=30)
     ctx = patient_ctx(setup)
-    complete = scripted(
+    turn1 = scripted(
         {
             "content": None,
             "tool_calls": [
@@ -669,6 +677,27 @@ def test_chat_books_cardiologist_end_to_end(client, db, tool_factory):
             ],
         },
         {
+            "content": "Dr. chatbook has Monday 3:30 open. Shall I book this? Reply yes to confirm.",
+            "tool_calls": [],
+        },
+    )
+    result1 = orchestrator.run_conversation(
+        db=db,
+        ctx=ctx,
+        conversation_id="conv-chatbook",
+        user_message="I need a cardiologist this week",
+        complete=turn1,
+    )
+    assert "Shall I book" in result1["reply"]
+    assert (
+        db.query(Appointment).filter(Appointment.idempotency_key == "chat-book-1").count()
+        == 0
+    )
+    remembered = get_ai_context("conv-chatbook")
+    assert len(remembered.offered_slots) > 0
+
+    turn2 = scripted(
+        {
             "content": None,
             "tool_calls": [
                 {
@@ -684,17 +713,17 @@ def test_chat_books_cardiologist_end_to_end(client, db, tool_factory):
                 }
             ],
         },
-        {"content": "Booked with Dr. chatbook for Monday 9:00.", "tool_calls": []},
+        {"content": "Booked with Dr. chatbook for Monday 3:30.", "tool_calls": []},
     )
     result = orchestrator.run_conversation(
         db=db,
         ctx=ctx,
         conversation_id="conv-chatbook",
-        user_message="I need a cardiologist this week",
-        complete=complete,
+        user_message="Yes, book it",
+        complete=turn2,
     )
     assert result["reply"].startswith("Booked")
-    assert result["iterations"] == 4
+    assert result["iterations"] == 2
     assert result["escalated"] is False
     appt = (
         db.query(Appointment)
@@ -704,6 +733,7 @@ def test_chat_books_cardiologist_end_to_end(client, db, tool_factory):
     assert appt.state.value == "confirmed"
     remembered = get_ai_context("conv-chatbook")
     assert remembered.last_appointment_id == str(appt.id)
+    assert remembered.awaiting_confirmation is False
     assert db.query(CapabilityExecution).count() == 3
 
 
@@ -729,7 +759,9 @@ def test_chat_declines_clinical_question_without_tools(client, db, tool_factory)
     assert db.query(CapabilityExecution).count() == 0
 
 
-def test_chat_scheduling_intent_with_symptom_still_books(client, db, tool_factory):
+def test_chat_scheduling_intent_with_symptom_proposes_confirmation(client, db, tool_factory):
+    """Mixed clinical + scheduling message is not declined, but a fresh
+    booking request without a prior offer must propose first, not book."""
     setup = seed_setup(client, tag="mixedmsg")
     start, end = slot_iso()
     ctx = patient_ctx(setup)
@@ -750,7 +782,10 @@ def test_chat_scheduling_intent_with_symptom_still_books(client, db, tool_factor
                 }
             ],
         },
-        {"content": "Booked.", "tool_calls": []},
+        {
+            "content": "Dr. mixedmsg has Monday 9:00 open. Shall I book this? Reply yes to confirm.",
+            "tool_calls": [],
+        },
     )
     result = orchestrator.run_conversation(
         db=db,
@@ -759,8 +794,520 @@ def test_chat_scheduling_intent_with_symptom_still_books(client, db, tool_factor
         user_message="My chest has been hurting; I need to book a cardiologist",
         complete=complete,
     )
+    # Not declined (scheduling intent present) and not booked (no prior
+    # offer + no explicit confirmation): the model must propose first.
+    assert result["reply"] != orchestrator.CLINICAL_DECLINE
+    assert "Shall I book" in result["reply"]
+    assert (
+        db.query(Appointment).filter(Appointment.idempotency_key == "mixed-1").count()
+        == 0
+    )
+    pending = get_ai_context("conv-mixed")
+    assert pending.awaiting_confirmation is True
+    assert pending.pending_clarification == "booking_confirmation"
+
+
+def test_chat_one_shot_booking_is_refused_without_confirmation(client, db, tool_factory):
+    """A single-turn search + book attempt is stopped at create: the gate
+    refuses, records the pending proposal, and books nothing."""
+    setup = seed_setup(client, tag="oneshot")
+    start, end = slot_iso()
+    ctx = patient_ctx(setup)
+    complete = scripted(
+        {
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "name": "search_doctors",
+                    "arguments": {"specialty": f"Cardiology oneshot"},
+                }
+            ],
+        },
+        {
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "c2",
+                    "name": "create_appointment",
+                    "arguments": {
+                        "doctor_id": setup["doctor"]["id"],
+                        "appointment_type_id": setup["type"]["id"],
+                        "slot_start": start,
+                        "slot_end": end,
+                        "idempotency_key": "oneshot-1",
+                    },
+                }
+            ],
+        },
+        {
+            "content": "Dr. oneshot has Monday 9:00 open. Shall I book this? Reply yes to confirm.",
+            "tool_calls": [],
+        },
+    )
+    result = orchestrator.run_conversation(
+        db=db,
+        ctx=ctx,
+        conversation_id="conv-oneshot",
+        user_message="Find me a cardiologist and book Monday morning",
+        complete=complete,
+    )
+    assert "Shall I book" in result["reply"]
+    assert (
+        db.query(Appointment).filter(Appointment.idempotency_key == "oneshot-1").count()
+        == 0
+    )
+    pending = get_ai_context("conv-oneshot")
+    assert pending.awaiting_confirmation is True
+    assert pending.pending_booking is not None
+    assert pending.pending_booking["doctor_id"] == setup["doctor"]["id"]
+
+
+def test_chat_missing_idempotency_key_is_minted_by_server(client, db, tool_factory):
+    """Assistant path never fails for a missing key: the gate mints one."""
+    setup = seed_setup(client, tag="mintkey")
+    start, end = slot_iso()
+    ctx = patient_ctx(setup)
+    clear_ai_context("conv-mintkey")
+    context = get_ai_context("conv-mintkey")
+    context.offered_doctors = [{"id": setup["doctor"]["id"], "name": "Dr. mintkey"}]
+    context.offered_slots = [{"start": start, "end": end}]
+    save_ai_context(context)
+    complete = scripted(
+        {
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "name": "create_appointment",
+                    "arguments": {
+                        "doctor_id": setup["doctor"]["id"],
+                        "appointment_type_id": setup["type"]["id"],
+                        "slot_start": start,
+                        "slot_end": end,
+                        "idempotency_key": "   ",
+                    },
+                }
+            ],
+        },
+        {"content": "Booked.", "tool_calls": []},
+    )
+    result = orchestrator.run_conversation(
+        db=db,
+        ctx=ctx,
+        conversation_id="conv-mintkey",
+        user_message="Yes, book it",
+        complete=complete,
+    )
     assert result["reply"] == "Booked."
-    assert result["iterations"] == 2
+    assert db.query(Appointment).count() == 1
+
+
+def test_chat_reschedule_requires_confirmation(client, db, tool_factory):
+    """A move request proposes first; only 'yes' for an offered slot moves it."""
+    setup = seed_setup(client, tag="rsconf")
+    booked = book_via_tool(client, setup, key="rsconf-1").json()["result"]
+    appt_id = booked["appointment_id"]
+    start2, end2 = slot_iso(hour=10)
+    ctx = patient_ctx(setup)
+    turn1 = scripted(
+        {
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "name": "reschedule_appointment",
+                    "arguments": {
+                        "appointment_id": appt_id,
+                        "slot_start": start2,
+                        "slot_end": end2,
+                    },
+                }
+            ],
+        },
+        {
+            "content": "I can move it to Monday 10:00. Shall I? Reply yes to confirm.",
+            "tool_calls": [],
+        },
+    )
+    r1 = orchestrator.run_conversation(
+        db=db,
+        ctx=ctx,
+        conversation_id="conv-rsconf",
+        user_message="Please move my appointment to Monday 10 AM",
+        complete=turn1,
+    )
+    assert "Shall I" in r1["reply"]
+    untouched = db.query(Appointment).filter(Appointment.id == uuid.UUID(appt_id)).one()
+    assert untouched.slot_start.replace(tzinfo=None).isoformat() == "2026-10-05T09:00:00"
+    pending = get_ai_context("conv-rsconf")
+    assert pending.awaiting_confirmation is True
+    assert pending.pending_booking is not None
+    assert pending.pending_booking.get("kind") == "reschedule"
+
+    turn2 = scripted(
+        {
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "c2",
+                    "name": "reschedule_appointment",
+                    "arguments": {
+                        "appointment_id": appt_id,
+                        "slot_start": start2,
+                        "slot_end": end2,
+                    },
+                }
+            ],
+        },
+        {"content": "Moved to Monday 10:00.", "tool_calls": []},
+    )
+    r2 = orchestrator.run_conversation(
+        db=db,
+        ctx=ctx,
+        conversation_id="conv-rsconf",
+        user_message="Yes, move it",
+        complete=turn2,
+    )
+    assert r2["reply"] == "Moved to Monday 10:00."
+    moved = db.query(Appointment).filter(Appointment.id == uuid.UUID(appt_id)).one()
+    assert moved.slot_start.replace(tzinfo=None).isoformat() == "2026-10-05T10:00:00"
+    assert moved.state.value == "rescheduled"
+    assert get_ai_context("conv-rsconf").awaiting_confirmation is False
+
+
+def test_chat_cancel_requires_confirmation(client, db, tool_factory):
+    """A cancel request proposes first; only 'yes' tears the booking down."""
+    setup = seed_setup(client, tag="cxconf")
+    booked = book_via_tool(client, setup, key="cxconf-1").json()["result"]
+    appt_id = booked["appointment_id"]
+    ctx = patient_ctx(setup)
+    turn1 = scripted(
+        {
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "name": "cancel_appointment",
+                    "arguments": {"appointment_id": appt_id},
+                }
+            ],
+        },
+        {
+            "content": "Shall I cancel it? Reply yes to confirm.",
+            "tool_calls": [],
+        },
+    )
+    r1 = orchestrator.run_conversation(
+        db=db,
+        ctx=ctx,
+        conversation_id="conv-cxconf",
+        user_message="Cancel my appointment",
+        complete=turn1,
+    )
+    assert "Shall I cancel" in r1["reply"]
+    live = db.query(Appointment).filter(Appointment.id == uuid.UUID(appt_id)).one()
+    assert live.state.value == "confirmed"
+    pending = get_ai_context("conv-cxconf")
+    assert pending.awaiting_confirmation is True
+    assert (pending.pending_booking or {}).get("kind") == "cancel"
+
+    turn2 = scripted(
+        {
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "c2",
+                    "name": "cancel_appointment",
+                    "arguments": {"appointment_id": appt_id},
+                }
+            ],
+        },
+        {"content": "Cancelled.", "tool_calls": []},
+    )
+    r2 = orchestrator.run_conversation(
+        db=db,
+        ctx=ctx,
+        conversation_id="conv-cxconf",
+        user_message="Yes, cancel it",
+        complete=turn2,
+    )
+    assert r2["reply"] == "Cancelled."
+    gone = db.query(Appointment).filter(Appointment.id == uuid.UUID(appt_id)).one()
+    assert gone.state.value == "cancelled"
+
+
+def test_chat_decline_clears_pending_proposal(client, db, tool_factory):
+    """'No, never mind' drops the proposal so a later 'yes' books nothing."""
+    setup = seed_setup(client, tag="decline")
+    start, end = slot_iso()
+    ctx = patient_ctx(setup)
+    clear_ai_context("conv-decline")
+    context = get_ai_context("conv-decline")
+    context.offered_doctors = [{"id": setup["doctor"]["id"], "name": "Dr. decline"}]
+    context.offered_slots = [{"start": start, "end": end}]
+    context.pending_booking = {
+        "kind": "create",
+        "doctor_id": setup["doctor"]["id"],
+        "appointment_type_id": setup["type"]["id"],
+        "slot_start": start,
+        "slot_end": end,
+    }
+    context.awaiting_confirmation = True
+    context.pending_clarification = "booking_confirmation"
+    save_ai_context(context)
+    r = orchestrator.run_conversation(
+        db=db,
+        ctx=ctx,
+        conversation_id="conv-decline",
+        user_message="No, never mind",
+        complete=scripted({"content": "No problem — what would you like instead?", "tool_calls": []}),
+    )
+    assert "No problem" in r["reply"]
+    cleared = get_ai_context("conv-decline")
+    assert cleared.awaiting_confirmation is False
+    assert cleared.pending_booking is None
+    assert db.query(Appointment).count() == 0
+    assert r["pending_booking"] is None
+
+
+# -- P2: consultation mode, durations, calendar state --------------------------
+
+
+def test_chat_booking_persists_consultation_mode(client, db, tool_factory):
+    """A confirmed video booking stores its mode; the patient view shows it."""
+    setup = seed_setup(client, tag="chatmode")
+    hid = setup["hid"]
+    did = setup["doctor"]["id"]
+    upd = client.put(
+        f"/hospitals/{hid}/doctors/{did}",
+        json={"consultation_types": ["in_person", "video"]},
+        headers=setup["hosp"]["owner"],
+    )
+    assert upd.status_code == 200, upd.text
+    start, end = slot_iso()
+    ctx = patient_ctx(setup)
+    clear_ai_context("conv-chatmode")
+    context = get_ai_context("conv-chatmode")
+    context.offered_doctors = [{"id": did, "name": "Dr. chatmode"}]
+    context.offered_slots = [{"start": start, "end": end}]
+    save_ai_context(context)
+    complete = scripted(
+        {
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "name": "create_appointment",
+                    "arguments": {
+                        "doctor_id": did,
+                        "appointment_type_id": setup["type"]["id"],
+                        "slot_start": start,
+                        "slot_end": end,
+                        "idempotency_key": "chat-mode-1",
+                        "consultation_mode": "video",
+                    },
+                }
+            ],
+        },
+        {"content": "Booked video visit.", "tool_calls": []},
+    )
+    result = orchestrator.run_conversation(
+        db=db,
+        ctx=ctx,
+        conversation_id="conv-chatmode",
+        user_message="Yes, book it as a video visit",
+        complete=complete,
+    )
+    assert result["reply"] == "Booked video visit."
+    appt = (
+        db.query(Appointment).filter(Appointment.idempotency_key == "chat-mode-1").one()
+    )
+    assert appt.consultation_mode == "video"
+    detail = client.get(
+        f"/appointments/{appt.id}", headers=setup["patient"]["headers"]
+    ).json()
+    assert detail["consultation_mode"] == "video"
+
+
+def test_chat_booking_rejects_unoffered_mode(client, db, tool_factory):
+    """A video-only doctor cannot be booked for an in-person visit."""
+    setup = seed_setup(client, tag="badmode")
+    hid = setup["hid"]
+    did = setup["doctor"]["id"]
+    assert (
+        client.put(
+            f"/hospitals/{hid}/doctors/{did}",
+            json={"consultation_types": ["video"]},
+            headers=setup["hosp"]["owner"],
+        ).status_code
+        == 200
+    )
+    start, end = slot_iso()
+    ctx = patient_ctx(setup)
+    clear_ai_context("conv-badmode")
+    context = get_ai_context("conv-badmode")
+    context.offered_doctors = [{"id": did, "name": "Dr. badmode"}]
+    context.offered_slots = [{"start": start, "end": end}]
+    save_ai_context(context)
+    complete = scripted(
+        {
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "name": "create_appointment",
+                    "arguments": {
+                        "doctor_id": did,
+                        "appointment_type_id": setup["type"]["id"],
+                        "slot_start": start,
+                        "slot_end": end,
+                        "idempotency_key": "bad-mode-1",
+                        "consultation_mode": "in_person",
+                    },
+                }
+            ],
+        },
+        {"content": "That doctor only offers video visits.", "tool_calls": []},
+    )
+    result = orchestrator.run_conversation(
+        db=db,
+        ctx=ctx,
+        conversation_id="conv-badmode",
+        user_message="Yes, book it in person",
+        complete=complete,
+    )
+    assert "only offers video" in result["reply"]
+    assert db.query(Appointment).count() == 0
+
+
+def test_booking_rejects_unoffered_duration(client, db, tool_factory):
+    """A 30-minute-only doctor cannot be booked for a 45-minute type —
+    at availability time and at booking time."""
+    setup = seed_setup(client, tag="baddur")
+    hid = setup["hid"]
+    did = setup["doctor"]["id"]
+    long_type = client.post(
+        f"/hospitals/{hid}/appointment-types",
+        json={"name": "Extended", "duration_minutes": 45},
+        headers=setup["hosp"]["owner"],
+    ).json()
+    h = setup["patient"]["headers"]
+    avail = client.post(
+        "/mcp/call",
+        json={
+            "tool": "check_availability",
+            "input": {
+                "doctor_id": did,
+                "appointment_type_id": long_type["id"],
+                "date_from": MONDAY,
+                "date_to": MONDAY,
+            },
+        },
+        headers=h,
+    )
+    assert avail.status_code == 422
+    assert "45-minute" in avail.text
+    start, end = slot_iso()
+    booked = client.post(
+        "/mcp/call",
+        json={
+            "tool": "create_appointment",
+            "input": {
+                "doctor_id": did,
+                "appointment_type_id": long_type["id"],
+                "slot_start": start,
+                "slot_end": end,
+                "idempotency_key": "bad-dur-1",
+            },
+        },
+        headers=h,
+    )
+    assert booked.status_code == 422
+    assert "45-minute" in booked.text
+    assert db.query(Appointment).count() == 0
+
+
+def test_check_availability_paused_calendar_and_inactive_doctor(client, db, tool_factory):
+    """Paused calendars and inactive doctors fail loudly instead of
+    returning an empty slot list that looks like 'no availability'."""
+    setup = seed_setup(client, tag="paused")
+    hid = setup["hid"]
+    did = setup["doctor"]["id"]
+    h = setup["patient"]["headers"]
+
+    def _check():
+        return client.post(
+            "/mcp/call",
+            json={
+                "tool": "check_availability",
+                "input": {
+                    "doctor_id": did,
+                    "appointment_type_id": setup["type"]["id"],
+                    "date_from": MONDAY,
+                    "date_to": MONDAY,
+                },
+            },
+            headers=h,
+        )
+
+    assert _check().status_code == 200
+    assert (
+        client.put(
+            f"/hospitals/{hid}/doctors/{did}/calendar",
+            json={"is_active": False},
+            headers=setup["hosp"]["owner"],
+        ).status_code
+        == 200
+    )
+    paused = _check()
+    assert paused.status_code == 422
+    assert "paused" in paused.text
+    assert (
+        client.put(
+            f"/hospitals/{hid}/doctors/{did}/calendar",
+            json={"is_active": True},
+            headers=setup["hosp"]["owner"],
+        ).status_code
+        == 200
+    )
+    assert _check().status_code == 200
+
+    assert (
+        client.post(
+            f"/hospitals/{hid}/doctors/{did}/suspend",
+            headers=setup["hosp"]["owner"],
+        ).status_code
+        == 200
+    )
+    suspended = _check()
+    assert suspended.status_code == 422
+    assert "not currently seeing patients" in suspended.text
+
+
+def test_reserve_slot_rejects_paused_calendar(client, db, tool_factory):
+    """The reservation backstop holds even if the calendar is paused
+    between the availability check and the booking."""
+    from datetime import datetime as _dt
+
+    from app.domain.scheduling import service as scheduling_service
+    from app.domain.scheduling.service import SlotConflictError
+
+    setup = seed_setup(client, tag="reservehold")
+    hid = setup["hid"]
+    did = setup["doctor"]["id"]
+    assert (
+        client.put(
+            f"/hospitals/{hid}/doctors/{did}/calendar",
+            json={"is_active": False},
+            headers=setup["hosp"]["owner"],
+        ).status_code
+        == 200
+    )
+    start = _dt.fromisoformat(f"{MONDAY}T09:00:00+00:00")
+    end = _dt.fromisoformat(f"{MONDAY}T09:30:00+00:00")
+    with pytest.raises(SlotConflictError):
+        scheduling_service.reserve_slot(db, uuid.UUID(did), start, end)
 
 
 def test_chat_max_iterations_guard(client, db, tool_factory):
@@ -793,6 +1340,12 @@ def test_chat_vendor_fault_parks_via_reconciliation(client, db, tool_factory, fa
     fake_connector.create_error = EHRTimeoutError
     start, end = slot_iso()
     ctx = patient_ctx(setup)
+    # Confirmation turn: the slot was offered on a previous turn.
+    clear_ai_context("conv-chatfault")
+    context = get_ai_context("conv-chatfault")
+    context.offered_doctors = [{"id": setup["doctor"]["id"], "name": "Dr. chatfault"}]
+    context.offered_slots = [{"start": start, "end": end}]
+    save_ai_context(context)
     complete = scripted(
         {
             "content": None,
@@ -819,7 +1372,7 @@ def test_chat_vendor_fault_parks_via_reconciliation(client, db, tool_factory, fa
         db=db,
         ctx=ctx,
         conversation_id="conv-chatfault",
-        user_message="Book the Monday morning slot",
+        user_message="Yes, book the Monday morning slot",
         complete=complete,
     )
     assert "held" in result["reply"]
@@ -840,9 +1393,13 @@ def test_chat_vendor_fault_parks_via_reconciliation(client, db, tool_factory, fa
 def test_chat_that_one_resolves_from_context(client, db, tool_factory):
     setup = seed_setup(client, tag="thatone")
     start, end = slot_iso()
+    # Fresh context (Redis persists across test runs): seed everything a
+    # prior check_availability turn would have recorded.
+    clear_ai_context("conv-thatone")
     context = get_ai_context("conv-thatone")
     context.offered_slots = [{"start": start, "end": end}]
     context.selected_doctor_id = setup["doctor"]["id"]
+    context.selected_appointment_type_id = setup["type"]["id"]
     save_ai_context(context)
     ctx = patient_ctx(setup)
     seen: dict = {}

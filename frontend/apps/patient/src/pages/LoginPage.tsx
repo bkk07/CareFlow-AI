@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Eye, EyeOff, Lock, Mail, ShieldCheck } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -7,8 +7,12 @@ import { Button } from "../components/common/ui";
 import { Logo } from "../components/layout/PatientShell";
 
 export default function LoginPage() {
-  const { login, register, mode, authError } = useAuth();
+  const { login, register, mode, authError, isAuthenticated } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (mode === "live" && isAuthenticated) navigate("/", { replace: true });
+  }, [mode, isAuthenticated, navigate]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);

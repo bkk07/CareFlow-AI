@@ -7,37 +7,106 @@ const baseURL =
 export const api = axios.create({ baseURL });
 
 const TOKEN_KEY = "careflow_doctor_token";
+const REFRESH_KEY = "careflow_doctor_refresh";
+
+function safeGet(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeSet(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* private mode */
+  }
+}
+
+function safeRemove(key: string) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* noop */
+  }
+}
 
 export function setAccessToken(token: string | null) {
   if (token) {
     api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
-    try {
-      localStorage.setItem(TOKEN_KEY, token);
-    } catch {
-      /* private mode */
-    }
+    safeSet(TOKEN_KEY, token);
   } else {
     delete api.defaults.headers.common["Authorization"];
-    try {
-      localStorage.removeItem(TOKEN_KEY);
-    } catch {
-      /* noop */
-    }
+    safeRemove(TOKEN_KEY);
+    safeRemove(REFRESH_KEY);
   }
 }
 
 export function restoreAccessToken(): string | null {
-  let token: string | null = null;
-  try {
-    token = localStorage.getItem(TOKEN_KEY);
-  } catch {
-    token = null;
-  }
+  const token = safeGet(TOKEN_KEY);
   if (token) {
     api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
   }
   return token;
 }
+
+function saveTokens(access: string, refresh: string) {
+  setAccessToken(access);
+  safeSet(REFRESH_KEY, refresh);
+}
+
+// Silent refresh: on 401 try one refresh with the stored refresh token
+// (2-day expiry) before surfacing the error, so users are not bounced
+// to login while their refresh token is still valid.
+let refreshInFlight: Promise<string | null> | null = null;
+async function refreshAccessToken(): Promise<string | null> {
+  if (!refreshInFlight) {
+    const rt = safeGet(REFRESH_KEY);
+    if (!rt) return null;
+    refreshInFlight = (async () => {
+      try {
+        const { data } = await axios.post(`${baseURL}/auth/refresh`, {
+          refresh_token: rt,
+        });
+        saveTokens(data.access_token, data.refresh_token);
+        return data.access_token as string;
+      } catch {
+        setAccessToken(null);
+        return null;
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+  }
+  return refreshInFlight;
+}
+
+api.interceptors.response.use(
+  (res) => res,
+  async (error) => {
+    const original = error?.config;
+    const status = error?.response?.status;
+    const url: string = original?.url ?? "";
+    if (
+      status === 401 &&
+      original &&
+      !original._retry &&
+      !url.includes("/auth/login") &&
+      !url.includes("/auth/refresh")
+    ) {
+      original._retry = true;
+      const fresh = await refreshAccessToken();
+      if (fresh) {
+        original.headers = original.headers ?? {};
+        original.headers["Authorization"] = `Bearer ${fresh}`;
+        return api(original);
+      }
+    }
+    return Promise.reject(error);
+  },
+);
 
 export async function probeBackend(timeoutMs = 4000): Promise<boolean> {
   try {
@@ -98,6 +167,7 @@ export interface DoctorAppointment {
   slot_start: string;
   slot_end: string;
   state: string;
+  consultation_mode: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -177,6 +247,11 @@ export interface QuestionnaireResponse {
   escalation_id?: string | null;
 }
 
+export interface DoctorQuestionPrompt {
+  id: string;
+  prompt: string;
+}
+
 export interface DoctorQuestionnaireItem {
   appointment_id: string;
   patient_id: string;
@@ -185,6 +260,12 @@ export interface DoctorQuestionnaireItem {
   slot_end: string;
   state: string;
   responses: QuestionnaireResponse[];
+  questions?: DoctorQuestionPrompt[];
+}
+
+export interface AppointmentQuestionnaire {
+  questionnaire: { id: string; name: string };
+  questions: { id: string; prompt: string }[];
 }
 
 export interface BackendNotification {
@@ -206,7 +287,7 @@ export interface Slot {
 
 export async function login(email: string, password: string): Promise<void> {
   const { data } = await api.post("/auth/login", { email, password });
-  setAccessToken(data.access_token);
+  saveTokens(data.access_token, data.refresh_token);
 }
 
 export async function me(): Promise<CurrentUser> {
@@ -341,6 +422,12 @@ export async function questionnaireResponses(
 
 export async function questionnaireInbox(): Promise<DoctorQuestionnaireItem[]> {
   return (await api.get("/doctors/me/questionnaire-responses")).data;
+}
+
+export async function fetchAppointmentQuestionnaire(
+  appointmentId: string,
+): Promise<AppointmentQuestionnaire | null> {
+  return (await api.get(`/appointments/${appointmentId}/questionnaire`)).data;
 }
 
 export async function fetchNotifications(): Promise<BackendNotification[]> {

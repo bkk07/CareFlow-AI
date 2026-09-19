@@ -128,6 +128,9 @@ export default function VoicePage() {
         <p className="page-sub mt-1">
           {canGoLive ? "Live voice session with CareFlow AI — or play a demo turn." : "Frontend simulation — no microphone, WebSocket, or backend is used."}
         </p>
+        <p className="text-[0.75rem] text-ink-faint mt-1">
+          Live voice is transcribed to schedule your care. Bookings only happen after you say yes to a suggested time.
+        </p>
       </div>
 
       <div className="card-base p-6 sm:p-8 mt-5 text-center">

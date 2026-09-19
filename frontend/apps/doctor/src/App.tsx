@@ -15,7 +15,14 @@ import NotificationsPage from "./pages/NotificationsPage";
 import ProfilePage from "./pages/ProfilePage";
 
 function ProtectedLayout() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, mode } = useAuth();
+  if (mode === "checking") {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-ink-secondary text-sm">
+        Restoring your session…
+      </div>
+    );
+  }
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   return (
     <DoctorShell>

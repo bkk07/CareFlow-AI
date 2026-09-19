@@ -42,10 +42,17 @@ def utc(day, hour, minute=0):
     return datetime(day.year, day.month, day.day, hour, minute, tzinfo=timezone.utc)
 
 
+def ist_utc(day, hour, minute=0):
+    """What a rule clock-time means in UTC (rules are IST wall time)."""
+    return datetime(
+        day.year, day.month, day.day, hour, minute, tzinfo=availability.IST
+    ).astimezone(timezone.utc)
+
+
 def test_weekly_rule_expands_only_on_matching_weekday():
     rule = weekly()
     windows = availability.expand_rules_to_windows([rule], MONDAY)
-    assert windows == [Window(utc(MONDAY, 9), utc(MONDAY, 17))]
+    assert windows == [Window(ist_utc(MONDAY, 9), ist_utc(MONDAY, 17))]
     assert availability.expand_rules_to_windows([rule], TUESDAY) == []
 
 
@@ -58,18 +65,26 @@ def test_validity_bounds_restrict_weekly_rule():
 def test_one_off_overrides_weekly_on_same_date():
     short_day = one_off(MONDAY, start=(10, 0), end=(14, 0))
     windows = availability.expand_rules_to_windows([weekly(), short_day], MONDAY)
-    assert windows == [Window(utc(MONDAY, 10), utc(MONDAY, 14))]
+    assert windows == [Window(ist_utc(MONDAY, 10), ist_utc(MONDAY, 14))]
     # Other Mondays still follow the weekly rule.
     assert availability.expand_rules_to_windows(
         [weekly(), short_day], date(2026, 9, 21)
-    ) == [Window(utc(date(2026, 9, 21), 9), utc(date(2026, 9, 21), 17))]
+    ) == [Window(ist_utc(date(2026, 9, 21), 9), ist_utc(date(2026, 9, 21), 17))]
 
 
 def test_overlapping_windows_union_within_tier():
     morning = weekly(start=(9, 0), end=(12, 0))
     afternoon = weekly(start=(12, 0), end=(17, 0))
     windows = availability.expand_rules_to_windows([morning, afternoon], MONDAY)
-    assert windows == [Window(utc(MONDAY, 9), utc(MONDAY, 17))]
+    assert windows == [Window(ist_utc(MONDAY, 9), ist_utc(MONDAY, 17))]
+
+
+def test_ist_rule_nine_to_five_is_0330_to_1130_utc():
+    """Pin the conversion: 09:00-17:00 IST == 03:30-11:30 UTC."""
+    windows = availability.expand_rules_to_windows([weekly()], MONDAY)
+    assert windows == [
+        Window(utc(MONDAY, 3, 30), utc(MONDAY, 11, 30))
+    ]
 
 
 def test_slicing_drops_trailing_stub():

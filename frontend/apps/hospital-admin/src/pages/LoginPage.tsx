@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Building2, Eye, EyeOff, Lock, Mail, ShieldCheck } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
@@ -6,8 +6,12 @@ import { useAdmin } from "../store/AdminStore";
 import { Button } from "../components/common/ui";
 
 export default function LoginPage() {
-  const { login, backendError } = useAdmin();
+  const { login, backendError, authed, mode } = useAdmin();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (mode === "live" && authed) navigate("/", { replace: true });
+  }, [mode, authed, navigate]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);

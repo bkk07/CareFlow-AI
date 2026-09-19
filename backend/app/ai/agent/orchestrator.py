@@ -35,8 +35,27 @@ How you work:
 - The conversation context lists doctors and slots you already offered. When the user says "that one",
   "the first", "the morning one", or similar, resolve it against the offered lists in the context — do not re-ask.
 - Booking needs a doctor, an appointment type, an exact slot, and an idempotency key (generate a random UUID string).
+- If the patient names a visit mode (in person / video / phone), pass it as
+  consultation_mode on create_appointment; otherwise leave it out.
 - If a tool reports a booking as "parked", tell the user it is held and being confirmed, and offer to check back or escalate.
 - If a tool reports "failed" or is unavailable, say so plainly and offer to escalate to a human via transfer_to_human.
+
+Multi-step booking (mandatory — never book in one shot):
+1. Find options first: search_doctors, list_appointment_types, check_availability.
+2. Then PROPOSE exactly one option in plain words — doctor name, hospital,
+   date and time (e.g. "Dr. Rao at Riverside, Monday Oct 6 at 9:00 AM") —
+   and ask "Shall I book this? Reply yes to confirm." On voice/phone
+   calls, keep this to one short spoken sentence and then wait silently
+   for the patient's yes or no.
+3. Call create_appointment ONLY after the patient replies with an explicit
+   confirmation (yes / confirm / book it / go ahead) for that exact
+   option. If the tool reports confirmation is still needed, propose again
+   instead of retrying the booking.
+4. The same confirm-first rule applies to moves and cancellations:
+   propose the new time ("Shall I move it to Tuesday 10:30 AM?") or name
+   the booking to cancel ("Shall I cancel Thursday 2 PM with Dr. Rao?")
+   and wait for yes. If the patient says no (or "cancel that", "never
+   mind"), drop the proposal and offer alternatives instead.
 
 How you present results (the chat UI renders cards itself):
 - When you recommend doctors, name each one briefly with hospital + city
@@ -165,6 +184,222 @@ def _refresh_verification(context, name: str, outcome: dict) -> None:
     context.identity_attempts = fresh.identity_attempts
 
 
+# -- P0 confirm gate: patient-friendly multi-step booking --------------------
+# Mutating scheduling calls only run after the patient explicitly confirms
+# the exact proposed option. A fresh request ("I need a cardiologist")
+# must first produce a proposal; only a follow-up confirmation ("yes",
+# "confirm", "book it", ...) unlocks the mutation — and only for the
+# previously offered option.
+
+MUTATING_TOOLS = (
+    "create_appointment",
+    "reschedule_appointment",
+    "cancel_appointment",
+)
+
+CONFIRM_PATTERNS = (
+    r"\byes\b",
+    r"\bconfirm\w*",
+    r"\bbook (it|that|this|the|that one|it in|me)\b",
+    r"\bgo ahead\b",
+    r"\bproceed\b",
+    r"\bthat works\b",
+    r"\bsounds good\b",
+    r"\bplease (book|confirm|proceed|go ahead)\b",
+    r"\block (it|that|this) in\b",
+    r"\bhold (that|it|that time|that slot)\b",
+)
+
+_CONFIRM_RE = re.compile("|".join(CONFIRM_PATTERNS), re.IGNORECASE)
+
+CONFIRM_REQUIRED = (
+    "booking_confirmation_required: the patient has not explicitly confirmed "
+    "this exact booking yet. Do NOT call create_appointment again this turn. "
+    "Instead, propose exactly one option in plain words — doctor name, "
+    "hospital, date and time — and ask 'Shall I book this? Reply yes to "
+    "confirm.' Only call create_appointment after the patient replies with "
+    "an explicit confirmation (yes / confirm / book it / go ahead) and only "
+    "for the previously offered doctor and slot."
+)
+
+RESCHEDULE_CONFIRM_REQUIRED = (
+    "booking_confirmation_required: the patient has not explicitly confirmed "
+    "this move yet. Do NOT call reschedule_appointment again this turn. "
+    "Instead, propose the new date and time in plain words and ask 'Shall I "
+    "move it there? Reply yes to confirm.' Only call reschedule_appointment "
+    "after an explicit confirmation and only for a previously offered slot."
+)
+
+CANCEL_CONFIRM_REQUIRED = (
+    "booking_confirmation_required: the patient has not explicitly confirmed "
+    "this cancellation yet. Do NOT call cancel_appointment again this turn. "
+    "Instead, name the appointment (doctor, date, time) in plain words and "
+    "ask 'Shall I cancel it? Reply yes to confirm.' Only call "
+    "cancel_appointment after an explicit confirmation."
+)
+
+# A turn-opening decline drops a stale proposal so a later "yes" cannot
+# accidentally confirm it. Narrowly anchored: "cancel my appointment" is a
+# request, not a decline, so it must NOT match.
+_DECLINE_RE = re.compile(
+    r"^(no|nope|don't|do not|never mind|not now|stop)\b|^cancel (that|it|this)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_declined(text: str) -> bool:
+    return bool(_DECLINE_RE.search((text or "").strip()))
+
+
+def _is_confirmation(text: str) -> bool:
+    return bool(_CONFIRM_RE.search(text or ""))
+
+
+def _norm_dt(value: object) -> str:
+    """Normalize an ISO datetime for offer comparison (tolerant of
+    equivalent spellings like +00:00 vs Z). Falls back to str()."""
+    try:
+        from datetime import datetime as _dt
+
+        text = str(value).strip().replace("Z", "+00:00")
+        return _dt.fromisoformat(text).isoformat()
+    except (ValueError, TypeError):
+        return str(value).strip()
+
+
+def _known_slot_starts(context) -> set[str]:
+    starts = {
+        _norm_dt(s.get("start", ""))
+        for s in (context.offered_slots or [])
+        if isinstance(s, dict) and s.get("start")
+    }
+    pending = context.pending_booking or {}
+    if pending.get("slot_start"):
+        starts.add(_norm_dt(pending["slot_start"]))
+    return starts
+
+
+def _known_slot_ends(context) -> set[str]:
+    ends = {
+        _norm_dt(s.get("end", ""))
+        for s in (context.offered_slots or [])
+        if isinstance(s, dict) and s.get("end")
+    }
+    pending = context.pending_booking or {}
+    if pending.get("slot_end"):
+        ends.add(_norm_dt(pending["slot_end"]))
+    return ends
+
+
+def _slot_known(context, args: dict) -> bool:
+    """True when the requested new slot was previously offered (or is the
+    recorded pending proposal)."""
+    start = _norm_dt(args.get("slot_start", ""))
+    end = _norm_dt(args.get("slot_end", ""))
+    if not start or start not in _known_slot_starts(context):
+        return False
+    known_ends = _known_slot_ends(context)
+    if end and known_ends and end not in known_ends:
+        return False
+    return True
+
+
+def _proposal_matches(context, args: dict) -> bool:
+    """True when the requested doctor + slot were previously offered (or
+    are the recorded pending proposal) — i.e. this is a confirmation of
+    a known option, not a fresh one-shot guess."""
+    doctor = str(args.get("doctor_id", "")).strip()
+    appt_type = str(args.get("appointment_type_id", "")).strip()
+
+    known_doctors = {
+        str(d.get("id", "")).strip()
+        for d in (context.offered_doctors or [])
+        if isinstance(d, dict) and d.get("id")
+    }
+    if context.selected_doctor_id:
+        known_doctors.add(str(context.selected_doctor_id).strip())
+    pending = context.pending_booking or {}
+    if pending.get("doctor_id"):
+        known_doctors.add(str(pending["doctor_id"]).strip())
+
+    if not doctor or doctor not in known_doctors:
+        return False
+    if not _slot_known(context, args):
+        return False
+    # Type must agree with prior selection when one exists; otherwise the
+    # offered doctor + slot match is sufficient.
+    if context.selected_appointment_type_id and appt_type:
+        if appt_type != str(context.selected_appointment_type_id).strip():
+            pending_type = str((pending or {}).get("appointment_type_id", "")).strip()
+            if appt_type != pending_type:
+                return False
+    return True
+
+
+def _ensure_booking_idempotency(args: dict) -> str:
+    """Server fallback: the assistant path never fails for a missing key.
+    Direct API callers must still send their own key (tool middleware
+    enforces it); here we mint one so a model slip cannot break booking."""
+    key = args.get("idempotency_key")
+    if isinstance(key, str) and key.strip():
+        return key.strip()
+    fresh = uuid.uuid4().hex
+    args["idempotency_key"] = fresh
+    return fresh
+
+
+def _booking_confirmation_gate(context, user_text: str, name: str, args: dict) -> dict | None:
+    """Refusal outcome for unconfirmed mutations (None = allowed).
+
+    Covers create / reschedule / cancel: a fresh request must first yield
+    a proposal; only an explicit confirmation of a previously offered
+    option unlocks the call."""
+    if name not in MUTATING_TOOLS:
+        return None
+    if not isinstance(args, dict):
+        args = {}
+    if name == "create_appointment":
+        _ensure_booking_idempotency(args)
+        if _is_confirmation(user_text) and _proposal_matches(context, args):
+            return None
+        # Remember the attempt as the pending proposal so the confirmation
+        # turn can match against it even if the model rephrases.
+        context.pending_booking = {
+            "kind": "create",
+            "doctor_id": str(args.get("doctor_id", "")),
+            "appointment_type_id": str(args.get("appointment_type_id", "")),
+            "slot_start": str(args.get("slot_start", "")),
+            "slot_end": str(args.get("slot_end", "")),
+        }
+        context.awaiting_confirmation = True
+        context.pending_clarification = "booking_confirmation"
+        return {"ok": False, "error": CONFIRM_REQUIRED}
+    if name == "reschedule_appointment":
+        if _is_confirmation(user_text) and _slot_known(context, args):
+            return None
+        context.pending_booking = {
+            "kind": "reschedule",
+            "appointment_id": str(args.get("appointment_id", "")),
+            "slot_start": str(args.get("slot_start", "")),
+            "slot_end": str(args.get("slot_end", "")),
+        }
+        context.awaiting_confirmation = True
+        context.pending_clarification = "booking_confirmation"
+        return {"ok": False, "error": RESCHEDULE_CONFIRM_REQUIRED}
+    # cancel_appointment: confirmation language alone unlocks it — the
+    # appointment was resolved via read-only tools, and the user must still
+    # say yes explicitly.
+    if _is_confirmation(user_text):
+        return None
+    context.pending_booking = {
+        "kind": "cancel",
+        "appointment_id": str(args.get("appointment_id", "")),
+    }
+    context.awaiting_confirmation = True
+    context.pending_clarification = "booking_confirmation"
+    return {"ok": False, "error": CANCEL_CONFIRM_REQUIRED}
+
+
 def is_clinical_request(text: str) -> bool:
     """A purely clinical message: clinical signals, no scheduling intent."""
     lowered = text.lower()
@@ -244,6 +479,56 @@ def _apply_result_to_context(context, name: str, result: dict) -> None:
     elif name == "create_appointment" and payload.get("appointment_id"):
         context.last_appointment_id = payload["appointment_id"]
         context.offered_slots = []
+        # Booking done: the proposal is fulfilled, not pending.
+        context.pending_booking = None
+        context.awaiting_confirmation = False
+        if context.pending_clarification == "booking_confirmation":
+            context.pending_clarification = None
+    elif name == "reschedule_appointment" and payload.get("appointment_id"):
+        context.last_appointment_id = payload["appointment_id"]
+        context.offered_slots = []
+        context.pending_booking = None
+        context.awaiting_confirmation = False
+        if context.pending_clarification == "booking_confirmation":
+            context.pending_clarification = None
+    elif name == "cancel_appointment" and payload.get("appointment_id"):
+        # The booking is gone: drop any pending proposal for it.
+        context.offered_slots = []
+        context.pending_booking = None
+        context.awaiting_confirmation = False
+        if context.pending_clarification == "booking_confirmation":
+            context.pending_clarification = None
+
+
+def _clear_booking_proposal(context) -> None:
+    """Drop a stale proposal (patient declined or moved on)."""
+    context.pending_booking = None
+    context.awaiting_confirmation = False
+    if context.pending_clarification == "booking_confirmation":
+        context.pending_clarification = None
+
+
+def _remember_booking_selection(context, name: str, args: dict, outcome: dict) -> None:
+    """Deterministic multi-step memory: remember which doctor/type/slot the
+    assistant looked up or booked, so follow-up confirmations and
+    'that one' references resolve even if the model forgets. Only
+    successful calls are remembered."""
+    if not isinstance(args, dict):
+        return
+    if not isinstance(outcome, dict) or not outcome.get("ok"):
+        return
+    if name in ("check_availability", "create_appointment"):
+        doctor = str(args.get("doctor_id", "")).strip()
+        if doctor:
+            context.selected_doctor_id = doctor
+        appt_type = str(args.get("appointment_type_id", "")).strip()
+        if appt_type:
+            context.selected_appointment_type_id = appt_type
+    if name in ("create_appointment", "reschedule_appointment"):
+        start = str(args.get("slot_start", "")).strip()
+        end = str(args.get("slot_end", "")).strip()
+        if start or end:
+            context.selected_slot = {"start": start, "end": end}
 
 
 def _offered_doctor_cards(db: Session, context) -> list[dict[str, Any]]:
@@ -305,6 +590,14 @@ def run_conversation(
     context = get_ai_context(cid)
     context.user_id = str(ctx.user_id)
     context.remember_turn("user", text)
+    # A turn-opening decline ("no", "never mind", "cancel that") drops a
+    # stale proposal so a later "yes" cannot accidentally confirm it.
+    if (
+        context.awaiting_confirmation
+        and _is_declined(text)
+        and not _is_confirmation(text)
+    ):
+        _clear_booking_proposal(context)
 
     if is_clinical_request(text):
         context.remember_turn("assistant", CLINICAL_DECLINE)
@@ -315,6 +608,8 @@ def run_conversation(
             "iterations": 0,
             "escalated": False,
             "doctors": [],
+            "slots": [],
+            "pending_booking": None,
         }
 
     client = AgentToolClient(db, ctx)
@@ -362,8 +657,18 @@ def run_conversation(
             if gated is not None:
                 outcome = gated
             else:
-                outcome = client.call(call.get("name", ""), call.get("arguments") or {})
-                _refresh_verification(context, call.get("name", ""), outcome)
+                args = call.get("arguments") or {}
+                confirm_gate = _booking_confirmation_gate(
+                    context, text, call.get("name", ""), args
+                )
+                if confirm_gate is not None:
+                    outcome = confirm_gate
+                else:
+                    outcome = client.call(call.get("name", ""), args)
+                    _remember_booking_selection(
+                        context, call.get("name", ""), args, outcome
+                    )
+                    _refresh_verification(context, call.get("name", ""), outcome)
             if call.get("name") == "transfer_to_human" and outcome.get("ok"):
                 escalated = True
             _apply_result_to_context(context, call.get("name", ""), outcome)
@@ -389,6 +694,7 @@ def run_conversation(
         messages.append({"role": "assistant", "content": reply})
     context.remember_turn("assistant", reply)
     save_ai_context(context)
+    pending = context.pending_booking if context.awaiting_confirmation else None
     return {
         "conversation_id": cid,
         "reply": reply,
@@ -396,15 +702,25 @@ def run_conversation(
         "escalated": escalated,
         "stopped": stopped,
         "doctors": _offered_doctor_cards(db, context),
+        "slots": [
+            {"start": s.get("start", ""), "end": s.get("end", "")}
+            for s in (context.offered_slots or [])[:10]
+            if isinstance(s, dict) and s.get("start")
+        ],
+        "pending_booking": pending,
     }
 
 
 __all__ = [
     "AINotConfiguredError",
     "CALLER_IDENTITY_REQUIRED",
+    "CANCEL_CONFIRM_REQUIRED",
     "CLINICAL_DECLINE",
+    "CONFIRM_REQUIRED",
     "LOOP_EXHAUSTED",
     "MAX_ITERATIONS",
+    "MUTATING_TOOLS",
+    "RESCHEDULE_CONFIRM_REQUIRED",
     "STOPPED",
     "SYSTEM_PROMPT",
     "TELEPHONY_GUARD_PROMPT",

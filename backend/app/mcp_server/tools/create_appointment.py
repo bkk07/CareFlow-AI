@@ -25,6 +25,7 @@ class CreateAppointmentIn(BaseModel):
     slot_end: datetime
     idempotency_key: str
     patient_id: uuid.UUID | None = None
+    consultation_mode: str | None = None
 
 
 @mcp_tool(
@@ -59,6 +60,7 @@ def run(
         actor_user_id=ctx.user_id,
         correlation_id=ctx.correlation_id,
         integration=integration,
+        consultation_mode=input.consultation_mode,
     )
     if appointment.state == AppointmentState.failed:
         outcome = "failed"

@@ -24,6 +24,7 @@ class Settings(BaseSettings):
         default="change-me-in-env-use-a-long-random-string", alias="JWT_SECRET"
     )
     jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
+    # 2880 minutes = 2 days — keeps users signed in without frequent logins.
     access_token_expire_minutes: int = Field(
         default=2880, alias="ACCESS_TOKEN_EXPIRE_MINUTES"
     )

@@ -159,7 +159,10 @@ export default function AvailabilityPage() {
       </section>
 
       <section className="card-base p-5" aria-label="Working hours">
-        <h2 className="section-title">Working hours</h2>
+        <h2 className="section-title">Working hours (IST)</h2>
+        <p className="text-[0.8rem] text-ink-secondary mt-1">
+          Hours are in India time — patients see these same times.
+        </p>
         {loading && rules.length === 0 && !error ? (
           <div className="mt-3"><CardSkeleton lines={4} /></div>
         ) : rules.length === 0 ? (

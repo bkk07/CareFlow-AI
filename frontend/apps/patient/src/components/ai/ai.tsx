@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Bot, User } from "lucide-react";
+import { Bot, CalendarCheck, User } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -7,6 +7,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import type { ChatMessage } from "../../types";
+import { formatSlotDate, formatSlotTime } from "../../lib/backend";
 import { Button, SafeImage } from "../common/ui";
 
 /** AI replies are markdown (+ LaTeX math); patient messages stay plain text. */
@@ -29,7 +30,7 @@ function AssistantMarkdown({ text }: { text: string }) {
   );
 }
 
-export function ChatBubble({ message }: { message: ChatMessage }) {
+export function ChatBubble({ message, onSend }: { message: ChatMessage; onSend?: (text: string) => void }) {
   const isPatient = message.from === "patient";
   return (
     <motion.div
@@ -62,6 +63,12 @@ export function ChatBubble({ message }: { message: ChatMessage }) {
               <LiveDoctorCard key={d.id} doctor={d} />
             ))}
           </div>
+        )}
+        {message.slots && message.slots.length > 0 && (
+          <SlotChips slots={message.slots} onSend={onSend} />
+        )}
+        {message.pendingBooking && (
+          <ConfirmPanel pending={message.pendingBooking} onSend={onSend} />
         )}
         <p className="text-[0.7rem] text-ink-faint mt-1">{message.time}</p>
       </div>
@@ -118,6 +125,82 @@ function LiveDoctorCard({
           onClick={() => navigate("/book", { state: { doctorId: doctor.id } })}
         >
           View availability
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function slotLabel(start: string, end: string): string {
+  return `${formatSlotDate(start)} · ${formatSlotTime(start)} – ${formatSlotTime(end)}`;
+}
+
+/** Tappable offered slots. Tapping only sends a confirmation message —
+ *  nothing books until the assistant confirms on the next turn. */
+export function SlotChips({
+  slots,
+  onSend,
+}: {
+  slots: NonNullable<ChatMessage["slots"]>;
+  onSend?: (text: string) => void;
+}) {
+  if (!onSend || slots.length === 0) return null;
+  return (
+    <div className="mt-2.5 text-left" aria-label="Suggested times">
+      <p className="text-[0.75rem] font-bold text-ink-secondary mb-1.5">
+        Tap a time to confirm it:
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {slots.slice(0, 6).map((s) => {
+          const label = slotLabel(s.start, s.end);
+          return (
+            <button
+              key={s.start}
+              type="button"
+              onClick={() => onSend(`Yes, book ${label}`)}
+              className="inline-flex items-center gap-1.5 text-[0.8rem] font-bold bg-white border border-healthcare/40 rounded-full px-3 py-1.5 text-navy hover:bg-healthcare-soft hover:border-healthcare transition"
+            >
+              <CalendarCheck size={14} className="text-healthcare" />
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Explicit yes/no for a pending proposal (book / move / cancel). */
+export function ConfirmPanel({
+  pending,
+  onSend,
+}: {
+  pending: NonNullable<ChatMessage["pendingBooking"]>;
+  onSend?: (text: string) => void;
+}) {
+  if (!onSend) return null;
+  const slot =
+    pending.slot_start != null
+      ? slotLabel(pending.slot_start, pending.slot_end ?? pending.slot_start)
+      : null;
+  const copy =
+    pending.kind === "reschedule"
+      ? { title: "Confirm the move?", confirm: `Yes, move it${slot ? ` to ${slot}` : ""}`, confirmLabel: "Confirm move", cancelLabel: "Keep current" }
+      : pending.kind === "cancel"
+        ? { title: "Cancel this appointment?", confirm: "Yes, cancel it", confirmLabel: "Yes, cancel", cancelLabel: "Keep it" }
+        : { title: "Confirm this booking?", confirm: `Yes, book ${slot ?? "it"}`, confirmLabel: "Confirm booking", cancelLabel: "Not now" };
+  return (
+    <div className="mt-2.5 text-left bg-healthcare-faint border border-healthcare/25 rounded-control p-3" aria-label="Confirm or decline">
+      <p className="text-[0.83rem] font-bold text-navy">{copy.title}</p>
+      {slot && pending.kind !== "cancel" && (
+        <p className="text-[0.78rem] text-ink-secondary mt-0.5">{slot}</p>
+      )}
+      <div className="flex gap-2 mt-2">
+        <Button size="sm" onClick={() => onSend(copy.confirm)}>
+          {copy.confirmLabel}
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => onSend("No, don't do that")}>
+          {copy.cancelLabel}
         </Button>
       </div>
     </div>

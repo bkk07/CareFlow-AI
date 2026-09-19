@@ -153,6 +153,7 @@ def enriched_appointments(
             "state": row.state.value
             if hasattr(row.state, "value")
             else str(row.state),
+            "consultation_mode": row.consultation_mode,
             "created_at": row.created_at,
             "updated_at": row.updated_at,
         }
@@ -162,7 +163,7 @@ def enriched_appointments(
 
 def questionnaire_inbox(session: Session, doctor: Doctor) -> list[dict]:
     """Every own appointment (newest first) with its responses attached."""
-    from app.domain.questionnaire.models import QuestionnaireResponse
+    from app.domain.questionnaire.models import QuestionnaireQuestion, QuestionnaireResponse
     from app.domain.questionnaire.schemas import ResponseOut
 
     rows = (
@@ -180,6 +181,15 @@ def questionnaire_inbox(session: Session, doctor: Doctor) -> list[dict]:
             .all()
         )
         name, _, _ = _patient_display(session, appt.patient_id)
+        qids = list({r.questionnaire_id for r in responses})
+        prompts: list[dict] = []
+        if qids:
+            for q in (
+                session.query(QuestionnaireQuestion)
+                .filter(QuestionnaireQuestion.questionnaire_id.in_(qids))
+                .all()
+            ):
+                prompts.append({"id": q.id, "prompt": q.prompt})
         inbox.append(
             {
                 "appointment_id": appt.id,
@@ -201,6 +211,7 @@ def questionnaire_inbox(session: Session, doctor: Doctor) -> list[dict]:
                     )
                     for r in responses
                 ],
+                "questions": prompts,
             }
         )
     return inbox

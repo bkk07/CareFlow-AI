@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
-import { appointmentDetail, type AppointmentDetail as ApiDetail } from "../api";
+import { appointmentDetail, fetchAppointmentQuestionnaire, type AppointmentDetail as ApiDetail } from "../api";
 import { formatDateLabel, formatTime, mapAppointmentState } from "../lib/backend";
 import { useSchedule } from "../context/ScheduleContext";
 import { AppointmentDetailBody } from "../components/appointments/AppointmentDetail";
@@ -12,6 +12,7 @@ function toUI(
   detail: ApiDetail,
   fallbackName: string,
   hospital: string,
+  promptById?: Map<string, string>,
 ): { appointment: Appointment; questionnaire: Questionnaire | undefined } {
   const state = mapAppointmentState(detail.state);
   const appointment: Appointment = {
@@ -61,8 +62,8 @@ function toUI(
           completedAt: done.length > 0 ? (done[done.length - 1].completed_at ?? "") : null,
           answers:
             done.length > 0
-              ? Object.entries(done[done.length - 1].answers ?? {}).map(([question, response]) => ({
-                  question,
+              ? Object.entries(done[done.length - 1].answers ?? {}).map(([qid, response]) => ({
+                  question: promptById?.get(qid) ?? "Question",
                   response: typeof response === "string" ? response : JSON.stringify(response),
                 }))
               : [],
@@ -74,6 +75,7 @@ export default function AppointmentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { appointments } = useSchedule();
   const [detail, setDetail] = useState<ApiDetail | null>(null);
+  const [prompts, setPrompts] = useState<Map<string, string>>(new Map());
   const [detailLoading, setDetailLoading] = useState(true);
   const [detailError, setDetailError] = useState(false);
 
@@ -85,9 +87,14 @@ export default function AppointmentDetailPage() {
     let cancelled = false;
     setDetailLoading(true);
     setDetailError(false);
-    appointmentDetail(id)
-      .then((d) => {
-        if (!cancelled) setDetail(d);
+    Promise.all([
+      appointmentDetail(id),
+      fetchAppointmentQuestionnaire(id).catch(() => null),
+    ])
+      .then(([d, q]) => {
+        if (cancelled) return;
+        setDetail(d);
+        setPrompts(new Map((q?.questions ?? []).map((x) => [x.id, x.prompt])));
       })
       .catch(() => {
         if (!cancelled) setDetailError(true);
@@ -129,6 +136,7 @@ export default function AppointmentDetailPage() {
     detail,
     known?.patient.name ?? "Patient",
     known?.hospital ?? "My hospital",
+    prompts,
   );
   if (known) {
     appointment.type = known.type;

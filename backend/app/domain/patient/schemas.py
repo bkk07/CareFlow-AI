@@ -76,6 +76,7 @@ class PatientAppointmentOut(BaseModel):
     slot_start: datetime
     slot_end: datetime
     state: AppointmentState
+    consultation_mode: str | None = None
     created_at: datetime
     updated_at: datetime
 

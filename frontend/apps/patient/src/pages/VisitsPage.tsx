@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useLocation } from "react-router-dom";
 import {
+  apiError as apiErrorText,
   checkAvailability as apiCheckAvailability,
   fetchAppointmentQuestionnaire,
   fetchMyAppointment,
@@ -268,7 +269,7 @@ function RescheduleModal({
   const { live, rescheduleLive, pushNotification } = useAppState();
   const days = nextSevenDays();
   const [step, setStep] = useState(0);
-  const [dayKey, setDayKey] = useState(days[1].key);
+  const [dayKey, setDayKey] = useState(days[0].key);
   const [slots, setSlots] = useState<TimeSlot[]>([]);
   const [rawById, setRawById] = useState<Record<string, Slot>>({});
   const [loading, setLoading] = useState(false);
@@ -277,14 +278,25 @@ function RescheduleModal({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  // Reset the flow only when a different appointment is opened.
+  useEffect(() => {
+    if (open) {
+      setStep(0);
+      setSelected(null);
+      setSaveError(null);
+      setLoadError(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, appointment?.id]);
+
   useEffect(() => {
     if (!open || !appointment) return;
-    setStep(0);
+    let cancelled = false;
     setSelected(null);
-    setSaveError(null);
     setLoadError(null);
     setLoading(true);
-    // Live: resolve the visit type, then ask for real open slots.
+    // Live: resolve the visit type, then ask for real open slots from the
+    // doctor's original working hours (rules minus blocks minus bookings).
     fetchMyAppointment(appointment.id)
       .then((detail) =>
         apiCheckAvailability({
@@ -295,6 +307,7 @@ function RescheduleModal({
         }),
       )
       .then((found) => {
+        if (cancelled) return;
         const byId: Record<string, Slot> = {};
         setSlots(
           found.map((s, i) => {
@@ -305,8 +318,15 @@ function RescheduleModal({
         );
         setRawById(byId);
       })
-      .catch(() => setLoadError("Could not load open times for this day."))
-      .finally(() => setLoading(false));
+      .catch((e) => {
+        if (!cancelled) setLoadError(apiErrorText(e));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, dayKey, live]);
 
@@ -373,7 +393,10 @@ function RescheduleModal({
           {loadError ? (
             <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">{loadError}</p>
           ) : (
-            <SlotPicker slots={slots} selectedId={selected?.id ?? null} onSelect={setSelected} loading={loading} />
+            <>
+              <p className="text-[0.78rem] text-ink-secondary mb-2">Pick a time to select it — nothing changes until you confirm.</p>
+              <SlotPicker slots={slots} selectedId={selected?.id ?? null} onSelect={setSelected} loading={loading} />
+            </>
           )}
           {saveError && (
             <p role="alert" className="mt-3 text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">{saveError}</p>
@@ -381,7 +404,7 @@ function RescheduleModal({
           <div className="flex gap-2 mt-4">
             <Button variant="outline" onClick={() => setStep(0)} className="flex-1">Back</Button>
             <Button disabled={!selected || saving} onClick={() => void save()} className="flex-1">
-              {saving ? "Confirming…" : "Review change"}
+              {saving ? "Confirming…" : "Confirm change"}
             </Button>
           </div>
         </div>

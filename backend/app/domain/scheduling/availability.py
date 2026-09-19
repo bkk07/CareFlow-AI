@@ -11,12 +11,18 @@ Precedence contract (the rule this module implements):
 4. A slot survives only if it overlaps no blocked/booked interval.
    Touching boundaries (a block ending exactly when the slot starts) do
    NOT count as overlap.
-5. All datetimes are UTC. Naive datetimes are treated as UTC because
-   SQLite returns naive values — `as_utc()` is applied at every boundary.
+5. Rule clock-times are IST (Asia/Kolkata, UTC+5:30, no DST) wall time —
+   a 09:00-17:00 rule means 09:00-17:00 India time. Windows are converted
+   to UTC for storage/comparison, so patients in IST see the hours the
+   doctor entered. Naive datetimes are treated as UTC because SQLite
+   returns naive values — `as_utc()` is applied at every boundary.
 """
 
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Iterable, NamedTuple
+
+#: Hospital working timezone. Fixed offset (no DST in India).
+IST = timezone(timedelta(hours=5, minutes=30), name="IST")
 
 
 class Window(NamedTuple):
@@ -49,7 +55,7 @@ def rule_covers_date(rule, day: date) -> bool:
 
 
 def expand_rules_to_windows(rules: Iterable, day: date) -> list[Window]:
-    """Expand rules to merged UTC windows for a single date."""
+    """Expand rules to merged UTC windows for a single IST date."""
     rules = list(rules)
     one_offs = [
         r for r in rules if _recurrence_of(r) == "one_off" and rule_covers_date(r, day)
@@ -69,16 +75,17 @@ def expand_rules_to_windows(rules: Iterable, day: date) -> list[Window]:
         end_time: time = rule.end_time
         if end_time <= start_time:
             raise ValueError("AvailabilityRule end_time must be after start_time")
+        # Rule times are IST wall time; convert to UTC for slot math.
         start = datetime(
             day.year, day.month, day.day,
             start_time.hour, start_time.minute, start_time.second,
-            tzinfo=timezone.utc,
-        )
+            tzinfo=IST,
+        ).astimezone(timezone.utc)
         end = datetime(
             day.year, day.month, day.day,
             end_time.hour, end_time.minute, end_time.second,
-            tzinfo=timezone.utc,
-        )
+            tzinfo=IST,
+        ).astimezone(timezone.utc)
         windows.append(Window(start, end))
     return _merge_windows(windows)
 

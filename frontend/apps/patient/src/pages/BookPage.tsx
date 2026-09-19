@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRight, CheckCircle2, Search } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
+  apiError as apiErrorText,
   checkAvailability as apiCheckAvailability,
   createAppointment as apiCreateAppointment,
   fetchContact as apiFetchContact,
@@ -57,10 +58,10 @@ export default function BookPage() {
 
   const [activeDoctor, setActiveDoctor] = useState<Doctor | null>(null);
   const [profileDoctor, setProfileDoctor] = useState<Doctor | null>(null);
-  const [dayKey, setDayKey] = useState(nextSevenDays()[1].key);
+  const [dayKey, setDayKey] = useState(nextSevenDays()[0].key);
   const [slots, setSlots] = useState<TimeSlot[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
-  const [slotsError, setSlotsError] = useState(false);
+  const [slotsError, setSlotsError] = useState<string | null>(null);
   const [selected, setSelected] = useState<TimeSlot | null>(null);
   const [typeId, setTypeId] = useState("");
   const [consultMode, setConsultMode] = useState<Appointment["consultationMode"]>("in_person");
@@ -109,7 +110,10 @@ export default function BookPage() {
         const hit = mapped.find((d) => d.id === preset.doctorId) ?? null;
         if (hit) {
           setActiveDoctor(hit);
-          setConsultMode(hit.consultationModes[0]);
+          setConsultMode(hit.consultationModes[0] ?? "in_person");
+          setTypeId("");
+          setSlots([]);
+          setSelected(null);
           setStep("availability");
         } else {
           setStep("search");
@@ -157,29 +161,61 @@ export default function BookPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geo]);
 
-  // Live availability: resolve the visit type for the doctor's hospital, then
-  // ask the backend for real open slots on the chosen day.
+  // Live availability from the doctor's ORIGINAL working hours:
+  // 1) load the hospital's visit types, preferring durations the doctor
+  //    actually offers (doctor.availableDurations), then
+  // 2) ask the backend for real open slots (rules minus blocks minus
+  //    bookings) for the chosen day + visit type.
+  // Step 1 — resolve visit types whenever the doctor changes.
   useEffect(() => {
     if (step !== "availability" || !activeDoctor || !live) return;
-    setSlotsLoading(true);
-    setSlotsError(false);
-    setSelected(null);
+    let cancelled = false;
     (async () => {
       try {
         const types = await apiListTypes(activeDoctor.hospitalId);
+        if (cancelled) return;
         setLiveTypes(types);
-        const chosen = types.find((t) => t.id === typeId) ?? types[0];
+        const offered = activeDoctor.availableDurations ?? [];
+        const compatible =
+          offered.length > 0
+            ? types.filter((t) => offered.includes(t.duration_minutes))
+            : types;
+        const pool = compatible.length > 0 ? compatible : types;
+        const chosen = pool.find((t) => t.id === typeId) ?? pool[0];
         if (!chosen) {
+          setTypeId("");
           setSlots([]);
           return;
         }
         if (chosen.id !== typeId) setTypeId(chosen.id);
+      } catch (e) {
+        if (!cancelled) setSlotsError(apiErrorText(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, activeDoctor, live]);
+
+  // Step 2 — load slots whenever day, doctor, or visit type changes.
+  // Picking a slot here only SELECTS it; booking happens solely via
+  // Confirm appointment on the review step (see confirmBooking).
+  useEffect(() => {
+    if (step !== "availability" || !activeDoctor || !live || !typeId) return;
+    let cancelled = false;
+    setSlotsLoading(true);
+    setSlotsError(null);
+    setSelected(null);
+    (async () => {
+      try {
         const found = await apiCheckAvailability({
           doctor_id: activeDoctor.id,
-          appointment_type_id: chosen.id,
+          appointment_type_id: typeId,
           date_from: dayKey,
           date_to: dayKey,
         });
+        if (cancelled) return;
         rawSlots.current = {};
         setSlots(
           found.map((s, i) => {
@@ -188,18 +224,24 @@ export default function BookPage() {
             return mapped;
           }),
         );
-      } catch {
-        setSlotsError(true);
+      } catch (e) {
+        if (!cancelled) setSlotsError(apiErrorText(e));
       } finally {
-        setSlotsLoading(false);
+        if (!cancelled) setSlotsLoading(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, activeDoctor, dayKey, live]);
+    return () => {
+      cancelled = true;
+    };
+  }, [step, activeDoctor, dayKey, typeId, live]);
 
   function openAvailability(d: Doctor) {
     setActiveDoctor(d);
-    setConsultMode(d.consultationModes[0]);
+    setConsultMode(d.consultationModes[0] ?? "in_person");
+    setTypeId("");
+    setSlots([]);
+    setSelected(null);
+    setSlotsError(null);
     setBookingError(null);
     setStep("availability");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -218,6 +260,7 @@ export default function BookPage() {
         appointment_type_id: typeId,
         slot_start: raw.start,
         slot_end: raw.end,
+        consultation_mode: consultMode,
       });
       await refresh();
       pushNotification({
@@ -229,13 +272,18 @@ export default function BookPage() {
       setBooking(false);
       setStep("success");
       window.scrollTo({ top: 0, behavior: "smooth" });
-    } catch {
+    } catch (e) {
       setBooking(false);
-      setBookingError("Booking failed — the slot may just have been taken. Pick another time.");
+      setBookingError(apiErrorText(e));
     }
   }
 
-  const typeOptions = liveTypes.map((t) => ({ id: t.id, name: t.name, durationMinutes: t.duration_minutes }));
+  const offeredDurations = activeDoctor?.availableDurations ?? [];
+  const compatibleTypes = liveTypes.filter((t) =>
+    offeredDurations.length === 0 ? true : offeredDurations.includes(t.duration_minutes),
+  );
+  const visibleTypes = compatibleTypes.length > 0 ? compatibleTypes : liveTypes;
+  const typeOptions = visibleTypes.map((t) => ({ id: t.id, name: t.name, durationMinutes: t.duration_minutes }));
   const activeType = typeOptions.find((t) => t.id === typeId) ?? typeOptions[0];
 
   return (
@@ -395,6 +443,10 @@ export default function BookPage() {
             <button onClick={() => setStep("search")} className="text-[0.83rem] font-bold text-ink-secondary hover:text-healthcare mb-2">← Back to results</button>
             <h1 className="text-[1.3rem] font-extrabold text-navy">Book with {activeDoctor.name}</h1>
             <p className="text-sm text-ink-secondary">{activeDoctor.specialty} · {activeDoctor.hospitalName}</p>
+            <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit mt-2">
+              Live slots from {activeDoctor.name}&rsquo;s working hours
+              {offeredDurations.length > 0 ? ` · ${offeredDurations.join(", ")} min visits` : ""}
+            </p>
 
             <div className="grid sm:grid-cols-2 gap-2 mt-4">
               <label className="text-[0.8rem] font-semibold text-ink-secondary">
@@ -441,8 +493,9 @@ export default function BookPage() {
             </div>
 
             <h3 className="font-bold text-ink mt-5 mb-2 text-[0.95rem]">Available times</h3>
+            <p className="text-[0.78rem] text-ink-secondary mb-2">Pick a time to select it — nothing is booked until you confirm on the next step.</p>
             {slotsError ? (
-              <ErrorState title="Unable to load availability" body="Please try another day." onRetry={() => setDayKey(days[0].key)} />
+              <ErrorState title="Unable to load availability" body={slotsError} onRetry={() => setDayKey(days[0].key)} />
             ) : (
               <SlotPicker slots={slots} selectedId={selected?.id ?? null} onSelect={setSelected} loading={slotsLoading} />
             )}
@@ -466,9 +519,9 @@ export default function BookPage() {
               ))}
             </dl>
             <Button disabled={!selected} onClick={() => setStep("review")} className="w-full mt-4">
-              Continue <ArrowRight size={16} />
+              Review booking <ArrowRight size={16} />
             </Button>
-            {!selected && <p className="text-[0.78rem] text-ink-faint text-center mt-2">Select a time to continue</p>}
+            {!selected && <p className="text-[0.78rem] text-ink-faint text-center mt-2">Select a time to continue — selecting does not book anything yet</p>}
           </aside>
         </div>
       )}

@@ -58,7 +58,7 @@ export default function ChatPage() {
         /* private mode */
       }
       const suffix = reply.escalated ? "\n\nI've flagged this for the care team to follow up." : "";
-      setMessages((prev) => [...prev, { id: `a-${Date.now()}`, from: "ai", text: reply.reply + suffix, time: "Now", doctors: reply.doctors ?? [] }]);
+      setMessages((prev) => [...prev, { id: `a-${Date.now()}`, from: "ai", text: reply.reply + suffix, time: "Now", doctors: reply.doctors ?? [], slots: reply.slots ?? [], pendingBooking: reply.pending_booking ?? null }]);
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -83,7 +83,7 @@ export default function ChatPage() {
 
         <div className="px-4 sm:px-5 py-5 space-y-4 min-h-[380px] max-h-[56vh] overflow-y-auto bg-background/50" aria-live="polite">
           {messages.map((m) => (
-            <ChatBubble key={m.id} message={m} />
+            <ChatBubble key={m.id} message={m} onSend={(text) => void sendPrompt(text)} />
           ))}
           {thinking && <TypingIndicator />}
           <div ref={bottomRef} />

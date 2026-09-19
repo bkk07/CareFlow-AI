@@ -7,6 +7,7 @@ const baseURL =
 export const api = axios.create({ baseURL });
 
 const TOKEN_KEY = "careflow_patient_token";
+const REFRESH_KEY = "careflow_patient_refresh";
 
 export function setAccessToken(token: string | null) {
   if (token) {
@@ -15,6 +16,7 @@ export function setAccessToken(token: string | null) {
   } else {
     delete api.defaults.headers.common["Authorization"];
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(REFRESH_KEY);
   }
 }
 
@@ -23,6 +25,66 @@ export function restoreAccessToken(): string | null {
   if (token) api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
   return token;
 }
+
+function getRefreshToken(): string | null {
+  return localStorage.getItem(REFRESH_KEY);
+}
+
+function saveTokens(access: string, refresh: string) {
+  setAccessToken(access);
+  localStorage.setItem(REFRESH_KEY, refresh);
+}
+
+// Silent refresh: on 401 try one refresh with the stored refresh token
+// (2-day expiry) before surfacing the error, so users are not bounced
+// to login while their refresh token is still valid.
+let refreshInFlight: Promise<string | null> | null = null;
+async function refreshAccessToken(): Promise<string | null> {
+  if (!refreshInFlight) {
+    const rt = getRefreshToken();
+    if (!rt) return null;
+    refreshInFlight = (async () => {
+      try {
+        const { data } = await axios.post(`${baseURL}/auth/refresh`, {
+          refresh_token: rt,
+        });
+        saveTokens(data.access_token, data.refresh_token);
+        return data.access_token as string;
+      } catch {
+        setAccessToken(null);
+        return null;
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+  }
+  return refreshInFlight;
+}
+
+api.interceptors.response.use(
+  (res) => res,
+  async (error) => {
+    const original = error?.config;
+    const status = error?.response?.status;
+    const url: string = original?.url ?? "";
+    if (
+      status === 401 &&
+      original &&
+      !original._retry &&
+      !url.includes("/auth/login") &&
+      !url.includes("/auth/refresh")
+    ) {
+      original._retry = true;
+      const fresh = await refreshAccessToken();
+      if (fresh) {
+        original.headers = original.headers ?? {};
+        original.headers["Authorization"] = `Bearer ${fresh}`;
+        return api(original);
+      }
+    }
+    return Promise.reject(error);
+  },
+);
 
 export function apiError(e: unknown): string {
   if (typeof e === "object" && e !== null && "response" in e) {
@@ -60,6 +122,9 @@ export interface DoctorResult {
   hospital_longitude: number | null;
   specialty: string | null;
   distance_km: number | null;
+  available_durations?: number[] | null;
+  consultation_types?: string[] | null;
+  default_duration_minutes?: number | null;
 }
 
 export interface Specialty {
@@ -156,7 +221,7 @@ export function newKey(): string {
 
 export async function login(email: string, password: string): Promise<void> {
   const { data } = await api.post("/auth/login", { email, password });
-  setAccessToken(data.access_token);
+  saveTokens(data.access_token, data.refresh_token);
 }
 
 export async function me(): Promise<CurrentUser> {
@@ -270,6 +335,7 @@ export interface PatientAppointment {
   slot_start: string;
   slot_end: string;
   state: string;
+  consultation_mode: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -292,6 +358,7 @@ export async function createAppointment(args: {
   appointment_type_id: string;
   slot_start: string;
   slot_end: string;
+  consultation_mode?: string;
 }): Promise<Appointment> {
   return (
     await api.post("/appointments", { ...args, idempotency_key: newKey() })
@@ -377,6 +444,20 @@ export interface ChatDoctorCard {
   specialty: string | null;
 }
 
+export interface ChatSlot {
+  start: string;
+  end: string;
+}
+
+export interface ChatPendingBooking {
+  kind: string;
+  doctor_id: string | null;
+  appointment_type_id: string | null;
+  slot_start: string | null;
+  slot_end: string | null;
+  appointment_id: string | null;
+}
+
 export interface ChatReply {
   conversation_id: string;
   reply: string;
@@ -384,6 +465,8 @@ export interface ChatReply {
   escalated: boolean;
   stopped: boolean;
   doctors: ChatDoctorCard[];
+  slots: ChatSlot[];
+  pending_booking: ChatPendingBooking | null;
 }
 
 export async function postChat(message: string, conversationId?: string | null): Promise<ChatReply> {

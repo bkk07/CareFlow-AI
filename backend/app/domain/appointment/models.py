@@ -67,6 +67,12 @@ class Appointment(Base):
     slot_end: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    # How the visit happens (in_person/video/phone). Mirrors the doctor's
+    # consultation_types at booking time; NULL means "not specified"
+    # (bookings made before the field existed or without a mode).
+    consultation_mode: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, default=None
+    )
     state: Mapped[AppointmentState] = mapped_column(
         Enum(AppointmentState, name="appointment_state", validate_strings=True),
         nullable=False,
