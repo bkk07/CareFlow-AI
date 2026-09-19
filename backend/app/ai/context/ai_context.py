@@ -33,6 +33,24 @@ class AIContext(BaseModel):
     selected_slot: dict[str, str] | None = None
     offered_slots: list[dict[str, str]] = Field(default_factory=list)
     offered_doctors: list[dict[str, str]] = Field(default_factory=list)
+    # Guided booking flow: the CURRENT page of doctor ids shown as cards
+    # (5 at a time) plus the last search filters so "explore more" can
+    # fetch the next page. offered_doctors keeps accumulating for
+    # "that one" resolution; offered_doctor_page is what gets displayed.
+    offered_doctor_page: list[str] = Field(default_factory=list)
+    last_search: dict[str, Any] | None = None
+    # Visit-type step: list_appointment_types must succeed and the patient
+    # must pick a type before availability is checked or anything is
+    # booked — durations differ per type, so nothing can be computed
+    # without it. Reset whenever a booking completes (next booking = new
+    # flow, type must be picked again).
+    visit_types_seen: bool = False
+    visit_types: list[dict[str, Any]] = Field(default_factory=list)
+    visit_type_name: str | None = None
+    # The visit day (YYYY-MM-DD) when the patient already gave it
+    # ("tomorrow", "Monday", "Sep 21"). Recorded deterministically so the
+    # assistant uses it directly instead of asking for the date again.
+    selected_date: str | None = None
     pending_clarification: str | None = None
     # P0 confirm-gate: a proposed booking waiting for the patient's
     # explicit "yes". Set when the assistant attempts create_appointment

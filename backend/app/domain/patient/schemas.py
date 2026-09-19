@@ -48,6 +48,8 @@ class ContactOut(BaseModel):
     full_name: str | None
     date_of_birth: date | None
     city: str | None
+    latitude: float | None = None
+    longitude: float | None = None
     updated_at: datetime
 
 
@@ -56,6 +58,12 @@ class ContactUpdateIn(BaseModel):
     full_name: str | None = Field(default=None, max_length=255)
     date_of_birth: date | None = Field(default=None)
     city: str | None = Field(default=None, max_length=120)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+
+    def model_post_init(self, _context) -> None:
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("latitude and longitude must be provided together")
 
 
 class PatientAppointmentOut(BaseModel):

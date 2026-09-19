@@ -3,6 +3,7 @@
 Protocol (all JSON text frames):
   client -> server: {"type": "audio", "data": "<base64 pcm16 16k mono>"}
   client -> server: {"type": "interrupt"}            # barge-in
+  client -> server: {"type": "location", "latitude": 12.93, "longitude": 77.62}
   server -> client: {"type": "ready", ...}
   server -> client: {"type": "partial", "text": ...} # display only, NO tools
   server -> client: {"type": "final", "text": ...}
@@ -80,6 +81,24 @@ def split_sentences(text: str) -> list[str]:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _store_location(session: VoiceSession, message: dict) -> None:
+    """Remember the caller's live GPS for this call's agent turns.
+
+    Same contract as the per-message coordinates on POST /chat: both must
+    be present numbers inside WGS84 bounds, otherwise the frame is ignored
+    and the saved profile point (if any) keeps applying.
+    """
+    try:
+        lat = float(message.get("latitude"))
+        lng = float(message.get("longitude"))
+    except (TypeError, ValueError):
+        return
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return
+    session.latitude = lat
+    session.longitude = lng
 
 
 async def _send(ws: WebSocket, payload: dict) -> None:
@@ -166,7 +185,9 @@ async def _run_agent_turn(
             correlation_id=session.correlation_id,
         )
         # The shared AIContext is keyed by conversation_id, so cross-turn
-        # references ("that one") resolve exactly like in text chat.
+        # references ("that one") resolve exactly like in text chat. The
+        # call's live GPS rides along too, so voice answers rank nearby
+        # care and greet by name just like chat does.
         result = await asyncio.to_thread(
             run_conversation,
             db=db,
@@ -175,6 +196,8 @@ async def _run_agent_turn(
             user_message=transcript,
             complete=_agent_complete,
             should_stop=session.interrupted.is_set,
+            latitude=session.latitude,
+            longitude=session.longitude,
         )
         reply = str(result.get("reply") or "")
         if session.interrupted.is_set() and not reply:
@@ -210,6 +233,8 @@ async def _pump_turn(ws: WebSocket, session: VoiceSession, text: str) -> None:
             if message.get("type") == "interrupt":
                 session.interrupted.set()
                 await _send(ws, {"type": "state", "state": "interrupted"})
+            elif message.get("type") == "location":
+                _store_location(session, message)
             elif message.get("type") == "audio":
                 session.last_voice_at = _utcnow()
                 session.silence_prompts = 0
@@ -303,6 +328,8 @@ async def handle_voice_socket(
             if kind == "interrupt":
                 session.interrupted.set()
                 await _send(ws, {"type": "state", "state": "interrupted"})
+            elif kind == "location":
+                _store_location(session, message)
             elif kind == "audio":
                 session.last_voice_at = _utcnow()
                 session.silence_prompts = 0

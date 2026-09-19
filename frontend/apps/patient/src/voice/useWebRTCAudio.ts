@@ -34,6 +34,8 @@ interface UseWebRTCAudio {
   connect: (token: string, resumeConversationId?: string | null) => void;
   disconnect: () => void;
   interrupt: () => void;
+  /** Share live GPS with the call so answers rank nearby care like chat. */
+  sendLocation: (latitude: number, longitude: number) => void;
 }
 
 const WORKLET_SOURCE = `
@@ -249,5 +251,11 @@ export function useWebRTCAudio(apiBase: string): UseWebRTCAudio {
     setState("interrupted");
   }, [stopPlayback]);
 
-  return { state, events, error, connect, disconnect, interrupt };
+  const sendLocation = useCallback((latitude: number, longitude: number) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "location", latitude, longitude }));
+    }
+  }, []);
+
+  return { state, events, error, connect, disconnect, interrupt, sendLocation };
 }

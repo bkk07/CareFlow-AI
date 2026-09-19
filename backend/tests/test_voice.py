@@ -201,6 +201,8 @@ def test_full_booking_flow_by_voice(client, db, voice_env):
                     "end": create_args["slot_end"],
                 }
             ]
+            # The scripted confirmation jumps past the visit-type step.
+            prior.visit_types_seen = True
             save_ai_context(prior)
             voice_env["stt"].text = "Yes, book Monday morning"
             ws.send_text(audio_msg(make_tone(0.4) + make_silence(0.8)))
@@ -217,6 +219,49 @@ def test_full_booking_flow_by_voice(client, db, voice_env):
     )
     assert appt.state.value == "confirmed"
     assert voice_env["tts"].calls == ["Booked for Monday morning."]
+
+
+# -- call location reaches the agent turn ---------------------------------------------
+
+
+def test_voice_location_reaches_agent_turn(client, db, voice_env):
+    """{"type": "location"} rides the turn like POST /chat coordinates."""
+    token = patient_token(client, "voiceloc")
+    seen = {}
+
+    def _capture(messages, specs):
+        seen["system"] = messages[0]["content"]
+        return {"content": "Noted near you.", "tool_calls": []}
+
+    ws_handler.set_agent_complete(_capture)
+    with client.websocket_connect(f"/voice/ws?token={token}") as ws:
+        read_until(ws, {"ready"})
+        ws.send_text(
+            json.dumps({"type": "location", "latitude": 12.9352, "longitude": 77.6245})
+        )
+        ws.send_text(audio_msg(make_tone(0.4) + make_silence(0.8)))
+        final, _ = read_until(ws, {"final"})
+        assert final["text"] == "book monday morning"
+        agent, _ = read_until(ws, {"agent_text"})
+        assert "Noted near you." in agent["text"]
+    assert "12.93520" in seen["system"]
+    assert "77.62450" in seen["system"]
+
+
+def test_voice_bad_location_is_ignored(client, db, voice_env):
+    """Malformed coordinates never break the turn; the model still answers."""
+    token = patient_token(client, "voicelocbad")
+    ws_handler.set_agent_complete(
+        scripted({"content": "Still here.", "tool_calls": []})
+    )
+    with client.websocket_connect(f"/voice/ws?token={token}") as ws:
+        read_until(ws, {"ready"})
+        ws.send_text(json.dumps({"type": "location", "latitude": 200, "longitude": "x"}))
+        ws.send_text(json.dumps({"type": "location"}))
+        ws.send_text(audio_msg(make_tone(0.4) + make_silence(0.8)))
+        read_until(ws, {"final"})
+        agent, _ = read_until(ws, {"agent_text"})
+        assert "Still here." in agent["text"]
 
 
 # -- barge-in ----------------------------------------------------------------------------

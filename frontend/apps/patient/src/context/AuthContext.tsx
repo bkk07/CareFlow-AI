@@ -29,7 +29,7 @@ interface AuthState {
   register: (email: string, password: string) => Promise<void>;
   logout: () => void;
   refreshProfile: () => Promise<void>;
-  updateContactInfo: (patch: { full_name?: string; phone?: string; date_of_birth?: string; city?: string | null }) => Promise<void>;
+  updateContactInfo: (patch: { full_name?: string; phone?: string; date_of_birth?: string; city?: string | null; latitude?: number | null; longitude?: number | null }) => Promise<void>;
   updateAccountEmail: (email: string) => Promise<void>;
 }
 
@@ -144,7 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateContactInfo = useCallback(
-    async (patch: { full_name?: string; phone?: string; date_of_birth?: string; city?: string | null }) => {
+    async (patch: { full_name?: string; phone?: string; date_of_birth?: string; city?: string | null; latitude?: number | null; longitude?: number | null }) => {
       const next = await apiSaveContact(patch);
       setContact(next);
     },

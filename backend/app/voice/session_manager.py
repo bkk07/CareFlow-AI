@@ -29,6 +29,11 @@ class VoiceSession:
     silence_prompts: int = 0
     interrupted: threading.Event = field(default_factory=threading.Event)
     ended: bool = False
+    # Live GPS for THIS call (sent by the app as {"type": "location"}).
+    # Outranks the saved home point for nearby ranking, exactly like the
+    # per-message coordinates on POST /chat. Never persisted to the profile.
+    latitude: float | None = None
+    longitude: float | None = None
 
 
 def new_session(

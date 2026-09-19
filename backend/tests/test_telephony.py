@@ -536,6 +536,8 @@ def test_full_call_verifies_then_books(client, db, tool_factory, telephony_env):
             "end": (start + timedelta(minutes=30)).isoformat(),
         }
     ]
+    # The scripted confirmation jumps past the visit-type step: simulate it.
+    prior.visit_types_seen = True
     save_ai_context(prior)
     telephony.set_agent_complete(
         scripted(

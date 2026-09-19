@@ -124,6 +124,16 @@ def update_contact(
     if "city" in data:
         city = (data["city"] or "").strip()
         profile.city = city or None
+    if "latitude" in data or "longitude" in data:
+        lat, lng = data.get("latitude"), data.get("longitude")
+        if (lat is None) != (lng is None):
+            raise _unprocessable("latitude and longitude must be provided together")
+        if lat is not None and not (-90 <= lat <= 90):
+            raise _unprocessable("latitude must be between -90 and 90")
+        if lng is not None and not (-180 <= lng <= 180):
+            raise _unprocessable("longitude must be between -180 and 180")
+        profile.latitude = lat
+        profile.longitude = lng
     session.commit()
     session.refresh(profile)
     return profile

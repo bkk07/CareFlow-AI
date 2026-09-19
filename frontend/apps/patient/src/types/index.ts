@@ -149,12 +149,31 @@ export interface ChatMessage {
     hospital_name: string;
     hospital_city: string | null;
     specialty: string | null;
+    distance_km?: number | null;
   }[];
+  /** Total matches behind the current 5-card page + whether more exist. */
+  doctorsTotal?: number;
+  hasMoreDoctors?: boolean;
   /** Offered time slots for this turn — tap to confirm (nothing books until confirmed). */
   slots?: {
     start: string;
     end: string;
   }[];
+  /** Visit types (name + minutes) offered this turn — tap to pick one. */
+  appointmentTypes?: {
+    id: string;
+    name: string;
+    duration_minutes: number;
+  }[];
+  /** The doctor's working day for the chosen date (hours + taken blocks). */
+  daySchedule?: {
+    doctor_id: string;
+    date: string;
+    working_hours: { start: string; end: string }[];
+    busy: { start: string; end: string }[];
+  } | null;
+  /** Where the patient is in the guided booking flow. */
+  bookingStage?: string;
   /** Proposal awaiting the patient's explicit yes/no. */
   pendingBooking?: {
     kind: string;

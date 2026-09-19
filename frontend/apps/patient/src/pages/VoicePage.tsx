@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Mic, MicOff, RotateCcw, Square } from "lucide-react";
+import { Mic, MicOff, Navigation, RotateCcw, Square, X } from "lucide-react";
 import { VoiceVisualizer } from "../components/ai/ai";
 import { useWebRTCAudio } from "../voice/useWebRTCAudio";
 import { wsBase } from "../api";
 import { useAppState } from "../context/AppStateContext";
 import { useAuth } from "../context/AuthContext";
 import { Button } from "../components/common/ui";
+import { readPosition } from "../lib/helpers";
 
 type VoiceState = "idle" | "listening" | "thinking" | "speaking" | "interrupted" | "completed" | "error";
 
@@ -34,6 +35,10 @@ export default function VoicePage() {
   const [muted, setMuted] = useState(false);
   const [lines, setLines] = useState<string[]>([]);
   const [sessionLive, setSessionLive] = useState(false);
+  const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [geoError, setGeoError] = useState<string | null>(null);
+  const sentGeoRef = useRef<string | null>(null);
   const timers = useRef<number[]>([]);
   const voice = useWebRTCAudio(wsBase());
   const canGoLive = live && !!accessToken;
@@ -44,6 +49,30 @@ export default function VoicePage() {
   }
 
   useEffect(() => clearTimers, []);
+
+  async function shareLocation() {
+    setLocating(true);
+    setGeoError(null);
+    try {
+      const g = await readPosition();
+      setCoords({ latitude: g.latitude, longitude: g.longitude });
+    } catch (err) {
+      setGeoError(err instanceof Error ? err.message : "Could not read your location.");
+    } finally {
+      setLocating(false);
+    }
+  }
+
+  // Push live GPS to the call once the socket is open (resends are idempotent).
+  useEffect(() => {
+    if (!coords || !sessionLive) return;
+    if (voice.state === "idle" || voice.state === "connecting" || voice.state === "ended") return;
+    const key = `${coords.latitude.toFixed(5)},${coords.longitude.toFixed(5)}`;
+    if (sentGeoRef.current === key) return;
+    voice.sendLocation(coords.latitude, coords.longitude);
+    sentGeoRef.current = key;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice.state, coords, sessionLive]);
 
   // Mirror live session events into the transcript.
   useEffect(() => {
@@ -90,6 +119,7 @@ export default function VoicePage() {
     if (!accessToken) return;
     clearTimers();
     setLines([]);
+    sentGeoRef.current = null;
     setSessionLive(true);
     setState("listening");
     voice.connect(accessToken);
@@ -115,6 +145,7 @@ export default function VoicePage() {
     voice.disconnect();
     setSessionLive(false);
     clearTimers();
+    sentGeoRef.current = null;
     setState("idle");
     setLines([]);
   }
@@ -131,6 +162,31 @@ export default function VoicePage() {
         <p className="text-[0.75rem] text-ink-faint mt-1">
           Live voice is transcribed to schedule your care. Bookings only happen after you say yes to a suggested time.
         </p>
+        <div className="flex justify-center mt-2">
+          {coords ? (
+            <span className="inline-flex items-center gap-1.5 text-[0.74rem] font-bold text-teal-dark bg-teal-soft/70 border border-teal/25 rounded-full pl-2.5 pr-1.5 py-1">
+              📍 {coords.latitude.toFixed(3)}, {coords.longitude.toFixed(3)}
+              <button
+                onClick={() => { setCoords(null); sentGeoRef.current = null; }}
+                aria-label="Clear shared location"
+                className="w-5 h-5 rounded-full hover:bg-white/70 flex items-center justify-center"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ) : (
+            <button
+              onClick={() => void shareLocation()}
+              disabled={locating}
+              className="inline-flex items-center gap-1 text-[0.76rem] font-bold text-healthcare hover:underline disabled:opacity-60"
+            >
+              <Navigation size={13} /> {locating ? "Reading location…" : "Share my location for nearby answers"}
+            </button>
+          )}
+        </div>
+        {geoError && (
+          <p role="alert" className="text-[0.76rem] font-semibold text-danger mt-1.5">{geoError}</p>
+        )}
       </div>
 
       <div className="card-base p-6 sm:p-8 mt-5 text-center">

@@ -16,7 +16,7 @@ import enum
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Enum, String, Uuid, func
+from sqlalchemy import Date, DateTime, Enum, Float, String, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -87,6 +87,11 @@ class PatientProfile(Base):
     date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
     # Patient's saved city, captured once and reused for "nearby" suggestions.
     city: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # Precise home location from "Use my location" (WGS84). Nullable: older
+    # rows and city-only profiles fall back to city ranking. Powers
+    # distance-based doctor/hospital ordering in search tools + chat.
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

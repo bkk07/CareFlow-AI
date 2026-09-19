@@ -17,6 +17,37 @@ from app.mcp_server.tools._base import mcp_tool
 
 TOOL_NAME = "search_doctors"
 
+#: People-words models pass vs catalog names we store.
+_SPECIALTY_SYNONYMS = {
+    "dermatologist": "Dermatology",
+    "cardiologist": "Cardiology",
+    "neurologist": "Neurology",
+    "orthopedist": "Orthopedics",
+    "orthopaedic": "Orthopedics",
+    "orthopedic": "Orthopedics",
+    "pediatrician": "Pediatrics",
+    "gynecologist": "Gynecology",
+    "gynaecologist": "Gynecology",
+    "psychiatrist": "Psychiatry",
+    "ophthalmologist": "Ophthalmology",
+    "dentist": "Dental",
+    "physician": "General Medicine",
+    "general physician": "General Medicine",
+}
+
+
+def _specialty_stem(lowered: str) -> str:
+    """Short stem so 'dermatologist' also matches 'Dermatology'.
+
+    Strips a trailing people-suffix and returns the first 8+ chars;
+    empty string when nothing useful remains (caller skips it).
+    """
+    for suffix in ("ologist", "iatrist", "ician"):
+        if lowered.endswith(suffix) and len(lowered) - len(suffix) >= 4:
+            lowered = lowered[: -len(suffix)]
+            break
+    return lowered if len(lowered) >= 4 else ""
+
 
 class SearchDoctorsIn(BaseModel):
     hospital_id: uuid.UUID | None = None
@@ -26,6 +57,11 @@ class SearchDoctorsIn(BaseModel):
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     radius_km: float | None = Field(default=None, gt=0, le=20000)
+    # Paging for "explore more": chat shows 5 at a time (limit=5,
+    # offsets 0/5/10…). Always paired with `total` so the caller knows
+    # whether another page exists.
+    limit: int = Field(default=5, ge=1, le=50)
+    offset: int = Field(default=0, ge=0)
 
 
 @mcp_tool(
@@ -48,9 +84,13 @@ def run(
     still included below. When `latitude`+`longitude` are given, hits are
     ordered by real hospital distance (nearest first, each carrying
     `distance_km`); `radius_km` additionally filters out doctors whose
-    hospital is farther away.
+    hospital is farther away. Results are paged (`limit`/`offset`) and
+    always report `total` so chat can offer "explore more" while matches
+    remain.
     """
     del ctx, integration
+    limit = max(1, min(input.limit or 5, 50))
+    offset = max(0, input.offset or 0)
     q = (
         db.query(
             Doctor,
@@ -78,7 +118,19 @@ def run(
         if specialty_id is not None:
             q = q.filter(Doctor.specialty_id == specialty_id)
         else:
-            q = q.filter(Specialty.name.ilike(f"%{text}%"))
+            # Models often pass "dermatologist" while the catalog stores
+            # "Dermatology" (and similar -ist/-logy pairs): match either
+            # form so a literal word never yields a false empty result.
+            lowered = text.lower()
+            variants = {text, _SPECIALTY_SYNONYMS.get(lowered, text)}
+            stem = _specialty_stem(lowered)
+            if stem:
+                variants.add(stem)
+            q = q.filter(
+                func.lower(Specialty.name).in_([v.lower() for v in variants])
+                | Specialty.name.ilike(f"%{text}%")
+                | Specialty.name.ilike(f"%{stem}%")
+            )
     if input.query:
         q = q.filter(Doctor.name.ilike(f"%{input.query.strip()}%"))
     city = (input.city or "").strip()
@@ -106,7 +158,12 @@ def run(
                 t[0][0].name or "",
             )
         )
+        total = len(scored)
+        page = scored[offset : offset + limit]
         return {
+            "total": total,
+            "offset": offset,
+            "limit": limit,
             "doctors": [
                 {
                     "id": str(d.id),
@@ -122,7 +179,7 @@ def run(
                     "default_duration_minutes": d.default_duration_minutes,
                     "distance_km": round(dist, 2) if dist is not None else None,
                 }
-                for (d, hospital_name, specialty_name, hospital_city, hlat, hlng), dist in scored
+                for (d, hospital_name, specialty_name, hospital_city, hlat, hlng), dist in page
             ],
         }
     if city:
@@ -133,7 +190,12 @@ def run(
     else:
         q = q.order_by(Doctor.name)
     rows = q.all()
+    total = len(rows)
+    page = rows[offset : offset + limit]
     return {
+        "total": total,
+        "offset": offset,
+        "limit": limit,
         "doctors": [
             {
                 "id": str(d.id),
@@ -149,6 +211,6 @@ def run(
                 "default_duration_minutes": d.default_duration_minutes,
                 "distance_km": None,
             }
-            for d, hospital_name, specialty_name, hospital_city, hlat, hlng in rows
+            for d, hospital_name, specialty_name, hospital_city, hlat, hlng in page
         ],
     }

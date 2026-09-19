@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { CalendarDays, Edit3, LogOut, MapPin, Phone, ShieldCheck } from "lucide-react";
+import { CalendarDays, Edit3, LogOut, MapPin, Navigation, Phone, ShieldCheck } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useAppState } from "../context/AppStateContext";
 import { Button, SafeImage } from "../components/common/ui";
 import { Modal } from "../components/common/Modal";
+import { readPosition } from "../lib/helpers";
 
 export default function ProfilePage() {
   const { patient, contact, updateContactInfo, logout, live } = useLiveProfile();
@@ -15,6 +16,13 @@ export default function ProfilePage() {
   const [phone, setPhone] = useState(patient.phone);
   const [address, setAddress] = useState(patient.address);
   const [city, setCity] = useState(contact?.city ?? "");
+  const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(
+    contact?.latitude != null && contact?.longitude != null
+      ? { latitude: contact.latitude, longitude: contact.longitude }
+      : null,
+  );
+  const [locating, setLocating] = useState(false);
+  const [geoError, setGeoError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -26,13 +34,47 @@ export default function ProfilePage() {
     navigate("/login");
   }
 
+  async function useMyLocation() {
+    setLocating(true);
+    setGeoError(null);
+    try {
+      const g = await readPosition();
+      setCoords({ latitude: g.latitude, longitude: g.longitude });
+    } catch (err) {
+      setGeoError(err instanceof Error ? err.message : "Could not read your location.");
+    } finally {
+      setLocating(false);
+    }
+  }
+
+  function openEditor() {
+    setName(patient.name);
+    setPhone(patient.phone);
+    setAddress(patient.address);
+    setCity(contact?.city ?? "");
+    setCoords(
+      contact?.latitude != null && contact?.longitude != null
+        ? { latitude: contact.latitude, longitude: contact.longitude }
+        : null,
+    );
+    setGeoError(null);
+    setSaveError(null);
+    setEditing(true);
+  }
+
   async function saveEdits() {
     setSaving(true);
     setSaveError(null);
     try {
       if (live) {
-        // Backend stores the verified identity (name/phone/city); address stays local.
-        await updateContactInfo({ full_name: name, phone, city: city || null });
+        // Backend stores the verified identity (name/phone/city/coords); address stays local.
+        await updateContactInfo({
+          full_name: name,
+          phone,
+          city: city || null,
+          latitude: coords?.latitude ?? null,
+          longitude: coords?.longitude ?? null,
+        });
       }
       setEditing(false);
     } catch {
@@ -41,6 +83,11 @@ export default function ProfilePage() {
       setSaving(false);
     }
   }
+
+  const savedCoords =
+    contact?.latitude != null && contact?.longitude != null
+      ? `${contact.latitude.toFixed(4)}, ${contact.longitude.toFixed(4)}`
+      : null;
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
@@ -58,7 +105,7 @@ export default function ProfilePage() {
               <span className="text-[0.75rem] font-bold bg-success-soft text-success rounded-full px-2.5 py-1">{completed} completed visits</span>
             </div>
           </div>
-            <Button variant="outline" size="sm" onClick={() => { setName(patient.name); setPhone(patient.phone); setAddress(patient.address); setCity(contact?.city ?? ""); setSaveError(null); setEditing(true); }}>
+            <Button variant="outline" size="sm" onClick={openEditor}>
             <Edit3 size={15} /> Edit profile
           </Button>
         </div>
@@ -97,7 +144,13 @@ export default function ProfilePage() {
                 {live ? (contact?.city || city || "Not set") : (city || "Not set")}
               </dd>
             </div>
-            <p className="text-[0.75rem] text-ink-faint">Your city powers nearby doctor and hospital suggestions — set it once.</p>
+            <div className="flex justify-between gap-3">
+              <dt className="text-ink-secondary flex items-center gap-1"><Navigation size={13} /> Location</dt>
+              <dd className="font-bold text-ink text-right max-w-[60%]">
+                {live ? (savedCoords ?? "Not set") : (coords ? `${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}` : "Not set")}
+              </dd>
+            </div>
+            <p className="text-[0.75rem] text-ink-faint">Your city + precise location power nearby doctor suggestions — set them once and the AI remembers.</p>
             <div className="flex justify-between gap-3">
               <dt className="text-ink-secondary">Emergency</dt>
               <dd className="font-bold text-ink text-right max-w-[60%]">{patient.emergencyContact}</dd>
@@ -137,7 +190,7 @@ export default function ProfilePage() {
 
       <p className="flex items-start gap-2 text-[0.78rem] text-ink-secondary bg-healthcare-faint border border-healthcare/20 rounded-control px-3.5 py-3">
         <ShieldCheck size={15} className="shrink-0 mt-0.5 text-healthcare" />
-        Your healthcare information stays private and secure. {live ? "Name and phone sync to your profile." : "Demo profile — edits stay on this device."}
+        Your healthcare information stays private and secure. {live ? "Name, phone, city and location sync to your profile." : "Demo profile — edits stay on this device."}
       </p>
 
       <Modal open={editing} onClose={() => setEditing(false)} title="Edit profile">
@@ -146,6 +199,29 @@ export default function ProfilePage() {
           <label className="block text-[0.83rem] font-bold">Phone<input value={phone} onChange={(e) => setPhone(e.target.value)} className="input-base mt-1" placeholder="+1 555 010 0000" /></label>
           <label className="block text-[0.83rem] font-bold">Address<input value={address} onChange={(e) => setAddress(e.target.value)} className="input-base mt-1" /></label>
           <label className="block text-[0.83rem] font-bold">City — for nearby suggestions<input value={city} onChange={(e) => setCity(e.target.value)} className="input-base mt-1" placeholder="e.g. Bengaluru" /></label>
+          <div className="bg-healthcare-faint border border-healthcare/20 rounded-control px-3 py-2.5">
+            <p className="text-[0.83rem] font-bold text-navy flex items-center gap-1.5">
+              <Navigation size={14} className="text-healthcare" /> Precise location
+            </p>
+            <p className="text-[0.76rem] text-ink-secondary mt-0.5">For exact distances (“2 km away”) instead of just city ranking.</p>
+            {coords ? (
+              <div className="flex items-center justify-between gap-2 mt-2">
+                <span className="text-[0.78rem] font-bold text-teal-dark bg-white border border-teal/20 rounded-full px-2.5 py-1">
+                  📍 {coords.latitude.toFixed(4)}, {coords.longitude.toFixed(4)}
+                </span>
+                <button type="button" onClick={() => setCoords(null)} className="text-[0.78rem] font-bold text-ink-secondary hover:text-healthcare hover:underline">
+                  Clear
+                </button>
+              </div>
+            ) : (
+              <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => void useMyLocation()} disabled={locating}>
+                <Navigation size={14} /> {locating ? "Reading location…" : "Use my location"}
+              </Button>
+            )}
+            {geoError && (
+              <p role="alert" className="text-[0.78rem] font-semibold text-danger mt-1.5">{geoError}</p>
+            )}
+          </div>
           {saveError && (
             <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">
               {saveError}

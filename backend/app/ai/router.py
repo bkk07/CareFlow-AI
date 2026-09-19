@@ -2,7 +2,7 @@
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.ai.agent.orchestrator import AINotConfiguredError, run_conversation
@@ -19,6 +19,10 @@ _chatter = require_role(Role.patient, Role.hospital_admin)
 class ChatIn(BaseModel):
     message: str
     conversation_id: str | None = None
+    # Live location for THIS message (from "Use my location"). Outranks the
+    # saved home point for nearby ranking; never persisted here.
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
 
 
 class DoctorCardOut(BaseModel):
@@ -28,6 +32,7 @@ class DoctorCardOut(BaseModel):
     hospital_name: str
     hospital_city: str | None = None
     specialty: str | None = None
+    distance_km: float | None = None
 
 
 class SlotOut(BaseModel):
@@ -44,6 +49,19 @@ class PendingBookingOut(BaseModel):
     appointment_id: str | None = None
 
 
+class AppointmentTypeOut(BaseModel):
+    id: str
+    name: str
+    duration_minutes: int
+
+
+class DayScheduleOut(BaseModel):
+    doctor_id: str
+    date: str
+    working_hours: list[SlotOut] = []
+    busy: list[SlotOut] = []
+
+
 class ChatOut(BaseModel):
     conversation_id: str
     reply: str
@@ -51,7 +69,12 @@ class ChatOut(BaseModel):
     escalated: bool
     stopped: bool = False
     doctors: list[DoctorCardOut] = []
+    doctors_total: int = 0
+    has_more_doctors: bool = False
     slots: list[SlotOut] = []
+    appointment_types: list[AppointmentTypeOut] = []
+    day_schedule: DayScheduleOut | None = None
+    booking_stage: str = "browse"
     pending_booking: PendingBookingOut | None = None
 
 
@@ -72,6 +95,8 @@ def chat(
                 ctx=ctx,
                 conversation_id=body.conversation_id,
                 user_message=body.message,
+                latitude=body.latitude,
+                longitude=body.longitude,
             )
         except ValueError as exc:
             raise HTTPException(

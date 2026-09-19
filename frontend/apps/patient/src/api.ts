@@ -188,6 +188,8 @@ export interface Notification {
   error: string | null;
   sent_at: string | null;
   created_at: string;
+  is_read?: boolean;
+  read_at?: string | null;
 }
 
 export interface Questionnaire {
@@ -260,6 +262,8 @@ export async function searchDoctors(args: {
   latitude?: number;
   longitude?: number;
   radius_km?: number;
+  limit?: number;
+  offset?: number;
 }): Promise<DoctorResult[]> {
   const input: Record<string, unknown> = {};
   if (args.hospital_id) input.hospital_id = args.hospital_id;
@@ -269,6 +273,8 @@ export async function searchDoctors(args: {
   if (args.latitude !== undefined) input.latitude = args.latitude;
   if (args.longitude !== undefined) input.longitude = args.longitude;
   if (args.radius_km !== undefined) input.radius_km = args.radius_km;
+  if (args.limit !== undefined) input.limit = args.limit;
+  if (args.offset !== undefined) input.offset = args.offset;
   const result = await mcpCall<{ doctors: DoctorResult[] }>("search_doctors", input);
   return result.doctors;
 }
@@ -382,6 +388,8 @@ export interface Contact {
   full_name: string | null;
   date_of_birth: string | null;
   city: string | null;
+  latitude: number | null;
+  longitude: number | null;
   updated_at: string;
 }
 
@@ -394,6 +402,8 @@ export async function saveContact(args: {
   phone?: string | null;
   date_of_birth?: string | null;
   city?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
 }): Promise<Contact> {
   return (await api.put("/patients/me/contact", args)).data;
 }
@@ -435,6 +445,22 @@ export async function fetchNotifications(): Promise<Notification[]> {
   return (await api.get("/notifications")).data;
 }
 
+export async function fetchNotification(id: string): Promise<Notification> {
+  return (await api.get(`/notifications/${id}`)).data;
+}
+
+export async function markNotificationRead(id: string): Promise<Notification> {
+  return (await api.post(`/notifications/${id}/read`)).data;
+}
+
+export async function markAllNotificationsRead(): Promise<{ marked: number }> {
+  return (await api.post("/notifications/read-all")).data;
+}
+
+export async function deleteNotification(id: string): Promise<void> {
+  await api.delete(`/notifications/${id}`);
+}
+
 export interface ChatDoctorCard {
   id: string;
   name: string;
@@ -442,6 +468,7 @@ export interface ChatDoctorCard {
   hospital_name: string;
   hospital_city: string | null;
   specialty: string | null;
+  distance_km: number | null;
 }
 
 export interface ChatSlot {
@@ -458,6 +485,21 @@ export interface ChatPendingBooking {
   appointment_id: string | null;
 }
 
+export interface ChatAppointmentType {
+  id: string;
+  name: string;
+  duration_minutes: number;
+}
+
+export interface ChatDaySchedule {
+  doctor_id: string;
+  date: string;
+  working_hours: ChatSlot[];
+  busy: ChatSlot[];
+}
+
+export type BookingStage = "browse" | "pick_date" | "pick_type" | "pick_time" | "confirm";
+
 export interface ChatReply {
   conversation_id: string;
   reply: string;
@@ -465,23 +507,77 @@ export interface ChatReply {
   escalated: boolean;
   stopped: boolean;
   doctors: ChatDoctorCard[];
+  doctors_total: number;
+  has_more_doctors: boolean;
   slots: ChatSlot[];
+  appointment_types: ChatAppointmentType[];
+  day_schedule: ChatDaySchedule | null;
+  booking_stage: BookingStage;
   pending_booking: ChatPendingBooking | null;
 }
 
-export async function postChat(message: string, conversationId?: string | null): Promise<ChatReply> {
+export async function postChat(
+  message: string,
+  conversationId?: string | null,
+  location?: { latitude: number; longitude: number } | null,
+): Promise<ChatReply> {
   return (
     await api.post("/chat", {
       message,
       conversation_id: conversationId ?? null,
+      latitude: location?.latitude ?? null,
+      longitude: location?.longitude ?? null,
     })
   ).data;
+}
+
+export interface DayScheduleWindow {
+  start: string;
+  end: string;
+}
+
+export interface DaySchedule {
+  doctor_id: string;
+  date: string;
+  working_hours: DayScheduleWindow[];
+  busy: DayScheduleWindow[];
+}
+
+/** Doctor's working day for the patient timeline: merged working hours
+ * plus anonymous busy blocks (no patient details). The booking API
+ * still re-validates the exact range server-side. */
+export async function fetchDaySchedule(
+  doctorId: string,
+  day: string,
+): Promise<DaySchedule> {
+  return mcpCall<DaySchedule>("get_day_schedule", {
+    doctor_id: doctorId,
+    date: day,
+  });
 }
 
 export async function fetchAppointmentQuestionnaire(
   appointmentId: string,
 ): Promise<Questionnaire | null> {
-  return (await api.get(`/appointments/${appointmentId}/questionnaire`)).data;
+  const raw = (await api.get(`/appointments/${appointmentId}/questionnaire`)).data;
+  if (!raw) return null;
+  // Backend returns { questionnaire: {...}, questions: [...] } — normalize
+  // to the flat shape the portal uses.
+  if (raw.questionnaire && Array.isArray(raw.questions)) {
+    return {
+      id: raw.questionnaire.id,
+      name: raw.questionnaire.name,
+      questions: raw.questions,
+    } as Questionnaire;
+  }
+  return raw as Questionnaire;
+}
+
+export async function fetchQuestionnaireResponses(
+  appointmentId: string,
+): Promise<QuestionnaireResponse[]> {
+  return (await api.get(`/appointments/${appointmentId}/questionnaire/responses`))
+    .data;
 }
 
 export interface QuestionnaireSubmitOut {

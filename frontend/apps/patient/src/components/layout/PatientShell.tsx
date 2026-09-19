@@ -11,7 +11,7 @@ import {
   Sparkles,
   User,
 } from "lucide-react";
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { useAppState } from "../../context/AppStateContext";
@@ -55,6 +55,9 @@ export function PatientShell({ children }: { children: React.ReactNode }) {
   const { unreadCount, notifications, markAllRead } = useAppState();
   const [panelOpen, setPanelOpen] = useState(false);
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  // Full-bleed ChatGPT-style chat manages its own height — no footer below it.
+  const isChat = pathname === "/chat";
 
   function doLogout() {
     logout();
@@ -177,15 +180,17 @@ export function PatientShell({ children }: { children: React.ReactNode }) {
 
       {/* Content */}
       <div className="md:pl-[248px]">
-        <main className="shell-container pt-5 sm:pt-7">
+        <main className={isChat ? "px-0 pb-0 md:pb-0" : "shell-container pt-5 sm:pt-7"}>
           {children}
         </main>
+        {!isChat && (
         <footer className="hidden md:block border-t border-border bg-white">
           <div className="max-w-shell mx-auto px-6 py-4 flex items-center justify-between text-[0.8rem] text-ink-secondary">
             <span><strong className="text-navy">CareFlow AI</strong> · secure patient scheduling</span>
             <span>Your healthcare information stays private and secure.</span>
           </div>
         </footer>
+        )}
       </div>
 
       {/* Mobile bottom nav */}
