@@ -271,7 +271,14 @@ def read_slots(
     ctx: RequestContext = Depends(_editor),
 ) -> list[SlotOut]:
     del ctx
+    from app.domain.appointment import service as appointment_service
+
     windows = service.get_available_slots(
-        doctor.id, appointment_type_id, date_from, date_to, db
+        doctor.id,
+        appointment_type_id,
+        date_from,
+        date_to,
+        db,
+        booked=appointment_service.live_intervals_for_doctor(db, doctor.id),
     )
     return [SlotOut(start=w.start, end=w.end) for w in windows]

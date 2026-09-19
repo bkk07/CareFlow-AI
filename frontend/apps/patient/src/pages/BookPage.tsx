@@ -63,6 +63,9 @@ export default function BookPage() {
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
   const [selected, setSelected] = useState<TimeSlot | null>(null);
+  // Bumped to force a fresh slot fetch (e.g. after a booking conflict,
+  // so a just-taken time never stays selectable from a stale list).
+  const [slotRefreshKey, setSlotRefreshKey] = useState(0);
   const [typeId, setTypeId] = useState("");
   const [consultMode, setConsultMode] = useState<Appointment["consultationMode"]>("in_person");
   const [booking, setBooking] = useState(false);
@@ -233,7 +236,7 @@ export default function BookPage() {
     return () => {
       cancelled = true;
     };
-  }, [step, activeDoctor, dayKey, typeId, live]);
+  }, [step, activeDoctor, dayKey, typeId, live, slotRefreshKey]);
 
   function openAvailability(d: Doctor) {
     setActiveDoctor(d);
@@ -270,11 +273,23 @@ export default function BookPage() {
         unread: true,
       });
       setBooking(false);
+      // Fresh availability for the next booking — the taken slot is gone.
+      setSlotRefreshKey((k) => k + 1);
       setStep("success");
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (e) {
       setBooking(false);
-      setBookingError(apiErrorText(e));
+      const raw = apiErrorText(e);
+      const taken = /409|not available|taken|conflict/i.test(raw);
+      if (taken) {
+        // Someone just took this time: refetch so it disappears from the
+        // list instead of staying selectable.
+        setSlotRefreshKey((k) => k + 1);
+        setStep("availability");
+        setBookingError("That time was just taken. The list has been refreshed — please pick another time.");
+      } else {
+        setBookingError(raw);
+      }
     }
   }
 

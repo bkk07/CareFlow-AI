@@ -277,6 +277,8 @@ function RescheduleModal({
   const [selected, setSelected] = useState<TimeSlot | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Bumped after a taken-slot conflict so the stale time disappears.
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // Reset the flow only when a different appointment is opened.
   useEffect(() => {
@@ -328,7 +330,7 @@ function RescheduleModal({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, dayKey, live]);
+  }, [open, dayKey, live, refreshKey]);
 
   if (!appointment) return null;
   const dayLabel = days.find((d) => d.key === dayKey);
@@ -349,7 +351,11 @@ function RescheduleModal({
       });
       onClose();
     } catch {
-      setSaveError("Could not move this visit — the slot may be taken. Pick another time.");
+      // Taken slot: refresh the list so it disappears instead of staying
+      // selectable from the stale response.
+      setRefreshKey((k) => k + 1);
+      setSelected(null);
+      setSaveError("That time was just taken — the list has been refreshed. Pick another time.");
     } finally {
       setSaving(false);
     }
