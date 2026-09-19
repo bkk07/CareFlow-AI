@@ -280,16 +280,26 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       const typeName = (id: string) => types.find((t) => t.id === id)?.name ?? "Visit";
 
       setLiveDepartments(
-        depts.map((d) =>
-          mapDepartment(
-            d,
-            0,
-            docs.filter((doc) => doc.department_id === d.id).length,
-          ),
-        ),
+        depts.map((d) => {
+          const deptDocs = docs.filter((doc) => doc.department_id === d.id);
+          const specialtyNames = [...new Set(
+            deptDocs
+              .map((doc) => specs.find((s) => s.id === doc.specialty_id)?.name)
+              .filter((n): n is string => !!n),
+          )].sort();
+          return mapDepartment(d, specialtyNames, deptDocs.length);
+        }),
       );
       setLiveSpecialties(
-        specs.map((s) => mapSpecialty(s, docs.filter((doc) => doc.specialty_id === s.id).length, "")),
+        specs.map((s) => {
+          const specDocs = docs.filter((doc) => doc.specialty_id === s.id);
+          const departmentNames = [...new Set(
+            specDocs
+              .map((doc) => depts.find((d) => d.id === doc.department_id)?.name)
+              .filter((n): n is string => !!n),
+          )].sort();
+          return mapSpecialty(s, specDocs.length, departmentNames.join(", "));
+        }),
       );
       setLiveTypes(types.map((t) => ({
         id: t.id,

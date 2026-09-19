@@ -52,7 +52,7 @@ export function DepartmentsPage() {
           {departments.map((d) => (
             <tr key={d.id} className="hover:bg-background/60 transition">
               <td className="td-cell font-bold">{d.name}</td>
-              <td className="td-cell">—</td>
+              <td className="td-cell text-ink-secondary text-[0.8rem]">{d.specialtyNames.length > 0 ? d.specialtyNames.join(", ") : "—"}</td>
               <td className="td-cell">{d.doctors}</td>
               <td className="td-cell"><StatusBadge status={d.status} /></td>
               <td className="td-cell text-ink-secondary">{d.updated}</td>
@@ -121,7 +121,7 @@ export function SpecialtiesPage() {
           {specialties.map((s) => (
             <tr key={s.id} className="hover:bg-background/60 transition">
               <td className="td-cell font-bold">{s.name}</td>
-              <td className="td-cell">—</td>
+              <td className="td-cell text-ink-secondary text-[0.8rem]">{s.department || "—"}</td>
               <td className="td-cell">{s.doctors}</td>
               <td className="td-cell"><StatusBadge status={s.status} /></td>
               <td className="td-cell">

@@ -19,6 +19,7 @@ export interface Department {
   id: string;
   name: string;
   specialties: number;
+  specialtyNames: string[];
   doctors: number;
   status: "active" | "inactive";
   updated: string;

@@ -74,11 +74,12 @@ function appointmentStatus(state: string): AppointmentStatus {
 
 /** Backend departments/specialties carry no counts or status — the portal
  *  derives counts client-side and treats every row as active. */
-export function mapDepartment(d: ApiDepartment, specialties: number, doctors: number): Department {
+export function mapDepartment(d: ApiDepartment, specialtyNames: string[], doctors: number): Department {
   return {
     id: d.id,
     name: d.name,
-    specialties,
+    specialties: specialtyNames.length,
+    specialtyNames,
     doctors,
     status: "active",
     updated: formatDate(d.updated_at),
