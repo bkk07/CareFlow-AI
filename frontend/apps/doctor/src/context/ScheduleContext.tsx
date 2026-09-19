@@ -110,7 +110,20 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
         .sort((x, y) => x.sortKey.localeCompare(y.sortKey));
       // Deduplicate: an appointment can appear in both ranges.
       const seen = new Set<string>();
-      setAppointments(mapped.filter((a) => (seen.has(a.id) ? false : (seen.add(a.id), true))));
+      const deduped = mapped.filter((a) => (seen.has(a.id) ? false : (seen.add(a.id), true)));
+      // Real form state comes from the questionnaire inbox (the appointment
+      // list itself carries no form info) — completed / pending / none.
+      const formByAppointment = new Map(
+        inbox.map((i) => [i.appointment_id, mapQuestionnaireItem(i).status]),
+      );
+      for (const a of deduped) {
+        const s = formByAppointment.get(a.id);
+        a.questionnaire =
+          s === "completed" || s === "in_progress" || s === "assigned"
+            ? s
+            : "not_assigned";
+      }
+      setAppointments(deduped);
       for (const r of calendar.rules) ruleCache.current.set(r.id, r);
       setRules(mapRules(calendar.rules));
       setBlocks(mapBlocks(calendar.blocks));

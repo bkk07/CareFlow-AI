@@ -163,6 +163,7 @@ def enriched_appointments(
 
 def questionnaire_inbox(session: Session, doctor: Doctor) -> list[dict]:
     """Every own appointment (newest first) with its responses attached."""
+    from app.domain.questionnaire import service as questionnaire_service
     from app.domain.questionnaire.models import QuestionnaireQuestion, QuestionnaireResponse
     from app.domain.questionnaire.schemas import ResponseOut
 
@@ -190,6 +191,9 @@ def questionnaire_inbox(session: Session, doctor: Doctor) -> list[dict]:
                 .all()
             ):
                 prompts.append({"id": q.id, "prompt": q.prompt})
+        # Whether any active form resolves for this booking (independent of
+        # whether the patient has answered yet).
+        form = questionnaire_service.resolve_for_appointment(session, appt)
         inbox.append(
             {
                 "appointment_id": appt.id,
@@ -212,6 +216,7 @@ def questionnaire_inbox(session: Session, doctor: Doctor) -> list[dict]:
                     for r in responses
                 ],
                 "questions": prompts,
+                "has_questionnaire": form is not None,
             }
         )
     return inbox

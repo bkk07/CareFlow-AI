@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { appointmentDetail, fetchAppointmentQuestionnaire, type AppointmentDetail as ApiDetail } from "../api";
-import { formatDateLabel, formatTime, mapAppointmentState } from "../lib/backend";
+import { formatCompletedAt, formatDateLabel, formatTime, mapAppointmentState } from "../lib/backend";
 import { useSchedule } from "../context/ScheduleContext";
 import { AppointmentDetailBody } from "../components/appointments/AppointmentDetail";
 import { CardSkeleton, EmptyState, ErrorState } from "../components/common/ui";
@@ -59,7 +59,7 @@ function toUI(
           name: "Pre-visit questionnaire",
           status:
             done.length > 0 ? "completed" : detail.responses.length > 0 ? "in_progress" : "assigned",
-          completedAt: done.length > 0 ? (done[done.length - 1].completed_at ?? "") : null,
+          completedAt: done.length > 0 ? formatCompletedAt(done[done.length - 1].completed_at) : null,
           answers:
             done.length > 0
               ? Object.entries(done[done.length - 1].answers ?? {}).map(([qid, response]) => ({

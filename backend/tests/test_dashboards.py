@@ -597,3 +597,6 @@ def test_doctor_questionnaire_inbox_aggregated(client, stub_integration):
     assert item["patient_id"] == setup["patient"]["id"]
     assert item["patient_name"]
     assert isinstance(item["responses"], list)
+    # An active form resolves for this booking even with no answers yet.
+    assert item["has_questionnaire"] is True
+    assert isinstance(item["questions"], list)

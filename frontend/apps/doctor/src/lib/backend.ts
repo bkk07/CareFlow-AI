@@ -275,11 +275,30 @@ export function mapNotification(n: BackendNotification): NotificationItem {
   };
 }
 
+/** "2026-09-19T13:06:28.094694Z" -> "Sep 19, 6:36 PM". Pass-through on bad input. */
+export function formatCompletedAt(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 /** Aggregated inbox item -> portal Questionnaire card. */
 export function mapQuestionnaireItem(item: DoctorQuestionnaireItem): Questionnaire {
   const done = item.responses.filter((r) => r.completed);
   const status =
-    done.length > 0 ? "completed" : item.responses.length > 0 ? "in_progress" : "assigned";
+    done.length > 0
+      ? "completed"
+      : item.responses.length > 0
+        ? "in_progress"
+        : item.has_questionnaire
+          ? "assigned"
+          : "not_assigned";
   const last = done.length > 0 ? done[done.length - 1] : null;
   const promptById = new Map(
     (item.questions ?? []).map((q) => [q.id, q.prompt]),
@@ -297,14 +316,7 @@ export function mapQuestionnaireItem(item: DoctorQuestionnaireItem): Questionnai
     patientName: item.patient_name,
     name: "Pre-visit questionnaire",
     status,
-    completedAt: last?.completed_at
-      ? new Date(last.completed_at).toLocaleString("en-US", {
-          month: "short",
-          day: "numeric",
-          hour: "numeric",
-          minute: "2-digit",
-        })
-      : null,
+    completedAt: formatCompletedAt(last?.completed_at),
     answers,
   };
 }

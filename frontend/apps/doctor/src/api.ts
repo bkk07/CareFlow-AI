@@ -261,6 +261,7 @@ export interface DoctorQuestionnaireItem {
   state: string;
   responses: QuestionnaireResponse[];
   questions?: DoctorQuestionPrompt[];
+  has_questionnaire?: boolean;
 }
 
 export interface AppointmentQuestionnaire {

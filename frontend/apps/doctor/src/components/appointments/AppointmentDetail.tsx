@@ -29,8 +29,8 @@ export function QuestionnairePanel({ questionnaire }: { questionnaire: Questionn
   if (!questionnaire || questionnaire.status === "not_assigned") {
     return (
       <div className="bg-background border border-border rounded-control p-4 text-sm">
-        <p className="font-bold text-ink flex items-center gap-1.5"><FileText size={15} /> Questionnaire pending</p>
-        <p className="text-ink-secondary mt-1">Patient has not completed the pre-visit questionnaire.</p>
+        <p className="font-bold text-ink flex items-center gap-1.5"><FileText size={15} /> No questionnaire</p>
+        <p className="text-ink-secondary mt-1">No pre-visit form is assigned to this appointment.</p>
       </div>
     );
   }

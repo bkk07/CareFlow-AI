@@ -139,6 +139,7 @@ class DoctorQuestionnaireItemOut(BaseModel):
     state: str
     responses: list[ResponseOut]
     questions: list[DoctorQuestionPrompt] = Field(default_factory=list)
+    has_questionnaire: bool = False
 
 
 class DoctorCalendarOut(BaseModel):
