@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useSchedule } from "../context/ScheduleContext";
 import { DayView, MonthView, WeekView } from "../components/calendar/CalendarViews";
@@ -9,8 +9,16 @@ type View = "day" | "week" | "month";
 
 export default function CalendarPage() {
   const [view, setView] = useState<View>("day");
+  const [selectedDate, setSelectedDate] = useState(() => new Date());
   const { appointments, blocks, loading, error, refresh } = useSchedule();
-  const today = useMemo(() => appointments.filter((a) => a.dayGroup === "today"), [appointments]);
+
+  function shiftDay(n: number) {
+    setSelectedDate((d) => {
+      const c = new Date(d);
+      c.setDate(c.getDate() + n);
+      return c;
+    });
+  }
 
   return (
     <div className="space-y-4">
@@ -36,9 +44,26 @@ export default function CalendarPage() {
         <div className="card-base"><EmptyState title="No calendar entries" body="Appointments and blocked time will appear here once your hospital schedule syncs." /></div>
       ) : (
         <>
-          {view === "day" && <DayView appointments={today} blocks={blocks} dateLabel="Today" />}
+          {view === "day" && (
+            <DayView
+              appointments={appointments}
+              blocks={blocks}
+              selected={selectedDate}
+              onPrevDay={() => shiftDay(-1)}
+              onNextDay={() => shiftDay(1)}
+              onToday={() => setSelectedDate(new Date())}
+            />
+          )}
           {view === "week" && <WeekView appointments={appointments} blocks={blocks} />}
-          {view === "month" && <MonthView appointments={appointments} />}
+          {view === "month" && (
+            <MonthView
+              appointments={appointments}
+              onPickDay={(d) => {
+                setSelectedDate(d);
+                setView("day");
+              }}
+            />
+          )}
         </>
       )}
 
