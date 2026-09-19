@@ -149,6 +149,8 @@ export function mapDoctorProfile(p: DoctorProfile): Doctor {
   const modes = (p.consultation_types ?? []).filter((m): m is Doctor["consultationTypes"][number] =>
     ["in_person", "video", "phone"].includes(m),
   );
+  const durations = (p.available_durations ?? []).filter((d) => d > 0);
+  const offered = durations.length > 0 ? [...new Set(durations)].sort((a, b) => a - b) : [p.default_duration_minutes];
   return {
     id: p.id,
     name: p.name,
@@ -159,7 +161,8 @@ export function mapDoctorProfile(p: DoctorProfile): Doctor {
     languages: p.languages ?? [],
     hospital: "",
     consultationTypes: modes,
-    appointmentDuration: p.default_duration_minutes,
+    appointmentDuration: offered[0],
+    appointmentDurations: offered,
     status: (["invited", "active", "inactive", "suspended"].includes(p.status)
       ? p.status
       : "active") as Doctor["status"],

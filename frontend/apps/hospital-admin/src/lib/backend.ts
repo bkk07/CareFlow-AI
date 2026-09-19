@@ -125,6 +125,9 @@ export function mapDoctor(
     department: departmentName || "General",
     experience: d.experience_years,
     modes: d.consultation_types.length > 0 ? d.consultation_types : ["In person"],
+    durations: (d.available_durations ?? []).length > 0
+      ? [...new Set(d.available_durations)].sort((a, b) => a - b)
+      : [d.default_duration_minutes],
     status: d.status as Doctor["status"],
     availability: d.status === "active" ? "Active" : d.status === "invited" ? "—" : "Paused",
     appointmentsWeek,

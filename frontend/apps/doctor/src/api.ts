@@ -67,6 +67,7 @@ export interface DoctorProfile {
   languages: string[];
   consultation_types: string[];
   default_duration_minutes: number;
+  available_durations: number[];
   external_provider_id: string | null;
   user_id: string | null;
   status: string;
@@ -82,6 +83,7 @@ export interface DoctorSelfUpdate {
   languages?: string[];
   consultation_types?: string[];
   default_duration_minutes?: number;
+  available_durations?: number[];
 }
 
 export interface DoctorAppointment {

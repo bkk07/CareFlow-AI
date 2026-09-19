@@ -51,6 +51,7 @@ export interface Doctor {
   department: string;
   experience: number;
   modes: string[];
+  durations: number[];
   status: DoctorStatus;
   availability: string;
   appointmentsWeek: number;

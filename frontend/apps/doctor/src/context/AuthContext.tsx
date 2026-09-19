@@ -27,6 +27,7 @@ const EMPTY_DOCTOR: Doctor = {
   photo: "",
   consultationTypes: [],
   appointmentDuration: 0,
+  appointmentDurations: [],
   status: "active",
   acceptingAppointments: false,
 };
@@ -57,8 +58,10 @@ function profilePatchFromUI(
   if (patch.languages !== undefined) out.languages = patch.languages;
   if (patch.consultationTypes !== undefined)
     out.consultation_types = patch.consultationTypes;
-  if (patch.appointmentDuration !== undefined)
-    out.default_duration_minutes = patch.appointmentDuration;
+  if (patch.appointmentDurations !== undefined)
+    out.available_durations = patch.appointmentDurations;
+  else if (patch.appointmentDuration !== undefined)
+    out.available_durations = [patch.appointmentDuration];
   if (patch.photo !== undefined) out.photo_url = patch.photo || null;
   if (patch.qualifications !== undefined)
     out.qualifications = { text: patch.qualifications };

@@ -26,6 +26,7 @@ export interface Doctor {
   photo: string;
   consultationTypes: ConsultationMode[];
   appointmentDuration: number;
+  appointmentDurations: number[];
   status: DoctorStatus;
   acceptingAppointments: boolean;
 }

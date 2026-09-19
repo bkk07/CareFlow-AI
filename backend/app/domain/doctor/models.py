@@ -55,6 +55,12 @@ class Doctor(Base):
     default_duration_minutes: Mapped[int] = mapped_column(
         Integer, nullable=False, default=30
     )
+    # Visit lengths (minutes) this doctor offers. Multi-select in the
+    # doctor portal; default_duration_minutes stays as the legacy
+    # primary length and is kept in sync with the first entry.
+    available_durations: Mapped[list[int]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=list
+    )
     external_provider_id: Mapped[str | None] = mapped_column(
         String(255), nullable=True
     )

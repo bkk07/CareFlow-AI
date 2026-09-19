@@ -152,6 +152,7 @@ export default function DoctorsPage() {
                 ["Experience", `${selected.experience} years`],
                 ["Languages", selected.languages.join(", ")],
                 ["Consultation", selected.modes.join(", ")],
+                ["Visit lengths", `${selected.durations.join(", ")} min`],
                 ["Hospital", selected.hospital],
                 ["Portal login", selected.loginEmail ?? "No login yet"],
                 ["Weekly load", `${selected.appointmentsWeek} appointments`],

@@ -97,12 +97,20 @@ export default function AvailabilityPage() {
     }
   }
 
-  async function setDuration(d: number) {
+  async function toggleDuration(d: number) {
+    const has = doctor.appointmentDurations.includes(d);
+    const next = has
+      ? doctor.appointmentDurations.filter((x) => x !== d)
+      : [...doctor.appointmentDurations, d].sort((a, b) => a - b);
+    if (next.length === 0) {
+      fail("Keep at least one visit length selected.");
+      return;
+    }
     try {
-      await updateDoctor({ appointmentDuration: d });
-      flash(`Duration set to ${d} min`);
+      await updateDoctor({ appointmentDurations: next });
+      flash(`Visit lengths: ${next.join(", ")} min`);
     } catch {
-      fail("Could not save visit length.");
+      fail("Could not save visit lengths.");
     }
   }
 
@@ -177,21 +185,25 @@ export default function AvailabilityPage() {
         )}
       </section>
 
-      <section className="card-base p-5" aria-label="Appointment duration">
-        <h2 className="section-title">Appointment duration</h2>
+      <section className="card-base p-5" aria-label="Appointment durations">
+        <h2 className="section-title">Appointment durations</h2>
+        <p className="text-[0.8rem] text-ink-secondary mt-1">Tick every visit length you offer — patients book against these.</p>
         <div className="grid grid-cols-4 gap-2 mt-3">
-          {DURATIONS.map((d) => (
-            <button
-              key={d}
-              onClick={() => void setDuration(d)}
-              aria-pressed={doctor.appointmentDuration === d}
-              className={`py-2.5 rounded-control border font-bold text-sm transition ${doctor.appointmentDuration === d ? "bg-navy text-white border-navy" : "bg-white border-border hover:border-healthcare"}`}
-            >
-              {d} min
-            </button>
-          ))}
+          {DURATIONS.map((d) => {
+            const on = doctor.appointmentDurations.includes(d);
+            return (
+              <button
+                key={d}
+                onClick={() => void toggleDuration(d)}
+                aria-pressed={on}
+                className={`py-2.5 rounded-control border font-bold text-sm transition ${on ? "bg-navy text-white border-navy" : "bg-white border-border hover:border-healthcare"}`}
+              >
+                {d} min
+              </button>
+            );
+          })}
         </div>
-        <p className="text-[0.8rem] text-ink-secondary mt-2">Currently <strong className="text-ink">{doctor.appointmentDuration} min</strong> per visit.</p>
+        <p className="text-[0.8rem] text-ink-secondary mt-2">Offering <strong className="text-ink">{doctor.appointmentDurations.length > 0 ? doctor.appointmentDurations.join(", ") + " min" : "—"}</strong> per visit.</p>
       </section>
 
       <section className="card-base p-5" aria-label="Consultation types">

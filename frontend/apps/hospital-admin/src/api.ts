@@ -72,6 +72,7 @@ export interface Doctor {
   department_id: string | null;
   experience_years: number;
   default_duration_minutes: number;
+  available_durations: number[];
   external_provider_id: string | null;
   status: string;
 }
@@ -384,6 +385,7 @@ export interface DoctorDetail extends Doctor {
   languages: string[];
   consultation_types: string[];
   default_duration_minutes: number;
+  available_durations: number[];
   external_provider_id: string | null;
   user_id: string | null;
   login_email: string | null;

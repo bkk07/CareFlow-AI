@@ -34,6 +34,18 @@ def _conflict(message: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
 
 
+def _normalize_durations(values: list[int] | None) -> list[int]:
+    """Dedupe + sort offered visit lengths; rejects empty/non-positive."""
+    if values is None:
+        raise _unprocessable("available_durations must not be empty")
+    cleaned = sorted({v for v in values if isinstance(v, int)})
+    if not cleaned or any(v <= 0 for v in cleaned):
+        raise _unprocessable(
+            "available_durations must be a non-empty list of positive minutes"
+        )
+    return cleaned
+
+
 def _resolve_ref(
     session: Session, hospital: Hospital, model, ref_id: uuid.UUID | None, label: str
 ):
@@ -102,6 +114,11 @@ def create_doctor(
 ) -> Doctor:
     _resolve_ref(session, hospital, Specialty, body.specialty_id, "specialty_id")
     _resolve_ref(session, hospital, Department, body.department_id, "department_id")
+    durations = (
+        _normalize_durations(body.available_durations)
+        if body.available_durations is not None
+        else [body.default_duration_minutes]
+    )
     doctor = Doctor(
         hospital_id=hospital.id,
         name=body.name,
@@ -112,7 +129,8 @@ def create_doctor(
         experience_years=body.experience_years,
         languages=body.languages,
         consultation_types=body.consultation_types,
-        default_duration_minutes=body.default_duration_minutes,
+        default_duration_minutes=durations[0],
+        available_durations=durations,
         external_provider_id=body.external_provider_id,
         user_id=_resolve_login(session, hospital, body.user_id),
         status=DoctorStatus.invited,
@@ -144,6 +162,12 @@ def update_doctor(
         )
     if "user_id" in data:
         data["user_id"] = _resolve_login(session, hospital, data["user_id"])
+    if "available_durations" in data:
+        data["available_durations"] = _normalize_durations(
+            data["available_durations"]
+        )
+        # Legacy primary length follows the first offered duration.
+        data["default_duration_minutes"] = data["available_durations"][0]
     for field, value in data.items():
         setattr(doctor, field, value)
     try:

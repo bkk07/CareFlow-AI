@@ -26,6 +26,7 @@ class DoctorCreateIn(BaseModel):
     languages: list[str] = Field(default_factory=list)
     consultation_types: list[str] = Field(default_factory=list)
     default_duration_minutes: int = Field(default=30, gt=0)
+    available_durations: list[int] | None = Field(default=None)
     external_provider_id: str | None = Field(default=None, max_length=255)
     user_id: uuid.UUID | None = None
 
@@ -40,6 +41,7 @@ class DoctorUpdateIn(BaseModel):
     languages: list[str] | None = None
     consultation_types: list[str] | None = None
     default_duration_minutes: int | None = Field(default=None, gt=0)
+    available_durations: list[int] | None = None
     external_provider_id: str | None = Field(default=None, max_length=255)
     user_id: uuid.UUID | None = None
 
@@ -56,6 +58,7 @@ class DoctorOut(BaseModel):
     languages: list[str]
     consultation_types: list[str]
     default_duration_minutes: int
+    available_durations: list[int]
     external_provider_id: str | None
     user_id: uuid.UUID | None
     # Linked login's email for roster display. Populated by the service
@@ -92,6 +95,7 @@ class DoctorSelfUpdateIn(BaseModel):
     languages: list[str] | None = None
     consultation_types: list[str] | None = None
     default_duration_minutes: int | None = Field(default=None, gt=0)
+    available_durations: list[int] | None = None
 
 
 class DoctorAppointmentOut(BaseModel):

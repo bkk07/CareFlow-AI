@@ -131,7 +131,7 @@ export default function ProfilePage() {
         <section className="card-base p-5">
           <h2 className="section-title">Practice setup</h2>
           <dl className="mt-3 space-y-2 text-sm">
-            <div className="flex justify-between gap-2"><dt className="text-ink-secondary">Visit length</dt><dd className="font-bold">{doctor.appointmentDuration} min</dd></div>
+            <div className="flex justify-between gap-2"><dt className="text-ink-secondary">Visit lengths</dt><dd className="font-bold">{doctor.appointmentDurations.length > 0 ? doctor.appointmentDurations.join(", ") + " min" : `${doctor.appointmentDuration} min`}</dd></div>
             <div className="flex justify-between gap-2"><dt className="text-ink-secondary">Consultation</dt><dd className="font-bold text-right">{doctor.consultationTypes.map(consultationModeLabel).join(" · ") || "—"}</dd></div>
             <div className="flex justify-between gap-2"><dt className="text-ink-secondary">Status</dt><dd><StatusBadge status={doctor.status} /></dd></div>
           </dl>

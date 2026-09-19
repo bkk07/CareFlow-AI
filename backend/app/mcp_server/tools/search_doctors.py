@@ -117,6 +117,7 @@ def run(
                     "hospital_latitude": hlat,
                     "hospital_longitude": hlng,
                     "specialty": specialty_name,
+                    "available_durations": list(d.available_durations or []),
                     "distance_km": round(dist, 2) if dist is not None else None,
                 }
                 for (d, hospital_name, specialty_name, hospital_city, hlat, hlng), dist in scored
@@ -141,6 +142,7 @@ def run(
                 "hospital_latitude": hlat,
                 "hospital_longitude": hlng,
                 "specialty": specialty_name,
+                "available_durations": list(d.available_durations or []),
                 "distance_km": None,
             }
             for d, hospital_name, specialty_name, hospital_city, hlat, hlng in rows

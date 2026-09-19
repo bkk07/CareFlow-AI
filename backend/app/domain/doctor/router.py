@@ -199,6 +199,7 @@ def update_my_profile(
         "languages",
         "consultation_types",
         "default_duration_minutes",
+        "available_durations",
     }
     safe = {k: v for k, v in data.items() if k in allowed}
     if not safe:
