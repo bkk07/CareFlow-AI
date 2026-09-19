@@ -7,12 +7,18 @@ import type { Questionnaire } from "../../types";
 import type { QuestionnaireDetail } from "../../api";
 
 export default function QuestionnairesPage() {
-  const { questionnaires, duplicateQuestionnaire, toggleQuestionnaire, createQuestionnaire, fetchQuestionnaireDetail, live, loading, backendError, refreshAll } = useAdmin();
+  const { questionnaires, duplicateQuestionnaire, toggleQuestionnaire, createQuestionnaire, fetchQuestionnaireDetail, addQuestionnaireQuestion, specialties, doctors, types, live, loading, backendError, refreshAll } = useAdmin();
   const [preview, setPreview] = useState<Questionnaire | null>(null);
   const [previewDetail, setPreviewDetail] = useState<QuestionnaireDetail | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newScope, setNewScope] = useState("hospital");
+  const [newScopeRef, setNewScopeRef] = useState("");
+  const [qType, setQType] = useState("short_text");
+  const [qPrompt, setQPrompt] = useState("");
+  const [qOptions, setQOptions] = useState("");
+  const [qRequired, setQRequired] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   async function run(fn: () => Promise<void>) {
@@ -37,6 +43,47 @@ export default function QuestionnairesPage() {
       setPreviewLoading(false);
     }
   }
+
+  const scopeRefOptions =
+    newScope === "specialty" ? specialties.map((s) => ({ id: s.id, name: s.name }))
+    : newScope === "appointment_type" ? types.map((t) => ({ id: t.id, name: t.name }))
+    : newScope === "doctor" ? doctors.map((d) => ({ id: d.id, name: d.name }))
+    : [];
+
+  async function create() {
+    if (newScope !== "hospital" && !newScopeRef) {
+      setError("Pick what this form applies to (specialty, visit type, or doctor).");
+      return;
+    }
+    await run(async () => {
+      await createQuestionnaire(newName.trim(), newScope, newScope === "hospital" ? null : newScopeRef);
+      setNewName("");
+      setNewScope("hospital");
+      setNewScopeRef("");
+      setCreateOpen(false);
+    });
+  }
+
+  async function addQuestion() {
+    if (!preview || !previewDetail) return;
+    const options = qOptions.split(",").map((o) => o.trim()).filter(Boolean);
+    const order = previewDetail.questions.length + 1;
+    await run(async () => {
+      await addQuestionnaireQuestion(preview.id, {
+        order,
+        type: qType,
+        prompt: qPrompt.trim(),
+        options: options.length > 0 ? options : null,
+        required: qRequired,
+      });
+      setQPrompt("");
+      setQOptions("");
+      const detail = await fetchQuestionnaireDetail(preview.id);
+      setPreviewDetail(detail);
+    });
+  }
+
+  const needsOptions = qType === "choice" || qType === "multi_choice";
 
   const previewFields = (previewDetail?.questions ?? []).map((f) => ({
     question: f.prompt,
@@ -102,7 +149,7 @@ export default function QuestionnairesPage() {
             {previewLoading ? (
               <p className="text-sm text-ink-secondary mt-2">Loading questions…</p>
             ) : previewFields.length === 0 ? (
-              <p className="text-sm text-ink-secondary mt-2">No questions in this form yet.</p>
+              <p className="text-sm text-ink-secondary mt-2">No questions in this form yet — add the first one below.</p>
             ) : (
               <div className="mt-2 space-y-3">
                 {previewFields.map((f, i) => (
@@ -116,13 +163,52 @@ export default function QuestionnairesPage() {
                 ))}
               </div>
             )}
+            <div className="mt-4 bg-white border border-border rounded-control p-3.5">
+              <p className="font-bold text-[0.88rem]">Add question</p>
+              <label className="block text-[0.8rem] font-bold mt-2">Type
+                <select value={qType} onChange={(e) => setQType(e.target.value)} className="input-base mt-1">
+                  <option value="yes_no">Yes / No</option>
+                  <option value="choice">Single choice</option>
+                  <option value="multi_choice">Multiple choice</option>
+                  <option value="numeric">Numeric</option>
+                  <option value="date">Date</option>
+                  <option value="short_text">Short text</option>
+                  <option value="long_text">Long text</option>
+                </select>
+              </label>
+              <label className="block text-[0.8rem] font-bold mt-2">Question<input value={qPrompt} onChange={(e) => setQPrompt(e.target.value)} placeholder="e.g. Do you have any known allergies?" className="input-base mt-1" /></label>
+              {needsOptions && (
+                <label className="block text-[0.8rem] font-bold mt-2">Options (comma separated)<input value={qOptions} onChange={(e) => setQOptions(e.target.value)} placeholder="e.g. New symptom, Follow-up, Refill" className="input-base mt-1" /></label>
+              )}
+              <label className="flex items-center gap-2 text-[0.8rem] font-bold mt-2 cursor-pointer">
+                <input type="checkbox" checked={qRequired} onChange={(e) => setQRequired(e.target.checked)} className="w-4 h-4 accent-[#1769AA]" />
+                Required
+              </label>
+              <Button size="sm" className="mt-3 w-full" disabled={!qPrompt.trim() || (needsOptions && !qOptions.trim())} onClick={() => void addQuestion()}>Add question</Button>
+            </div>
           </div>
         )}
       </Drawer>
 
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Create questionnaire">
         <label className="block text-[0.83rem] font-bold">Name<input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Orthopedics Pre-visit" className="input-base mt-1" /></label>
-        <Button className="w-full mt-4" disabled={!newName.trim()} onClick={() => void run(async () => { await createQuestionnaire(newName.trim()); setNewName(""); setCreateOpen(false); })}>Create draft</Button>
+        <label className="block text-[0.83rem] font-bold mt-3">Applies to
+          <select value={newScope} onChange={(e) => { setNewScope(e.target.value); setNewScopeRef(""); }} className="input-base mt-1">
+            <option value="hospital">Whole hospital (fallback for every booking)</option>
+            <option value="specialty">One specialty</option>
+            <option value="appointment_type">One visit type</option>
+            <option value="doctor">One doctor</option>
+          </select>
+        </label>
+        {newScope !== "hospital" && (
+          <label className="block text-[0.83rem] font-bold mt-3">Which one?
+            <select value={newScopeRef} onChange={(e) => setNewScopeRef(e.target.value)} className="input-base mt-1">
+              <option value="">— Select —</option>
+              {scopeRefOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </label>
+        )}
+        <Button className="w-full mt-4" disabled={!newName.trim()} onClick={() => void create()}>Create form</Button>
       </Modal>
     </div>
   );

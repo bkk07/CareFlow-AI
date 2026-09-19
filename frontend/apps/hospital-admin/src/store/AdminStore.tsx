@@ -153,7 +153,8 @@ interface AdminStore {
   inviteDoctorLogin: (id: string, email: string, password: string) => Promise<void>;
   removeDoctorLogin: (id: string) => Promise<void>;
   cancelAppointment: (id: string) => Promise<void>;
-  createQuestionnaire: (name: string) => Promise<void>;
+  createQuestionnaire: (name: string, scope?: string, scopeRefId?: string | null) => Promise<void>;
+  addQuestionnaireQuestion: (id: string, body: { order: number; type: string; prompt: string; options?: string[] | null; required?: boolean }) => Promise<void>;
   duplicateQuestionnaire: (id: string) => Promise<void>;
   toggleQuestionnaire: (id: string) => Promise<void>;
   fetchQuestionnaireDetail: (id: string) => Promise<QuestionnaireDetail | null>;
@@ -597,9 +598,18 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   // -- questionnaires ------------------------------------------------------------------
 
-  const createQuestionnaire = useCallback(async (name: string) => {
+  const createQuestionnaire = useCallback(async (name: string, scope?: string, scopeRefId?: string | null) => {
     if (!live || !hospitalId) throw fail("Sign in — managing questionnaires needs the backend.");
-    await apiCreateQuestionnaire(hospitalId, { name }).catch(() => { throw fail("Could not create questionnaire."); });
+    await apiCreateQuestionnaire(hospitalId, { name, scope: scope ?? "hospital", scope_ref_id: scopeRefId ?? null }).catch(() => { throw fail("Could not create questionnaire."); });
+    await refreshAll();
+  }, [live, hospitalId, refreshAll, fail]);
+
+  const addQuestionnaireQuestion = useCallback(async (id: string, body: { order: number; type: string; prompt: string; options?: string[] | null; required?: boolean }) => {
+    if (!live || !hospitalId) throw fail("Sign in — managing questionnaires needs the backend.");
+    if ((body.type === "choice" || body.type === "multi_choice") && (!body.options || body.options.length === 0)) {
+      throw fail("Choice questions need at least one option.");
+    }
+    await apiAddQuestion(hospitalId, id, body).catch(() => { throw fail("Could not add question."); });
     await refreshAll();
   }, [live, hospitalId, refreshAll, fail]);
 
@@ -758,6 +768,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       duplicateQuestionnaire,
       toggleQuestionnaire,
       fetchQuestionnaireDetail,
+      addQuestionnaireQuestion,
       inviteStaff,
       deactivateStaff,
       hospitals,

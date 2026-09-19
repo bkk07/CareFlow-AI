@@ -478,7 +478,7 @@ export async function listQuestionnaires(hospitalId: string): Promise<Questionna
 
 export async function createQuestionnaire(
   hospitalId: string,
-  body: { name: string; scope?: string },
+  body: { name: string; scope?: string; scope_ref_id?: string | null },
 ): Promise<Questionnaire> {
   return (
     await api.post(`/hospitals/${hospitalId}/questionnaires`, {
