@@ -20,6 +20,9 @@ import {
   restoreAccessToken,
   setAccessToken,
   suspendHospital as apiSuspend,
+  startHospitalReview as apiStartReview,
+  requestHospitalCorrections as apiRequestCorrections,
+  reinstateHospital as apiReinstate,
   type AIEvaluation,
   type CurrentUser,
   type OpsMetrics,
@@ -79,6 +82,9 @@ interface AdminStore {
   metrics: OpsMetrics | null;
   reviewHospital: (id: string, decision: "approved" | "rejected", reason?: string) => Promise<void>;
   suspendHospital: (id: string) => Promise<void>;
+  startReview: (id: string) => Promise<void>;
+  requestCorrections: (id: string, message: string) => Promise<void>;
+  reinstateHospital: (id: string) => Promise<void>;
   notifications: NotificationItem[];
   unread: number;
   markAllRead: () => void;
@@ -262,6 +268,27 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     await refreshAll();
   }, [live, refreshAll, fail]);
 
+  const startReview = useCallback(async (id: string) => {
+    if (!live) throw fail("Not authenticated. Sign in to review hospitals.");
+    await apiStartReview(id).catch(() => { throw fail("Could not start review (already under review?)."); });
+    await refreshAll();
+    pushNotification("Review started", `${id} → under_review`);
+  }, [live, refreshAll, fail]);
+
+  const requestCorrections = useCallback(async (id: string, message: string) => {
+    if (!live) throw fail("Not authenticated. Sign in to review hospitals.");
+    await apiRequestCorrections(id, message).catch(() => { throw fail("Could not request corrections."); });
+    await refreshAll();
+    pushNotification("Corrections requested", `${id} → draft`);
+  }, [live, refreshAll, fail]);
+
+  const reinstateHospital = useCallback(async (id: string) => {
+    if (!live) throw fail("Not authenticated. Sign in to manage hospitals.");
+    await apiReinstate(id).catch(() => { throw fail("Could not reinstate hospital."); });
+    await refreshAll();
+    pushNotification("Hospital reinstated", `${id} → approved`);
+  }, [live, refreshAll, fail]);
+
   const pushNotification = useCallback((title: string, body: string) => {
     setNotifications((prev) => [{ id: nid("n"), title, body, time: "Just now", unread: true }, ...prev]);
   }, []);
@@ -291,6 +318,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       metrics,
       reviewHospital,
       suspendHospital,
+      startReview,
+      requestCorrections,
+      reinstateHospital,
       notifications,
       unread: notifications.filter((n) => n.unread).length,
       markAllRead,
@@ -299,6 +329,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     [authed, login, logout, mode, live, loading, backendError, user,
       refreshAll, hospitals, doctors, patients, appointments, aiEvaluation, audit,
       overview, integrations, analytics, workflows, metrics, reviewHospital, suspendHospital,
+      startReview, requestCorrections, reinstateHospital,
       notifications, markAllRead, pushNotification],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

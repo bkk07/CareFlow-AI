@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { ArrowRight, CheckCircle2, XCircle } from "lucide-react";
 import { useAdmin } from "../../store/AdminStore";
 import { Avatar, Button, EmptyState, MetricCard, StatusBadge } from "../../components/common/ui";
-import { ConfirmDialog, Drawer, ResponsiveTable } from "../../components/common/Modal";
+import { ConfirmDialog, Drawer, Modal, ResponsiveTable } from "../../components/common/Modal";
 import type { Hospital } from "../../types";
 
 const LIFECYCLE = ["draft", "submitted", "under_review", "approved"] as const;
@@ -63,10 +63,12 @@ export function PlatformOverviewPage() {
 }
 
 export function HospitalApplicationsPage() {
-  const { hospitals, reviewHospital, loading, backendError } = useAdmin();
+  const { hospitals, reviewHospital, startReview, requestCorrections, loading, backendError } = useAdmin();
   const [selected, setSelected] = useState<Hospital | null>(null);
   const [decision, setDecision] = useState<{ id: string; approve: boolean } | null>(null);
   const [reason, setReason] = useState("Does not meet onboarding requirements.");
+  const [correctFor, setCorrectFor] = useState<Hospital | null>(null);
+  const [correctMsg, setCorrectMsg] = useState("Please add weekend operating hours and a contact phone.");
   const [error, setError] = useState<string | null>(null);
   const pending = hospitals.filter((h) => ["submitted", "under_review", "draft"].includes(h.status));
 
@@ -78,6 +80,15 @@ export function HospitalApplicationsPage() {
       setSelected(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Review failed.");
+    }
+  }
+
+  async function run(fn: () => Promise<void>) {
+    setError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Operation failed.");
     }
   }
 
@@ -100,12 +111,16 @@ export function HospitalApplicationsPage() {
               <td className="td-cell text-ink-secondary text-[0.8rem]">{h.contact}</td>
               <td className="td-cell"><StatusBadge status={h.status} /></td>
               <td className="td-cell">
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <button onClick={() => setSelected(h)} className="text-[0.78rem] font-bold text-healthcare hover:underline">Detail</button>
+                  {h.status === "submitted" && (
+                    <button onClick={() => void run(async () => { await startReview(h.id); })} className="text-[0.78rem] font-bold text-healthcare hover:underline">Start review</button>
+                  )}
                   {["submitted", "under_review"].includes(h.status) && (
                     <>
                       <button onClick={() => setDecision({ id: h.id, approve: true })} className="text-[0.78rem] font-bold text-success hover:underline">Approve</button>
                       <button onClick={() => setDecision({ id: h.id, approve: false })} className="text-[0.78rem] font-bold text-ink-secondary hover:text-danger">Reject</button>
+                      <button onClick={() => { setCorrectFor(h); setCorrectMsg("Please add weekend operating hours and a contact phone."); }} className="text-[0.78rem] font-bold text-ink-secondary hover:text-healthcare">Request corrections</button>
                     </>
                   )}
                 </div>
@@ -161,14 +176,34 @@ export function HospitalApplicationsPage() {
         danger={!decision?.approve}
         onConfirm={() => decision && void decide(decision.id, decision.approve)}
       />
+      <Modal
+        open={!!correctFor}
+        onClose={() => setCorrectFor(null)}
+        title={`Request corrections${correctFor ? ` · ${correctFor.name}` : ""}`}
+      >
+        <div className="space-y-3">
+          <p className="text-[0.83rem] text-ink-secondary">The application returns to draft with your fix-list. The hospital resubmits when ready.</p>
+          <label className="block text-[0.83rem] font-bold">What needs fixing?
+            <textarea value={correctMsg} onChange={(e) => setCorrectMsg(e.target.value)} rows={3} className="input-base mt-1" />
+          </label>
+          <Button
+            className="w-full"
+            disabled={correctMsg.trim().length === 0}
+            onClick={() => correctFor && void run(async () => { await requestCorrections(correctFor.id, correctMsg.trim()); setCorrectFor(null); })}
+          >
+            Send corrections request
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }
 
 export function PlatformHospitalsPage() {
-  const { hospitals, suspendHospital, loading, backendError } = useAdmin();
+  const { hospitals, suspendHospital, reinstateHospital, loading, backendError } = useAdmin();
   const [error, setError] = useState<string | null>(null);
   const [confirmSuspend, setConfirmSuspend] = useState<string | null>(null);
+  const [confirmReinstate, setConfirmReinstate] = useState<string | null>(null);
   return (
     <div className="space-y-4">
       <div><h1 className="page-title">Hospitals</h1><p className="page-sub mt-1">Every organization on the platform.</p></div>
@@ -196,6 +231,13 @@ export function PlatformHospitalsPage() {
                   >
                     Suspend
                   </button>
+                ) : h.status === "suspended" ? (
+                  <button
+                    onClick={() => setConfirmReinstate(h.id)}
+                    className="text-[0.78rem] font-bold text-success hover:underline"
+                  >
+                    Reinstate
+                  </button>
                 ) : (
                   <span className="text-ink-faint text-[0.78rem]">—</span>
                 )}
@@ -208,7 +250,7 @@ export function PlatformHospitalsPage() {
         open={!!confirmSuspend}
         onClose={() => setConfirmSuspend(null)}
         title="Suspend hospital"
-        body="The hospital stops taking bookings immediately. This can only be reversed by platform review."
+        body="The hospital stops taking bookings immediately. You can reinstate it after review."
         confirmLabel="Suspend"
         danger
         onConfirm={() => {
@@ -217,6 +259,21 @@ export function PlatformHospitalsPage() {
             suspendHospital(confirmSuspend)
               .catch((e: unknown) => setError(e instanceof Error ? e.message : "Suspend failed."))
               .finally(() => setConfirmSuspend(null));
+          }
+        }}
+      />
+      <ConfirmDialog
+        open={!!confirmReinstate}
+        onClose={() => setConfirmReinstate(null)}
+        title="Reinstate hospital"
+        body="The hospital goes live again and resumes bookings immediately."
+        confirmLabel="Reinstate"
+        onConfirm={() => {
+          if (confirmReinstate) {
+            setError(null);
+            reinstateHospital(confirmReinstate)
+              .catch((e: unknown) => setError(e instanceof Error ? e.message : "Reinstate failed."))
+              .finally(() => setConfirmReinstate(null));
           }
         }}
       />

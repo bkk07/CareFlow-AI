@@ -9,6 +9,7 @@ import {
   createQuestionnaire as apiCreateQuestionnaire,
   createSpecialty as apiCreateSpecialty,
   deactivateDoctor as apiDeactivateDoctor,
+  suspendDoctor as apiSuspendDoctor,
   deactivateStaff as apiDeactivateStaff,
   deleteAppointmentType as apiDeleteType,
   deleteDepartment as apiDeleteDepartment,
@@ -43,6 +44,7 @@ import {
   retryOperation as apiRetryOperation,
   setAccessToken,
   updateHospital as apiUpdateHospital,
+  resubmitHospital as apiResubmitHospital,
   updateQuestionnaire as apiUpdateQuestionnaire,
   verifyAppointment as apiVerify,
   cancelAppointment as apiCancelAppointment,
@@ -118,7 +120,9 @@ interface AdminStore {
     city?: string | null;
     latitude?: number | null;
     longitude?: number | null;
+    operating_hours?: Record<string, [string, string]> | null;
   }) => Promise<void>;
+  resubmitHospital: () => Promise<void>;
   // hospital
   departments: Department[];
   specialties: Specialty[];
@@ -447,10 +451,19 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     city?: string | null;
     latitude?: number | null;
     longitude?: number | null;
+    operating_hours?: Record<string, [string, string]> | null;
   }) => {
     if (!live || !hospitalId) throw fail("Sign in — hospital edits need the backend.");
     const next = await apiUpdateHospital(hospitalId, patch).catch(() => {
       throw fail("Could not save hospital profile.");
+    });
+    setHospital(next);
+  }, [live, hospitalId, fail]);
+
+  const resubmitHospital = useCallback(async () => {
+    if (!live || !hospitalId) throw fail("Sign in — resubmission needs the backend.");
+    const next = await apiResubmitHospital(hospitalId).catch(() => {
+      throw fail("Could not resubmit (only drafts can be resubmitted).");
     });
     setHospital(next);
   }, [live, hospitalId, fail]);
@@ -563,13 +576,14 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     try {
       if (status === "active") await apiActivateDoctor(hospitalId, id);
       else if (status === "inactive") await apiDeactivateDoctor(hospitalId, id);
-      else throw fail("Only activate/deactivate is supported by the backend.");
+      else if (status === "suspended") await apiSuspendDoctor(hospitalId, id);
+      else throw fail("Only activate/deactivate/suspend is supported by the backend.");
     } catch (e) {
-      if (e instanceof Error && e.message === "Only activate/deactivate is supported by the backend.") throw e;
+      if (e instanceof Error && e.message === "Only activate/deactivate/suspend is supported by the backend.") throw e;
       throw fail("Status change rejected — set specialty, department and a compatible visit type first.");
     }
     await refreshAll();
-    log(status === "active" ? "Doctor activated" : "Doctor deactivated", id);
+    log(status === "active" ? "Doctor activated" : status === "suspended" ? "Doctor suspended" : "Doctor deactivated", id);
   }, [live, hospitalId, refreshAll, fail]);
 
   // -- appointments ------------------------------------------------------------------
@@ -717,6 +731,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       hospital,
       refreshAll,
       updateHospital,
+      resubmitHospital,
       departments,
       specialties,
       types,
@@ -772,7 +787,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       pushNotification,
     }),
     [role, authed, login, logout, mode, live, loading, backendError, user, hospital,
-      refreshAll, updateHospital, departments, specialties, types, doctors, appointments, questionnaires, staff,
+      refreshAll, updateHospital, resubmitHospital, departments, specialties, types, doctors, appointments, questionnaires, staff,
       addDepartment, renameDepartment, deleteDepartment, toggleDepartment, addSpecialty, deleteSpecialty,
       toggleSpecialty, addType, deleteType, toggleType, createDoctor, setDoctorStatus, inviteDoctorLogin,
       removeDoctorLogin, cancelAppointment,

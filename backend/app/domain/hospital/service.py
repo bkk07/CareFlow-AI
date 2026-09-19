@@ -141,6 +141,7 @@ def _transition(
         hospital.rejection_reason = (metadata or {}).get("reason")
     if to == HospitalStatus.approved:
         hospital.rejection_reason = None
+        hospital.review_notes = None
     write_audit_event(
         session,
         action=action,
@@ -199,6 +200,105 @@ def reject(
         correlation_id=correlation_id or uuid.uuid4(),
         action="hospital.rejected",
         metadata={"reason": reason},
+    )
+
+
+def start_review(
+    session: Session,
+    hospital: Hospital,
+    *,
+    actor_user_id: uuid.UUID,
+    correlation_id: uuid.UUID | None = None,
+) -> Hospital:
+    """Mark an application as actively under platform review."""
+    if hospital.status != HospitalStatus.submitted:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot start review of a hospital with status={hospital.status.value}",
+        )
+    return _transition(
+        session,
+        hospital,
+        HospitalStatus.under_review,
+        actor_user_id=actor_user_id,
+        correlation_id=correlation_id or uuid.uuid4(),
+        action="hospital.review_started",
+    )
+
+
+def request_corrections(
+    session: Session,
+    hospital: Hospital,
+    *,
+    actor_user_id: uuid.UUID,
+    message: str,
+    correlation_id: uuid.UUID | None = None,
+) -> Hospital:
+    """Send the application back to draft with a fix-list for the hospital."""
+    if hospital.status not in REVIEWABLE:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot request corrections of a hospital with status={hospital.status.value}",
+        )
+    hospital.review_notes = message
+    hospital.reviewed_at = None
+    hospital.reviewed_by = None
+    return _transition(
+        session,
+        hospital,
+        HospitalStatus.draft,
+        actor_user_id=actor_user_id,
+        correlation_id=correlation_id or uuid.uuid4(),
+        action="hospital.corrections_requested",
+        metadata={"message": message},
+    )
+
+
+def resubmit(
+    session: Session,
+    hospital: Hospital,
+    *,
+    actor_user_id: uuid.UUID,
+    correlation_id: uuid.UUID | None = None,
+) -> Hospital:
+    """Hospital re-submits a draft (e.g. after applying corrections)."""
+    if hospital.status != HospitalStatus.draft:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot resubmit a hospital with status={hospital.status.value}",
+        )
+    hospital.submitted_at = _utcnow()
+    return _transition(
+        session,
+        hospital,
+        HospitalStatus.submitted,
+        actor_user_id=actor_user_id,
+        correlation_id=correlation_id or uuid.uuid4(),
+        action="hospital.resubmitted",
+    )
+
+
+def reinstate(
+    session: Session,
+    hospital: Hospital,
+    *,
+    actor_user_id: uuid.UUID,
+    correlation_id: uuid.UUID | None = None,
+) -> Hospital:
+    """Bring a suspended hospital back live after platform review."""
+    if hospital.status != HospitalStatus.suspended:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only a suspended hospital can be reinstated",
+        )
+    hospital.review_notes = None
+    return _transition(
+        session,
+        hospital,
+        HospitalStatus.approved,
+        actor_user_id=actor_user_id,
+        correlation_id=correlation_id or uuid.uuid4(),
+        action="hospital.reinstated",
     )
 
 

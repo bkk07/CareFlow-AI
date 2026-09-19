@@ -234,6 +234,8 @@ export interface Hospital {
   city: string | null;
   latitude: number | null;
   longitude: number | null;
+  operating_hours: Record<string, [string, string]> | null;
+  review_notes: string | null;
   status: string;
   submitted_at: string | null;
   reviewed_at: string | null;
@@ -273,9 +275,14 @@ export async function updateHospital(
     city?: string | null;
     latitude?: number | null;
     longitude?: number | null;
+    operating_hours?: Record<string, [string, string]> | null;
   },
 ): Promise<Hospital> {
   return (await api.put(`/hospitals/${hospitalId}`, patch)).data;
+}
+
+export async function resubmitHospital(hospitalId: string): Promise<Hospital> {
+  return (await api.post(`/hospitals/${hospitalId}/resubmit`)).data;
 }
 
 export interface StaffMember {
@@ -420,6 +427,10 @@ export async function activateDoctor(hospitalId: string, id: string): Promise<Do
 
 export async function deactivateDoctor(hospitalId: string, id: string): Promise<DoctorDetail> {
   return (await api.post(`/hospitals/${hospitalId}/doctors/${id}/deactivate`)).data;
+}
+
+export async function suspendDoctor(hospitalId: string, id: string): Promise<DoctorDetail> {
+  return (await api.post(`/hospitals/${hospitalId}/doctors/${id}/suspend`)).data;
 }
 
 // -- appointments ---------------------------------------------------------------

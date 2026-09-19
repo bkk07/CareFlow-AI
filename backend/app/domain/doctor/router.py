@@ -114,6 +114,20 @@ def deactivate_doctor(
 
 
 @router.post(
+    "/hospitals/{hospital_id}/doctors/{doctor_id}/suspend",
+    response_model=DoctorOut,
+)
+def suspend_doctor(
+    doctor_id: uuid.UUID,
+    hospital: Hospital = Depends(require_managed_hospital),
+    db: Session = Depends(get_db),
+):
+    """Suspend an active doctor (compliance hold); re-activatable."""
+    doctor = service.get_doctor_or_404(db, hospital, doctor_id)
+    return service.suspend(db, doctor)
+
+
+@router.post(
     "/hospitals/{hospital_id}/doctors/{doctor_id}/invite",
     response_model=DoctorOut,
     status_code=201,

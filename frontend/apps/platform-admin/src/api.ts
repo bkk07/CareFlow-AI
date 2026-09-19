@@ -259,6 +259,18 @@ export async function suspendHospital(id: string): Promise<ApiHospital> {
   return (await api.post(`/platform/hospitals/${id}/suspend`)).data;
 }
 
+export async function reinstateHospital(id: string): Promise<ApiHospital> {
+  return (await api.post(`/platform/hospitals/${id}/reinstate`)).data;
+}
+
+export async function startHospitalReview(id: string): Promise<ApiHospital> {
+  return (await api.post(`/platform/hospitals/${id}/start-review`)).data;
+}
+
+export async function requestHospitalCorrections(id: string, message: string): Promise<ApiHospital> {
+  return (await api.post(`/platform/hospitals/${id}/request-corrections`, { message })).data;
+}
+
 export async function listPlatformDoctors(hospitalId?: string): Promise<PlatformDoctor[]> {
   return (
     await api.get("/platform/doctors", { params: hospitalId ? { hospital_id: hospitalId } : {} })

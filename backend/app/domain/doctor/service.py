@@ -174,7 +174,11 @@ def _has_compatible_appointment_type(
 
 
 def activate(session: Session, hospital: Hospital, doctor: Doctor) -> Doctor:
-    if doctor.status not in (DoctorStatus.invited, DoctorStatus.inactive):
+    if doctor.status not in (
+        DoctorStatus.invited,
+        DoctorStatus.inactive,
+        DoctorStatus.suspended,
+    ):
         raise _conflict(
             f"Cannot activate a doctor with status={doctor.status.value}"
         )
@@ -199,6 +203,17 @@ def deactivate(session: Session, doctor: Doctor) -> Doctor:
     if doctor.status != DoctorStatus.active:
         raise _conflict("Only an active doctor can be deactivated")
     doctor.status = DoctorStatus.inactive
+    session.commit()
+    session.refresh(doctor)
+    attach_login_email(session, doctor)
+    return doctor
+
+
+def suspend(session: Session, doctor: Doctor) -> Doctor:
+    """Suspend an active doctor (compliance hold); reactivatable via activate."""
+    if doctor.status != DoctorStatus.active:
+        raise _conflict("Only an active doctor can be suspended")
+    doctor.status = DoctorStatus.suspended
     session.commit()
     session.refresh(doctor)
     attach_login_email(session, doctor)

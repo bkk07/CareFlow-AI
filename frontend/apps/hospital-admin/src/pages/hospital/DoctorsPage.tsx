@@ -118,7 +118,10 @@ export default function DoctorsPage() {
                   {d.status !== "active" ? (
                     <button onClick={() => setConfirm({ id: d.id, to: "active" })} className="text-[0.78rem] font-bold text-success hover:underline">Activate</button>
                   ) : (
-                    <button onClick={() => setConfirm({ id: d.id, to: "inactive" })} className="text-[0.78rem] font-bold text-ink-secondary hover:text-danger">Deactivate</button>
+                    <>
+                      <button onClick={() => setConfirm({ id: d.id, to: "inactive" })} className="text-[0.78rem] font-bold text-ink-secondary hover:text-danger">Deactivate</button>
+                      <button onClick={() => setConfirm({ id: d.id, to: "suspended" })} className="text-[0.78rem] font-bold text-ink-secondary hover:text-danger">Suspend</button>
+                    </>
                   )}
                   {d.loginEmail ? (
                     <button onClick={() => setRemoveLoginFor(d)} className="text-[0.78rem] font-bold text-ink-secondary hover:text-danger">Remove login</button>
@@ -183,9 +186,9 @@ export default function DoctorsPage() {
       <ConfirmDialog
         open={!!confirm}
         onClose={() => setConfirm(null)}
-        title={confirm?.to === "active" ? "Activate doctor" : "Deactivate doctor"}
-        body={confirm?.to === "active" ? "The doctor will start receiving new appointments." : "Inactive doctors will not receive new appointments. Existing visits stay unchanged."}
-        confirmLabel={confirm?.to === "active" ? "Activate" : "Deactivate"}
+        title={confirm?.to === "active" ? "Activate doctor" : confirm?.to === "suspended" ? "Suspend doctor" : "Deactivate doctor"}
+        body={confirm?.to === "active" ? "The doctor will start receiving new appointments." : confirm?.to === "suspended" ? "Suspended doctors stop receiving new appointments immediately and can be reactivated later." : "Inactive doctors will not receive new appointments. Existing visits stay unchanged."}
+        confirmLabel={confirm?.to === "active" ? "Activate" : confirm?.to === "suspended" ? "Suspend" : "Deactivate"}
         danger={confirm?.to !== "active"}
         onConfirm={() => confirm && void run(async () => { await setDoctorStatus(confirm.id, confirm.to); setConfirm(null); })}
       />

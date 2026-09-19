@@ -13,6 +13,7 @@ from app.domain.auth.models import Role, User
 from app.domain.hospital import service
 from app.domain.hospital.models import Hospital, HospitalStatus
 from app.domain.hospital.schemas import (
+    CorrectionsIn,
     HospitalCreateIn,
     HospitalOut,
     HospitalUpdateIn,
@@ -231,6 +232,80 @@ def suspend_hospital(
 ) -> Hospital:
     hospital = service.get_hospital_or_404(db, hospital_id)
     return service.suspend(
+        db,
+        hospital,
+        actor_user_id=ctx.user_id,
+        correlation_id=_correlation_id(x_correlation_id),
+    )
+
+
+@router.post("/platform/hospitals/{hospital_id}/reinstate", response_model=HospitalOut)
+def reinstate_hospital(
+    hospital_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(require_role(Role.platform_admin)),
+    x_correlation_id: str | None = Header(default=None),
+) -> Hospital:
+    """Bring a suspended hospital back live after platform review."""
+    hospital = service.get_hospital_or_404(db, hospital_id)
+    return service.reinstate(
+        db,
+        hospital,
+        actor_user_id=ctx.user_id,
+        correlation_id=_correlation_id(x_correlation_id),
+    )
+
+
+@router.post(
+    "/platform/hospitals/{hospital_id}/start-review", response_model=HospitalOut
+)
+def start_hospital_review(
+    hospital_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(require_role(Role.platform_admin)),
+    x_correlation_id: str | None = Header(default=None),
+) -> Hospital:
+    hospital = service.get_hospital_or_404(db, hospital_id)
+    return service.start_review(
+        db,
+        hospital,
+        actor_user_id=ctx.user_id,
+        correlation_id=_correlation_id(x_correlation_id),
+    )
+
+
+@router.post(
+    "/platform/hospitals/{hospital_id}/request-corrections",
+    response_model=HospitalOut,
+)
+def request_hospital_corrections(
+    hospital_id: uuid.UUID,
+    body: CorrectionsIn,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(require_role(Role.platform_admin)),
+    x_correlation_id: str | None = Header(default=None),
+) -> Hospital:
+    """Send the application back to draft with a fix-list for the hospital."""
+    hospital = service.get_hospital_or_404(db, hospital_id)
+    return service.request_corrections(
+        db,
+        hospital,
+        actor_user_id=ctx.user_id,
+        message=body.message,
+        correlation_id=_correlation_id(x_correlation_id),
+    )
+
+
+@router.post("/hospitals/{hospital_id}/resubmit", response_model=HospitalOut)
+def resubmit_hospital(
+    hospital_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(require_role(Role.hospital_admin)),
+    x_correlation_id: str | None = Header(default=None),
+) -> Hospital:
+    """Re-submit a draft application (e.g. after applying corrections)."""
+    hospital = _own_hospital_or_403(db, ctx, hospital_id)
+    return service.resubmit(
         db,
         hospital,
         actor_user_id=ctx.user_id,

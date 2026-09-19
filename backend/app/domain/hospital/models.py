@@ -3,8 +3,10 @@
 import enum
 import uuid
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import DateTime, Enum, Float, String, Uuid, func
+from sqlalchemy import JSON, DateTime, Enum, Float, String, Uuid, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -35,6 +37,15 @@ class Hospital(Base):
     # and registrations without coordinates fall back to city ranking.
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Hospital-level operating hours: {"mon": ["09:00", "18:00"], ...}.
+    # Days absent from the map are closed. Recorded at onboarding/setup;
+    # slot calculation still derives from doctor calendars.
+    operating_hours: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"), nullable=True
+    )
+    # Latest platform corrections request (set by request-corrections,
+    # cleared on approve). Lets the hospital see what to fix.
+    review_notes: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     status: Mapped[HospitalStatus] = mapped_column(
         Enum(HospitalStatus, name="hospital_status", validate_strings=True),
         nullable=False,

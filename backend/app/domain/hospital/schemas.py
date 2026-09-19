@@ -32,6 +32,39 @@ class ReviewDecisionIn(BaseModel):
     reason: str = Field(min_length=1, max_length=1000)
 
 
+class CorrectionsIn(BaseModel):
+    """Platform asks the hospital to fix its application before review."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    message: str = Field(min_length=1, max_length=1000)
+
+
+WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+
+def validate_operating_hours(value: dict | None) -> dict | None:
+    """Weekly hours map: {"mon": ["09:00", "18:00"], ...}; absent = closed."""
+    if value is None:
+        return None
+    import re
+
+    if not isinstance(value, dict):
+        raise ValueError("operating_hours must be an object")
+    for day, span in value.items():
+        if day not in WEEKDAYS:
+            raise ValueError(f"unknown day: {day}")
+        if (
+            not isinstance(span, list)
+            or len(span) != 2
+            or not all(isinstance(t, str) and re.fullmatch(r"[0-2]\d:[0-5]\d", t) for t in span)
+        ):
+            raise ValueError(f"{day} must be [open, close] as HH:MM")
+        if span[0] >= span[1]:
+            raise ValueError(f"{day}: open must be before close")
+    return value
+
+
 class HospitalOut(BaseModel):
     id: uuid.UUID
     name: str
@@ -41,6 +74,8 @@ class HospitalOut(BaseModel):
     city: str | None
     latitude: float | None
     longitude: float | None
+    operating_hours: dict | None
+    review_notes: str | None
     status: HospitalStatus
     submitted_at: datetime | None
     reviewed_at: datetime | None
@@ -66,11 +101,17 @@ class HospitalUpdateIn(BaseModel):
     city: str | None = Field(default=None, max_length=120)
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
+    operating_hours: dict | None = None
 
     @model_validator(mode="after")
     def _coords_come_in_pairs(self) -> "HospitalUpdateIn":
         if (self.latitude is None) != (self.longitude is None):
             raise ValueError("latitude and longitude must be provided together")
+        return self
+
+    @model_validator(mode="after")
+    def _hours_well_formed(self) -> "HospitalUpdateIn":
+        self.operating_hours = validate_operating_hours(self.operating_hours)
         return self
 
 
