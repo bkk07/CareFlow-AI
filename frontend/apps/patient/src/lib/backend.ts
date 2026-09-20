@@ -186,7 +186,7 @@ export function mapHospitalResult(h: Hospital): UIHospital {
     id: h.id,
     name: h.name,
     location,
-    image: "",
+    image: h.image_url ?? "",
     departments: [],
     specialties: [],
     doctorsCount: 0,

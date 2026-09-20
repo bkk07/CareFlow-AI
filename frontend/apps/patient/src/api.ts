@@ -110,6 +110,7 @@ export interface Hospital {
   city: string | null;
   latitude: number | null;
   longitude: number | null;
+  image_url: string | null;
   distance_km: number | null;
 }
 

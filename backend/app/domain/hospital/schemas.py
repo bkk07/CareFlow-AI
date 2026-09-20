@@ -74,6 +74,7 @@ class HospitalOut(BaseModel):
     city: str | None
     latitude: float | None
     longitude: float | None
+    image_url: str | None
     operating_hours: dict | None
     review_notes: str | None
     status: HospitalStatus
@@ -101,6 +102,7 @@ class HospitalUpdateIn(BaseModel):
     city: str | None = Field(default=None, max_length=120)
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
+    image_url: str | None = Field(default=None, max_length=1000)
     operating_hours: dict | None = None
 
     @model_validator(mode="after")

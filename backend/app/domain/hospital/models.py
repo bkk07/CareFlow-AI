@@ -37,6 +37,9 @@ class Hospital(Base):
     # and registrations without coordinates fall back to city ranking.
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Cover photo for hospital cards (Unsplash/preset URL). Nullable:
+    # older rows render a monogram fallback until an admin sets one.
+    image_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     # Hospital-level operating hours: {"mon": ["09:00", "18:00"], ...}.
     # Days absent from the map are closed. Recorded at onboarding/setup;
     # slot calculation still derives from doctor calendars.

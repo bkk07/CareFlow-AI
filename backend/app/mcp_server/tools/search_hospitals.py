@@ -77,6 +77,7 @@ def run(
                     "city": h.city,
                     "latitude": h.latitude,
                     "longitude": h.longitude,
+                    "image_url": h.image_url,
                     "distance_km": round(d, 2) if d is not None else None,
                 }
                 for h, d in scored
@@ -98,6 +99,7 @@ def run(
                 "city": h.city,
                 "latitude": h.latitude,
                 "longitude": h.longitude,
+                "image_url": h.image_url,
                 "distance_km": None,
             }
             for h in rows
