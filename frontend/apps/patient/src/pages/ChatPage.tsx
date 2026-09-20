@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Mic, Navigation, Send, X } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { postChat } from "../api";
+import type { BookingSelection } from "../api";
 import { useAuth } from "../context/AuthContext";
 import { ChatBubble, TypingIndicator } from "../components/ai/ai";
 import { readPosition } from "../lib/helpers";
@@ -79,7 +80,7 @@ export default function ChatPage() {
     }
   }
 
-  async function sendPrompt(text: string) {
+  async function sendPrompt(text: string, selection?: BookingSelection | null) {
     const clean = text.trim();
     if (!clean || thinking) return;
     setMessages((prev) => [...prev, { id: `p-${Date.now()}`, from: "patient", text: clean, time: "Now" }]);
@@ -89,7 +90,9 @@ export default function ChatPage() {
       const conversationId = localStorage.getItem(CONV_KEY);
       // Live GPS wins for this message; otherwise the backend falls back
       // to the saved home location on your profile automatically.
-      const reply = await postChat(clean, conversationId, liveGeo);
+      // A typed selection rides along so taps update the same canonical
+      // state a spoken phrase would — the text stays for the transcript.
+      const reply = await postChat(clean, conversationId, liveGeo, selection ?? null);
       try {
         localStorage.setItem(CONV_KEY, reply.conversation_id);
       } catch {
@@ -123,13 +126,21 @@ export default function ChatPage() {
 
   const isFresh = messages.length <= 1;
 
-  function pickType(name: string, minutes: number) {
+  function pickType(id: string, name: string, minutes: number) {
     setChosenType({ name, minutes });
-    void sendPrompt(name);
+    void sendPrompt(name, { type: "booking_selection", field: "appointment_type", value: id });
   }
 
-  function pickMode(label: string) {
-    void sendPrompt(label);
+  function pickMode(mode: string, label: string) {
+    void sendPrompt(label, { type: "booking_selection", field: "consultation_mode", value: mode });
+  }
+
+  function sendSelection(text: string, selection: BookingSelection) {
+    if (selection.field === "appointment_type") {
+      const m = messages.flatMap((msg) => msg.appointmentTypes ?? []).find((t) => t.id === selection.value);
+      if (m) setChosenType({ name: m.name, minutes: m.duration_minutes });
+    }
+    void sendPrompt(text, selection);
   }
 
   return (
@@ -206,8 +217,9 @@ export default function ChatPage() {
               key={m.id}
               message={m}
               onSend={(text) => void sendPrompt(text)}
-              onPickType={(name, minutes) => pickType(name, minutes)}
-              onPickMode={(_mode, label) => pickMode(label)}
+              onSelect={(text, selection) => sendSelection(text, selection)}
+              onPickType={(id, name, minutes) => pickType(id, name, minutes)}
+              onPickMode={(mode, label) => pickMode(mode, label)}
               daySlotMinutes={chosenType?.minutes ?? null}
             />
           ))}

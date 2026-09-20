@@ -8,6 +8,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import type { ChatMessage } from "../../types";
+import type { BookingSelection } from "../../api";
 import { formatSlotDate, formatSlotTime } from "../../lib/backend";
 import { Button, SafeImage } from "../common/ui";
 
@@ -31,16 +32,22 @@ function AssistantMarkdown({ text }: { text: string }) {
   );
 }
 
-export function ChatBubble({ message, onSend, onPickType, onPickMode, daySlotMinutes }: {
+export function ChatBubble({ message, onSend, onSelect, onPickType, onPickMode, daySlotMinutes }: {
   message: ChatMessage;
   onSend?: (text: string) => void;
+  /** Typed tap: text for the transcript + selection for canonical state. */
+  onSelect?: (text: string, selection: BookingSelection) => void;
   /** Visit-type tap: records minutes for slot coloring, then sends the name. */
-  onPickType?: (name: string, minutes: number) => void;
+  onPickType?: (id: string, name: string, minutes: number) => void;
   /** How-to-meet tap: sends the mode label for the assistant to record. */
   onPickMode?: (mode: string, label: string) => void;
   /** Chosen visit length — day slots that can't fit it render taken. */
   daySlotMinutes?: number | null;
 }) {
+  const send = (text: string, selection?: BookingSelection) => {
+    if (selection && onSelect) onSelect(text, selection);
+    else onSend?.(text);
+  };
   const isPatient = message.from === "patient";
   return (
     <motion.div
@@ -70,7 +77,7 @@ export function ChatBubble({ message, onSend, onPickType, onPickMode, daySlotMin
         {message.doctors && message.doctors.length > 0 && (
           <div className="mt-2.5 space-y-2 text-left">
             {message.doctors.map((d) => (
-              <LiveDoctorCard key={d.id} doctor={d} />
+              <LiveDoctorCard key={d.id} doctor={d} onSelect={send} />
             ))}
             {message.hasMoreDoctors && (
               <MoreDoctorsButton
@@ -82,23 +89,24 @@ export function ChatBubble({ message, onSend, onPickType, onPickMode, daySlotMin
           </div>
         )}
         {message.slots && message.slots.length > 0 && (
-          <SlotChips slots={message.slots} onSend={onSend} />
+          <SlotChips slots={message.slots} onSend={onSend} onSelect={send} />
         )}
         {message.appointmentTypes && message.appointmentTypes.length > 0 && (
-          <TypeSelect types={message.appointmentTypes} onPick={onPickType} onSend={onSend} />
+          <TypeSelect types={message.appointmentTypes} onPick={onPickType} onSend={onSend} onSelect={send} />
         )}
         {message.consultationModes && message.consultationModes.length > 0 && (
-          <ModeChips modes={message.consultationModes} onPick={onPickMode} onSend={onSend} />
+          <ModeChips modes={message.consultationModes} onPick={onPickMode} onSend={onSend} onSelect={send} />
         )}
         {message.daySchedule && (
           <DaySlots
             schedule={message.daySchedule}
             durationMinutes={daySlotMinutes ?? 30}
             onSend={onSend}
+            onSelect={send}
           />
         )}
         {message.bookingStage === "pick_date" && (
-          <DateStrip onSend={onSend} />
+          <DateStrip onSend={onSend} onSelect={send} />
         )}
         {message.pendingBooking && (
           <ConfirmPanel pending={message.pendingBooking} onSend={onSend} />
@@ -134,8 +142,10 @@ export function TypingIndicator({ name = "Assistant is typing" }: { name?: strin
 
 function LiveDoctorCard({
   doctor,
+  onSelect,
 }: {
   doctor: NonNullable<ChatMessage["doctors"]>[number];
+  onSelect?: (text: string, selection: BookingSelection) => void;
 }) {
   const navigate = useNavigate();
   const where = [doctor.hospital_name, doctor.hospital_city]
@@ -160,13 +170,25 @@ function LiveDoctorCard({
           {where ? ` · ${where}` : ""}
           {distance && <span className="font-bold text-teal-dark">{distance}</span>}
         </p>
-        <Button
-          size="sm"
-          className="mt-2"
-          onClick={() => navigate("/book", { state: { doctorId: doctor.id } })}
-        >
-          View availability
-        </Button>
+        <div className="flex gap-2 mt-2">
+          <Button
+            size="sm"
+            onClick={() =>
+              onSelect
+                ? onSelect(`${doctor.name}`, { type: "booking_selection", field: "doctor", value: doctor.id })
+                : navigate("/book", { state: { doctorId: doctor.id } })
+            }
+          >
+            Choose
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => navigate("/book", { state: { doctorId: doctor.id } })}
+          >
+            View availability
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -181,11 +203,17 @@ function slotLabel(start: string, end: string): string {
 export function SlotChips({
   slots,
   onSend,
+  onSelect,
 }: {
   slots: NonNullable<ChatMessage["slots"]>;
   onSend?: (text: string) => void;
+  onSelect?: (text: string, selection: BookingSelection) => void;
 }) {
-  if (!onSend || slots.length === 0) return null;
+  if ((!onSend && !onSelect) || slots.length === 0) return null;
+  const send = (text: string, selection: BookingSelection) => {
+    if (onSelect) onSelect(text, selection);
+    else onSend?.(text);
+  };
   return (
     <div className="mt-2.5 text-left" aria-label="Suggested times">
       <p className="text-[0.75rem] font-bold text-ink-secondary mb-1.5">
@@ -198,7 +226,7 @@ export function SlotChips({
             <button
               key={s.start}
               type="button"
-              onClick={() => onSend(`Yes, book ${label}`)}
+              onClick={() => send(`Yes, book ${label}`, { type: "booking_selection", field: "start_time", value: s.start })}
               className="inline-flex items-center gap-1.5 text-[0.8rem] font-bold bg-white border border-healthcare/40 rounded-full px-3 py-1.5 text-navy hover:bg-healthcare-soft hover:border-healthcare transition"
             >
               <CalendarCheck size={14} className="text-healthcare" />
@@ -286,12 +314,14 @@ export function TypeSelect({
   types,
   onPick,
   onSend,
+  onSelect,
 }: {
   types: NonNullable<ChatMessage["appointmentTypes"]>;
-  onPick?: (name: string, minutes: number) => void;
+  onPick?: (id: string, name: string, minutes: number) => void;
   onSend?: (text: string) => void;
+  onSelect?: (text: string, selection: BookingSelection) => void;
 }) {
-  if ((!onPick && !onSend) || types.length === 0) return null;
+  if ((!onPick && !onSend && !onSelect) || types.length === 0) return null;
   return (
     <div className="mt-2.5 text-left" aria-label="Visit types">
       <label
@@ -306,7 +336,8 @@ export function TypeSelect({
         onChange={(e) => {
           const t = types.find((x) => x.id === e.target.value);
           if (!t) return;
-          if (onPick) onPick(t.name, t.duration_minutes);
+          if (onSelect) onSelect(t.name, { type: "booking_selection", field: "appointment_type", value: t.id });
+          else if (onPick) onPick(t.id, t.name, t.duration_minutes);
           else onSend?.(t.name);
         }}
         className="input-base"
@@ -327,12 +358,14 @@ export function ModeChips({
   modes,
   onPick,
   onSend,
+  onSelect,
 }: {
   modes: string[];
   onPick?: (mode: string, label: string) => void;
   onSend?: (text: string) => void;
+  onSelect?: (text: string, selection: BookingSelection) => void;
 }) {
-  if ((!onPick && !onSend) || modes.length === 0) return null;
+  if ((!onPick && !onSend && !onSelect) || modes.length === 0) return null;
   const OPTIONS = [
     { mode: "video", label: "Video visit", Icon: Video },
     { mode: "phone", label: "Phone visit", Icon: Phone },
@@ -349,7 +382,11 @@ export function ModeChips({
           <button
             key={mode}
             type="button"
-            onClick={() => (onPick ? onPick(mode, label) : onSend?.(label))}
+            onClick={() => {
+              if (onSelect) onSelect(label, { type: "booking_selection", field: "consultation_mode", value: mode });
+              else if (onPick) onPick(mode, label);
+              else onSend?.(label);
+            }}
             className="inline-flex items-center gap-1.5 text-[0.8rem] font-bold bg-white border border-healthcare/40 rounded-full px-3 py-1.5 text-navy hover:bg-healthcare-soft hover:border-healthcare transition"
           >
             <Icon size={14} className="text-healthcare" />
@@ -362,9 +399,14 @@ export function ModeChips({
 }
 
 /** 7-day strip for picking the visit day, like normal booking. */
-export function DateStrip({ onSend }: { onSend?: (text: string) => void }) {
+export function DateStrip({ onSend, onSelect }: { onSend?: (text: string) => void; onSelect?: (text: string, selection: BookingSelection) => void }) {
   const [picked, setPicked] = useState<string | null>(null);
-  if (!onSend) return null;
+  if (!onSend && !onSelect) return null;
+  const send = (text: string, key: string) => {
+    setPicked(key);
+    if (onSelect) onSelect(text, { type: "booking_selection", field: "date", value: key });
+    else onSend?.(text);
+  };
   const days: { key: string; label: string; sub: string }[] = [];
   const now = new Date();
   for (let i = 0; i < 7; i++) {
@@ -388,10 +430,7 @@ export function DateStrip({ onSend }: { onSend?: (text: string) => void }) {
           <button
             key={d.key}
             type="button"
-            onClick={() => {
-              setPicked(d.key);
-              onSend(`${d.label}, ${d.sub}`);
-            }}
+            onClick={() => send(`${d.label}, ${d.sub}`, d.key)}
             aria-pressed={picked === d.key}
             className={`min-w-[68px] px-2.5 py-2 rounded-control border text-center transition shrink-0 ${
               picked === d.key
@@ -412,70 +451,118 @@ function rangeMs(iso: string): number {
   return new Date(iso).getTime();
 }
 
-/** Horizontal day timeline: teal = free start, grey struck = taken.
+/** Horizontal day timeline with exact interval rendering (§11).
  *
- * Starts come from the doctor's own working hours in 30-minute steps
- * (same grid as normal booking). A start is tappable only when the
- * visit (start + duration) fits inside working hours without touching a
- * taken block — e.g. a 9:30 start is grey when 9:30–10:00 overlaps one.
+ * Visual track: working hours as the open lane, busy blocks drawn at
+ * their EXACT offsets (a 09:15–09:45 booking sits mid-cell, it never
+ * blacks out the whole 09:00/09:30 boundary slots visually). Start
+ * pills step every 30 minutes for navigation; a start is tappable only
+ * when the visit (start + duration) fits inside working hours without
+ * overlapping a busy block. Tapping sends a typed start_time selection
+ * (UTC ISO) — the same canonical state saying "9:30" would set.
  */
 export function DaySlots({
   schedule,
   durationMinutes,
   onSend,
+  onSelect,
 }: {
   schedule: NonNullable<ChatMessage["daySchedule"]>;
   durationMinutes: number;
   onSend?: (text: string) => void;
+  onSelect?: (text: string, selection: BookingSelection) => void;
 }) {
-  if (!onSend) return null;
+  const [picked, setPicked] = useState<string | null>(null);
+  if (!onSend && !onSelect) return null;
+  const send = (text: string, iso: string) => {
+    setPicked(iso);
+    if (onSelect) onSelect(text, { type: "booking_selection", field: "start_time", value: iso });
+    else onSend?.(text);
+  };
   const durMs = Math.max(15, durationMinutes || 30) * 60_000;
   const stepMs = 30 * 60_000;
   const dayLabel = schedule.working_hours[0]
     ? formatSlotDate(schedule.working_hours[0].start)
     : schedule.date;
-  const starts: { iso: string; label: string; free: boolean }[] = [];
-  const seen = new Set<string>();
-  for (const w of schedule.working_hours) {
-    const s = rangeMs(w.start);
-    const e = rangeMs(w.end);
-    if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) continue;
-    for (let t = s; t + stepMs <= e + 1_000; t += stepMs) {
-      const iso = new Date(t).toISOString();
-      if (seen.has(iso)) continue;
-      seen.add(iso);
-      const end = t + durMs;
-      const inside = s <= t && end <= e + 1_000;
-      const clash = schedule.busy.some(
-        (b) => t < rangeMs(b.end) && rangeMs(b.start) < end,
-      );
-      starts.push({ iso, label: formatSlotTime(iso), free: inside && !clash });
-    }
-  }
-  starts.sort((a, b) => (a.iso < b.iso ? -1 : 1));
-  if (schedule.working_hours.length === 0) {
+  const windows = schedule.working_hours
+    .map((w) => ({ s: rangeMs(w.start), e: rangeMs(w.end) }))
+    .filter((w) => Number.isFinite(w.s) && Number.isFinite(w.e) && w.e > w.s)
+    .sort((a, b) => a.s - b.s);
+  if (windows.length === 0) {
     return (
       <p className="mt-2.5 text-[0.82rem] text-ink-secondary border border-dashed border-border rounded-control px-3.5 py-2.5">
         The doctor is not available this day — try another day.
       </p>
     );
   }
+  const t0 = windows[0].s;
+  const t1 = windows[windows.length - 1].e;
+  const span = Math.max(1, t1 - t0);
+  const pct = (t: number) => `${Math.min(100, Math.max(0, ((t - t0) / span) * 100))}%`;
+  const busyBlocks = schedule.busy
+    .map((b) => ({ s: rangeMs(b.start), e: rangeMs(b.end) }))
+    .filter((b) => Number.isFinite(b.s) && Number.isFinite(b.e) && b.e > b.s);
+  const hourMarks: number[] = [];
+  const firstHour = Math.ceil(t0 / 3_600_000) * 3_600_000;
+  for (let h = firstHour; h <= t1; h += 3_600_000) hourMarks.push(h);
+  const starts: { iso: string; label: string; free: boolean }[] = [];
+  const seen = new Set<string>();
+  for (const w of windows) {
+    for (let t = w.s; t + stepMs <= w.e + 1_000; t += stepMs) {
+      const iso = new Date(t).toISOString();
+      if (seen.has(iso)) continue;
+      seen.add(iso);
+      const end = t + durMs;
+      const inside = w.s <= t && end <= w.e + 1_000;
+      const clash = busyBlocks.some((b) => t < b.e && b.s < end);
+      starts.push({ iso, label: formatSlotTime(iso), free: inside && !clash });
+    }
+  }
+  starts.sort((a, b) => (a.iso < b.iso ? -1 : 1));
   return (
     <div className="mt-2.5 text-left" aria-label={`Available times for ${dayLabel}`}>
       <p className="text-[0.75rem] font-bold text-ink-secondary mb-1.5">
         {dayLabel} · {durationMinutes}-min visit — pick a start time:
       </p>
-      <div className="flex gap-1.5 overflow-x-auto pb-1.5">
+      {/* Exact-interval track: working lane + true-offset busy blocks */}
+      <div className="relative h-12 rounded-control bg-healthcare-faint border border-healthcare/20 overflow-hidden" aria-hidden>
+        {busyBlocks.map((b, i) => (
+          <div
+            key={i}
+            title={`${formatSlotTime(new Date(b.s).toISOString())}–${formatSlotTime(new Date(b.e).toISOString())} booked`}
+            className="absolute top-1 bottom-1 rounded bg-danger/70 border border-danger-dark"
+            style={{ left: pct(b.s), width: `calc(${pct(b.e)} - ${pct(b.s)})` }}
+          />
+        ))}
+        {starts.filter((s) => s.free).map((s) => (
+          <div
+            key={s.iso}
+            className="absolute top-1 bottom-1 w-1 rounded-full bg-healthcare"
+            style={{ left: pct(rangeMs(s.iso)) }}
+          />
+        ))}
+      </div>
+      <div className="relative h-4 text-[0.65rem] font-semibold text-ink-faint" aria-hidden>
+        {hourMarks.map((h) => (
+          <span key={h} className="absolute -translate-x-1/2" style={{ left: pct(h) }}>
+            {formatSlotTime(new Date(h).toISOString())}
+          </span>
+        ))}
+      </div>
+      <div className="flex gap-1.5 overflow-x-auto pb-1.5 mt-1">
         {starts.map((s) => (
           <button
             key={s.iso}
             type="button"
             disabled={!s.free}
-            onClick={() => onSend(`${dayLabel} at ${s.label}`)}
+            aria-pressed={picked === s.iso}
+            onClick={() => send(`${dayLabel} at ${s.label}`, s.iso)}
             className={`shrink-0 min-w-[72px] px-2.5 py-2 rounded-control border text-[0.82rem] font-bold transition ${
-              s.free
-                ? "bg-white text-navy border-healthcare/40 hover:border-healthcare hover:bg-healthcare-soft"
-                : "bg-background text-ink-faint border-border line-through cursor-not-allowed"
+              picked === s.iso
+                ? "bg-healthcare text-white border-healthcare-dark"
+                : s.free
+                  ? "bg-white text-navy border-healthcare/40 hover:border-healthcare hover:bg-healthcare-soft"
+                  : "bg-background text-ink-faint border-border line-through cursor-not-allowed"
             }`}
           >
             {s.label}
@@ -483,8 +570,8 @@ export function DaySlots({
         ))}
       </div>
       <p className="text-[0.7rem] text-ink-faint">
-        <span className="inline-block w-2 h-2 rounded-full bg-healthcare mr-1" aria-hidden /> free
-        <span className="inline-block w-2 h-2 rounded-full bg-border ml-2.5 mr-1" aria-hidden /> taken
+        <span className="inline-block w-2 h-4 rounded bg-danger/70 border border-danger-dark mr-1 align-middle" aria-hidden /> booked
+        <span className="inline-block w-1 h-4 rounded-full bg-healthcare ml-2.5 mr-1 align-middle" aria-hidden /> free start
       </p>
     </div>
   );

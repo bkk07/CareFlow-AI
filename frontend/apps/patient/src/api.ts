@@ -508,7 +508,21 @@ export interface ChatDaySchedule {
   busy: ChatSlot[];
 }
 
-export type BookingStage = "browse" | "pick_date" | "pick_type" | "pick_time" | "confirm";
+export type BookingStage = "browse" | "pick_date" | "pick_type" | "pick_mode" | "pick_time" | "confirm";
+
+/** Typed tap (§12): updates the same canonical state a spoken phrase
+ * would. Field: hospital | doctor | appointment_type | date |
+ * start_time | consultation_mode. */
+export interface BookingSelection {
+  type: "booking_selection";
+  field: string;
+  value: string;
+}
+
+export interface ChatHospital {
+  id: string | null;
+  name: string | null;
+}
 
 export interface ChatReply {
   conversation_id: string;
@@ -516,6 +530,12 @@ export interface ChatReply {
   iterations: number;
   escalated: boolean;
   stopped: boolean;
+  hospital?: ChatHospital | null;
+  selected_date?: string | null;
+  selected_start?: string | null;
+  selected_end?: string | null;
+  duration_minutes?: number | null;
+  missing_fields?: string[];
   doctors: ChatDoctorCard[];
   doctors_total: number;
   has_more_doctors: boolean;
@@ -531,6 +551,7 @@ export async function postChat(
   message: string,
   conversationId?: string | null,
   location?: { latitude: number; longitude: number } | null,
+  selection?: BookingSelection | null,
 ): Promise<ChatReply> {
   return (
     await api.post("/chat", {
@@ -538,6 +559,7 @@ export async function postChat(
       conversation_id: conversationId ?? null,
       latitude: location?.latitude ?? null,
       longitude: location?.longitude ?? null,
+      selection: selection ?? null,
     })
   ).data;
 }

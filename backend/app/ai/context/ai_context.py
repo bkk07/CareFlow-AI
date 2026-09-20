@@ -28,9 +28,30 @@ class AIContext(BaseModel):
     conversation_id: str
     user_id: str | None = None
     selected_hospital_id: str | None = None
+    # Phase 2 canonical booking state: display names ride with canonical
+    # IDs (IDs are identity, names are display-only). Query fields hold
+    # UNVALIDATED natural-language candidates until a tool result
+    # confirms them (hospital_query -> search_hospitals, doctor_query ->
+    # search_doctors, type_query -> list_appointment_types).
+    selected_hospital_name: str | None = None
+    hospital_query: str | None = None
+    offered_hospitals: list[dict[str, Any]] = Field(default_factory=list)
     selected_doctor_id: str | None = None
+    selected_doctor_name: str | None = None
+    doctor_query: str | None = None
     selected_appointment_type_id: str | None = None
+    type_query: str | None = None
+    # Canonical duration (minutes) resolved from the validated visit type.
+    # Never guessed, never asked: appointment_type.duration_minutes only.
+    duration_minutes: int | None = None
+    # Canonical interval. selected_slot ({start, end} ISO) is the legacy
+    # mirror kept for existing readers; selected_start/selected_end are
+    # the explicit canonical fields. requested_start is the raw "HH:MM"
+    # the patient said, before duration math turns it into an interval.
     selected_slot: dict[str, str] | None = None
+    selected_start: str | None = None
+    selected_end: str | None = None
+    requested_start: str | None = None
     offered_slots: list[dict[str, str]] = Field(default_factory=list)
     offered_doctors: list[dict[str, str]] = Field(default_factory=list)
     # Guided booking flow: the CURRENT page of doctor ids shown as cards

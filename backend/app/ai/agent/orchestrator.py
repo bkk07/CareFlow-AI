@@ -9,11 +9,27 @@ never spin forever.
 
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import date as _date
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
+from app.ai.agent.booking_state import (
+    compute_interval_utc,
+    detect_date_iso as detect_date_iso_ist,
+    detect_doctor_candidate,
+    detect_hospital_candidate,
+    detect_mode_candidate,
+    detect_time_hhmm,
+    detect_type_candidate,
+    evaluate_readiness,
+    invalidate_on_change,
+    match_hospital_offer,
+    match_type_offer,
+    set_canonical_slot,
+    sync_duration_from_types,
+)
 from app.ai.context.ai_context import get_ai_context, save_ai_context
 from app.ai.mcp_client.client import AgentToolClient
 from app.core.deps import RequestContext
@@ -160,6 +176,23 @@ Guided booking flow (follow this order every time):
    immediately offer the nearest free starts from the same day schedule,
    then propose one and wait for yes again. Never report "confirmed"
    unless the tool outcome is confirmed.
+
+Canonical booking state (Phase 2 — code owns memory, you own language):
+- The context JSON is canonical: selected_hospital_id/name, selected_doctor_id/name,
+  selected_date (YYYY-MM-DD, IST), selected_appointment_type_id + visit_type_name +
+  duration_minutes, selected_consultation_mode, requested_start (HH:MM),
+  selected_start/selected_end (UTC ISO interval), offered lists, pending_booking.
+  Whatever is already VALID there is truth — never re-ask it, never re-derive it.
+- HOSPITAL-FIRST: if selected_hospital_id is set, EVERY doctor search MUST pass
+  hospital_id=selected_hospital_id. Never search globally once the hospital is known.
+  If the patient names a hospital ("at Apollo"), call search_hospitals first, then
+  search_doctors(hospital_id=...) — never the reverse.
+- The patient's taps arrive as typed selections AND as words; both update the same
+  state. A tapped time is already validated — use its UTC start, don't reinterpret it.
+- Booking readiness is computed in code and shown as missing[] in your context notes:
+  only propose when missing is empty; otherwise ask ONLY the first missing item.
+  Never decide readiness yourself, never compute end times yourself
+  (end = start + duration_minutes is done in code).
 
 How you present results (the chat UI renders cards itself):
 - When you recommend doctors, name up to five briefly with hospital + city
@@ -689,6 +722,19 @@ def _apply_result_to_context(context, name: str, args: dict, result: dict) -> No
     payload = result.get("result") if isinstance(result, dict) else None
     if not isinstance(payload, dict):
         return
+    if name == "search_hospitals" and isinstance(payload.get("hospitals"), list):
+        # Hospital-first constraint: ground the patient's "Apollo" against
+        # real results into canonical selected_hospital_id (+ display name).
+        # Never a global doctor search after this resolves (prompt §H1).
+        hid = match_hospital_offer(context, payload["hospitals"])
+        if hid:
+            for h in context.offered_hospitals:
+                if str(h.get("id")) == hid:
+                    context.selected_hospital_id = hid
+                    context.selected_hospital_name = str(h.get("name", "")) or None
+                    break
+            context.flow_open = True
+        return
     if name == "search_doctors" and isinstance(payload.get("doctors"), list):
         page = [
             {"id": d.get("id", ""), "name": d.get("name", "")}
@@ -714,7 +760,21 @@ def _apply_result_to_context(context, name: str, args: dict, result: dict) -> No
         # booking completes. Offers still accumulate for "that one"
         # resolution.
         context.selected_doctor_id = None
+        context.selected_doctor_name = None
         context.flow_open = True
+        # Cold-start grounding ("Book Dr Rao tomorrow"): the name kept as
+        # doctor_query now meets real offers — resolve without re-asking.
+        dq = (getattr(context, "doctor_query", None) or "").strip().lower()
+        if dq:
+            for d in payload["doctors"]:
+                if not isinstance(d, dict) or not d.get("id"):
+                    continue
+                nm = str(d.get("name", "")).lower().lstrip("dr. ").strip()
+                if dq in nm or nm in dq or dq.split()[-1] in nm:
+                    context.selected_doctor_id = str(d["id"])
+                    context.selected_doctor_name = str(d.get("name", "")) or None
+                    context.doctor_query = None
+                    break
         filters = {}
         if isinstance(args, dict):
             for key in (
@@ -782,6 +842,89 @@ def _clear_booking_proposal(context) -> None:
     context.awaiting_confirmation = False
     if context.pending_clarification == "booking_confirmation":
         context.pending_clarification = None
+
+
+def _apply_typed_selection(context, db: Session, selection: dict[str, Any]) -> None:
+    """Apply a typed frontend selection to canonical state (§12, §19).
+
+    Event: {"type": "booking_selection", "field": ..., "value": ...}.
+    Fields: hospital (id), doctor (id), appointment_type (id), date
+    (YYYY-MM-DD), start_time (UTC ISO start), consultation_mode
+    (video|phone|in_person). Unknown ids are ignored (never trusted
+    blindly); valid ones behave exactly like a spoken pick, including
+    invalidation of dependents.
+    """
+    field = str(selection.get("field", "") or "")
+    value = selection.get("value", "")
+    if field == "hospital" and value:
+        try:
+            row = db.get(Hospital, uuid.UUID(str(value)))
+        except (ValueError, AttributeError, TypeError):
+            row = None
+        if row is not None and getattr(getattr(row, "status", None), "value", getattr(row, "status", None)) == "approved":
+            prev = str(getattr(context, "selected_hospital_id", None) or "")
+            context.selected_hospital_id = str(row.id)
+            context.selected_hospital_name = getattr(row, "name", None)
+            context.hospital_query = None
+            context.flow_open = True
+            if prev and prev != str(row.id):
+                invalidate_on_change(context, "hospital")
+    elif field == "doctor" and value:
+        pool = [str(d.get("id")) for d in (context.offered_doctors or []) if isinstance(d, dict)]
+        if str(value) in pool or not pool:
+            try:
+                row = db.get(Doctor, uuid.UUID(str(value)))
+            except (ValueError, AttributeError, TypeError):
+                row = None
+            if row is not None:
+                prev = str(getattr(context, "selected_doctor_id", None) or "")
+                context.selected_doctor_id = str(row.id)
+                context.selected_doctor_name = getattr(row, "name", None)
+                context.doctor_query = None
+                context.flow_open = True
+                if prev and prev != str(row.id):
+                    invalidate_on_change(context, "doctor")
+    elif field == "appointment_type" and value:
+        for t in (getattr(context, "visit_types", None) or []):
+            if isinstance(t, dict) and str(t.get("id")) == str(value):
+                prev = str(getattr(context, "selected_appointment_type_id", None) or "")
+                context.selected_appointment_type_id = str(t["id"])
+                context.visit_type_name = str(t.get("name", ""))
+                context.type_query = None
+                context.flow_open = True
+                sync_duration_from_types(context)
+                if prev and prev != str(t["id"]):
+                    invalidate_on_change(context, "visit_type")
+                break
+    elif field == "consultation_mode" and str(value).lower() in ("video", "phone", "in_person"):
+        prev = str(getattr(context, "selected_consultation_mode", None) or "")
+        context.selected_consultation_mode = str(value).lower()
+        context.flow_open = True
+        if prev and prev != str(value).lower():
+            invalidate_on_change(context, "consultation_mode")
+    elif field == "date" and value:
+        try:
+            _date.fromisoformat(str(value))
+            prev = str(getattr(context, "selected_date", None) or "")
+            context.selected_date = str(value)
+            context.flow_open = True
+            if prev and prev != str(value):
+                invalidate_on_change(context, "date")
+        except ValueError:
+            pass
+    elif field == "start_time" and value:
+        # Value is a UTC ISO start; end derives from the picked duration.
+        dur = getattr(context, "duration_minutes", None)
+        try:
+            start_dt = datetime.fromisoformat(str(value))
+            if start_dt.tzinfo is None:
+                return
+            if dur:
+                end_dt = start_dt + timedelta(minutes=int(dur))
+                set_canonical_slot(context, start_dt.isoformat(), end_dt.isoformat())
+                context.flow_open = True
+        except (ValueError, TypeError):
+            pass
 
 
 _ORDINALS = {
@@ -1360,6 +1503,7 @@ def run_conversation(
     should_stop: Callable[[], bool] | None = None,
     latitude: float | None = None,
     longitude: float | None = None,
+    selection: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """One chat turn: guard, tool loop, reply. Never raises for tool faults.
 
@@ -1375,6 +1519,11 @@ def run_conversation(
     context = get_ai_context(cid)
     context.user_id = str(ctx.user_id)
     context.remember_turn("user", text)
+    # Phase 2 typed selection (§12): a tap and a spoken phrase update the
+    # SAME canonical state. Selections are authoritative (no fuzzy parse):
+    # hospital/doctor/appointment_type/consultation_mode/date/start_time.
+    if isinstance(selection, dict) and selection.get("type") == "booking_selection":
+        _apply_typed_selection(context, db, selection)
     # Snapshot for change detection: widgets must reflect what THIS turn
     # did (picked/changed), never re-blast earlier turns' UI.
     selected_doctor_before = str(getattr(context, "selected_doctor_id", None) or "")
@@ -1395,6 +1544,13 @@ def run_conversation(
     # Same for the visit day ("tomorrow", "Monday, Oct 6"): when the
     # patient already gave it, it is recorded so the assistant uses it
     # directly instead of asking for the date again.
+    # Phase 2 invalidation snapshots: dependent availability must die
+    # when its source changes (never leave a stale slot active).
+    doctor_before = str(getattr(context, "selected_doctor_id", None) or "")
+    date_before = str(getattr(context, "selected_date", None) or "")
+    type_before = str(getattr(context, "selected_appointment_type_id", None) or "")
+    hospital_before = str(getattr(context, "selected_hospital_id", None) or "")
+    mode_before = str(getattr(context, "selected_consultation_mode", None) or "")
     if not context.awaiting_confirmation:
         picked = detect_doctor_selection(context, text)
         if picked:
@@ -1406,6 +1562,20 @@ def run_conversation(
                 # availability no longer applies, so drop it. The model
                 # re-checks from the date step for the new doctor.
                 context.offered_slots = []
+            for d in context.offered_doctors or []:
+                if isinstance(d, dict) and str(d.get("id")) == picked:
+                    context.selected_doctor_name = str(d.get("name", "")) or None
+                    break
+        else:
+            # Cold start ("Book Dr Rao tomorrow"): no offers yet, so keep
+            # the raw name as a candidate for the post-search resolution.
+            cand_doc = detect_doctor_candidate(text)
+            if cand_doc and not getattr(context, "selected_doctor_id", None):
+                context.doctor_query = cand_doc
+        hosp_cand = detect_hospital_candidate(text)
+        if hosp_cand:
+            context.hospital_query = hosp_cand
+            context.flow_open = True
         picked_type = detect_type_selection(context, text)
         if picked_type:
             context.selected_appointment_type_id = picked_type
@@ -1414,13 +1584,62 @@ def run_conversation(
                 if isinstance(t, dict) and str(t.get("id")) == picked_type:
                     context.visit_type_name = str(t.get("name", ""))
                     break
-        picked_mode = detect_consultation_mode(text)
+            sync_duration_from_types(context)
+        else:
+            # Cold start ("... for a follow-up"): keep the semantic
+            # candidate until list_appointment_types grounds it.
+            cand_type = detect_type_candidate(text)
+            if cand_type and not getattr(context, "selected_appointment_type_id", None):
+                context.type_query = cand_type
+        picked_mode = detect_consultation_mode(text) or detect_mode_candidate(text)
         if picked_mode:
             context.selected_consultation_mode = picked_mode
             context.flow_open = True
-    day = detect_date_iso(text)
-    if day:
-        context.selected_date = day
+        # Deterministic start-time ("at 9:30"): recorded, never re-asked.
+        hhmm = detect_time_hhmm(text)
+        if hhmm:
+            context.requested_start = hhmm
+            context.flow_open = True
+    # IST date parse (product timezone): "tomorrow" -> selected_date now.
+    # A confirmation ("Yes, book it for Monday") affirms the recorded day;
+    # it must never shift it (shifting would invalidate the very offers the
+    # confirmation needs). Only fill an empty date from confirmations.
+    if not (_is_confirmation(text) and getattr(context, "selected_date", None)):
+        day = detect_date_iso_ist(text)
+        if day:
+            context.selected_date = day
+    # Ground cold-start type candidates against just-arrived listings.
+    if not getattr(context, "selected_appointment_type_id", None) and getattr(
+        context, "type_query", None
+    ):
+        match_type_offer(context)
+    # Build the canonical interval once date + time + duration are known.
+    # Deterministic code owns interval math; the LLM never computes it.
+    if (
+        getattr(context, "selected_date", None)
+        and getattr(context, "requested_start", None)
+        and getattr(context, "duration_minutes", None)
+    ):
+        try:
+            start_iso, end_iso = compute_interval_utc(
+                str(context.selected_date),
+                str(context.requested_start),
+                int(context.duration_minutes),
+            )
+            set_canonical_slot(context, start_iso, end_iso)
+        except (ValueError, TypeError):
+            pass
+    # Explicit invalidation on what THIS turn changed.
+    if str(getattr(context, "selected_hospital_id", None) or "") != hospital_before and hospital_before:
+        invalidate_on_change(context, "hospital")
+    if str(getattr(context, "selected_doctor_id", None) or "") != doctor_before and doctor_before:
+        invalidate_on_change(context, "doctor")
+    if str(getattr(context, "selected_date", None) or "") != date_before and date_before:
+        invalidate_on_change(context, "date")
+    if str(getattr(context, "selected_appointment_type_id", None) or "") != type_before and type_before:
+        invalidate_on_change(context, "visit_type")
+    if str(getattr(context, "selected_consultation_mode", None) or "") != mode_before and mode_before:
+        invalidate_on_change(context, "consultation_mode")
 
     if is_clinical_request(text):
         context.remember_turn("assistant", CLINICAL_DECLINE)
@@ -1456,10 +1675,84 @@ def run_conversation(
             "pending_booking": pending_greet,
         }
 
+    # Phase 2 hospital-doctor verification: a named doctor must belong to
+    # the named hospital. Never silently substitute — return a structured
+    # correction with real choices inside the hospital.
+    hid_now = str(getattr(context, "selected_hospital_id", None) or "")
+    did_now = str(getattr(context, "selected_doctor_id", None) or "")
+    if hid_now and did_now:
+        try:
+            doc_row = db.get(Doctor, uuid.UUID(did_now))
+        except (ValueError, AttributeError, TypeError):
+            doc_row = None
+        if doc_row is None or str(getattr(doc_row, "hospital_id", "")) != hid_now:
+            hname = str(getattr(context, "selected_hospital_name", None) or "that hospital")
+            context.selected_doctor_id = None
+            context.selected_doctor_name = None
+            invalidate_on_change(context, "doctor")
+            from app.domain.doctor.models import DoctorStatus as _DoctorStatus
+
+            alternates = (
+                db.query(Doctor)
+                .filter(
+                    Doctor.hospital_id == uuid.UUID(hid_now),
+                    Doctor.status == _DoctorStatus.active,
+                )
+                .limit(5)
+                .all()
+            )
+            alt_ids = [str(d.id) for d in alternates]
+            cards = _doctor_cards_by_ids(db, alt_ids) if alt_ids else []
+            reply = (
+                f"The doctor you named isn't at {hname} — I haven't booked "
+                f"anything. Here are doctors who are there; pick one and "
+                f"we'll continue with {context.selected_date or 'your day'}."
+            )
+            context.remember_turn("assistant", reply)
+            save_ai_context(context)
+            return {
+                "conversation_id": cid,
+                "reply": reply,
+                "iterations": 0,
+                "escalated": False,
+                "stopped": False,
+                "doctors": cards,
+                "doctors_total": len(cards),
+                "has_more_doctors": False,
+                "slots": [],
+                "appointment_types": [],
+                "day_schedule": None,
+                "consultation_modes": [],
+                "booking_stage": booking_stage(context, set()),
+                "pending_booking": None,
+                "hospital": {"id": hid_now, "name": getattr(context, "selected_hospital_name", None)},
+                "selected_date": getattr(context, "selected_date", None),
+                "selected_start": getattr(context, "selected_start", None),
+                "selected_end": getattr(context, "selected_end", None),
+                "duration_minutes": getattr(context, "duration_minutes", None),
+                "missing_fields": ["doctor"],
+            }
+
     client = AgentToolClient(db, ctx)
     complete_fn = complete or groq_complete
-    today = datetime.now(timezone.utc).date().isoformat()
-    system = SYSTEM_PROMPT + f"\nToday is {today} (UTC)."
+    from app.ai.agent.booking_state import ist_today as _ist_today
+
+    today = _ist_today().isoformat()
+    system = SYSTEM_PROMPT + f"\nToday is {today} (IST, UTC+5:30)."
+    # Deterministic readiness: the model follows `missing`, never decides.
+    readiness = evaluate_readiness(context)
+    system += (
+        "\nBooking readiness (computed, authoritative): ready="
+        + ("true" if readiness["ready"] else "false")
+        + " missing=["
+        + ", ".join(readiness["missing"])
+        + "]. Ask ONLY the first missing item, nothing else."
+    )
+    if hid_now:
+        system += (
+            "\nHospital scope is SET (id=" + hid_now + "): every search_doctors "
+            "call MUST pass hospital_id=" + hid_now + "."
+        )
     if context.channel == "telephony":
         system += TELEPHONY_GUARD_PROMPT
     # Full patient profile (name + city + coordinates) rides every turn so
@@ -1660,12 +1953,22 @@ def run_conversation(
         m for m in (getattr(context, "consultation_modes", None) or [])
         if m in ("video", "phone", "in_person")
     ]
+    readiness_out = evaluate_readiness(context)
     return {
         "conversation_id": cid,
         "reply": reply,
         "iterations": iterations,
         "escalated": escalated,
         "stopped": stopped,
+        "hospital": {
+            "id": getattr(context, "selected_hospital_id", None),
+            "name": getattr(context, "selected_hospital_name", None),
+        },
+        "selected_date": getattr(context, "selected_date", None),
+        "selected_start": getattr(context, "selected_start", None),
+        "selected_end": getattr(context, "selected_end", None),
+        "duration_minutes": getattr(context, "duration_minutes", None),
+        "missing_fields": readiness_out["missing"],
         "doctors": doctors_cards,
         "doctors_total": search_total,
         "has_more_doctors": has_more,
@@ -1704,6 +2007,7 @@ __all__ = [
     "detect_consultation_mode",
     "detect_date_iso",
     "detect_doctor_selection",
+    "evaluate_readiness",
     "greeting_kind",
     "groq_complete",
     "is_clinical_request",

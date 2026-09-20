@@ -16,6 +16,17 @@ router = APIRouter(tags=["chat"])
 _chatter = require_role(Role.patient, Role.hospital_admin)
 
 
+class BookingSelectionIn(BaseModel):
+    """Typed frontend tap (§12): {"type": "booking_selection",
+    "field": hospital|doctor|appointment_type|date|start_time|
+    consultation_mode, "value": ...}. Updates the same canonical state a
+    spoken phrase would — never re-parsed as free text."""
+
+    type: str = "booking_selection"
+    field: str
+    value: str
+
+
 class ChatIn(BaseModel):
     message: str
     conversation_id: str | None = None
@@ -23,6 +34,7 @@ class ChatIn(BaseModel):
     # saved home point for nearby ranking; never persisted here.
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
+    selection: BookingSelectionIn | None = None
 
 
 class DoctorCardOut(BaseModel):
@@ -63,12 +75,25 @@ class DayScheduleOut(BaseModel):
     busy: list[SlotOut] = []
 
 
+class HospitalOut(BaseModel):
+    id: str | None = None
+    name: str | None = None
+
+
 class ChatOut(BaseModel):
     conversation_id: str
     reply: str
     iterations: int
     escalated: bool
     stopped: bool = False
+    # Phase 2 canonical snapshot (§19): structured values, never inferred
+    # from prose. All optional so older frontends keep working.
+    hospital: HospitalOut | None = None
+    selected_date: str | None = None
+    selected_start: str | None = None
+    selected_end: str | None = None
+    duration_minutes: int | None = None
+    missing_fields: list[str] = []
     doctors: list[DoctorCardOut] = []
     doctors_total: int = 0
     has_more_doctors: bool = False
@@ -99,6 +124,7 @@ def chat(
                 user_message=body.message,
                 latitude=body.latitude,
                 longitude=body.longitude,
+                selection=body.selection.model_dump() if body.selection else None,
             )
         except ValueError as exc:
             raise HTTPException(
