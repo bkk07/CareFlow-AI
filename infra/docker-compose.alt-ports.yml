@@ -7,11 +7,6 @@ services:
   backend:
     ports:
       - "8001:8000"
-  frontend:
-    ports:
-      - "5178:5173"
-    environment:
-      VITE_API_URL: http://localhost:8001
   hospital-admin:
     ports:
       - "5179:5174"

@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Mic, MicOff, Navigation, RotateCcw, Square, X } from "lucide-react";
 import { VoiceVisualizer } from "../components/ai/ai";
 import { useWebRTCAudio } from "../voice/useWebRTCAudio";
+import { useSpeechSynthesis } from "../voice/useSpeechSynthesis";
 import { wsBase } from "../api";
 import { useAppState } from "../context/AppStateContext";
 import { useAuth } from "../context/AuthContext";
@@ -39,8 +40,13 @@ export default function VoicePage() {
   const [locating, setLocating] = useState(false);
   const [geoError, setGeoError] = useState<string | null>(null);
   const sentGeoRef = useRef<string | null>(null);
+  const shownErrorRef = useRef<string | null>(null);
   const timers = useRef<number[]>([]);
   const voice = useWebRTCAudio(wsBase());
+  // Browser-native speech for streamed agent sentences (queued in order).
+  // Server audio_out is best-effort; the text always flows and is spoken here.
+  const { enqueue: enqueueSpeech, stop: stopSpeech } = useSpeechSynthesis();
+  const spokenCountRef = useRef(0);
   const canGoLive = live && !!accessToken;
 
   function clearTimers() {
@@ -88,16 +94,34 @@ export default function VoicePage() {
     };
     const mapped = map[voice.state];
     if (mapped) setState(mapped);
-    if (voice.error) {
+    // "TTS failed" frames are benign now: the browser speaks the agent
+    // text via SpeechSynthesis, so they must not flip the UI to error.
+    if (voice.error && !/tts failed/i.test(voice.error) && shownErrorRef.current !== voice.error) {
+      shownErrorRef.current = voice.error;
       setState("error");
       setLines((prev) => [...prev.slice(-5), `Voice session error: ${voice.error}`]);
+    } else if (!voice.error) {
+      shownErrorRef.current = null;
     }
-    const fresh = voice.events.filter((e) => e.kind === "final" || e.kind === "agent_text");
+    const fresh = voice.events.filter((e) => e.kind === "final" || e.kind === "agent_text" || e.kind === "unheard");
     if (fresh.length > 0) {
-      setLines((prev) => [...prev.slice(-5), ...fresh.map((e) => (e.kind === "final" ? `You: ${e.text}` : `CareFlow AI: ${e.text}`))].slice(-6));
+      setLines((prev) => [...prev.slice(-5), ...fresh.map((e) => (e.kind === "final" ? `You: ${e.text}` : e.kind === "unheard" ? "CareFlow AI: I couldn't quite catch that — please speak a little louder." : `CareFlow AI: ${e.text}`))].slice(-6));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voice.state, voice.events, voice.error, sessionLive]);
+
+  // Speak each new agent sentence (queued in order, never overlapping).
+  useEffect(() => {
+    if (!sessionLive) return;
+    const events = voice.events;
+    const fresh = events.slice(spokenCountRef.current);
+    spokenCountRef.current = events.length;
+    for (const e of fresh) {
+      if (e.kind === "agent_text" && e.text) enqueueSpeech(e.text);
+      else if (e.kind === "unheard") enqueueSpeech("I couldn't quite catch that — please speak a little louder.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice.events, sessionLive]);
 
   function startDemo() {
     voice.disconnect();
@@ -120,6 +144,8 @@ export default function VoicePage() {
     clearTimers();
     setLines([]);
     sentGeoRef.current = null;
+    shownErrorRef.current = null;
+    spokenCountRef.current = voice.events.length;
     setSessionLive(true);
     setState("listening");
     voice.connect(accessToken);
@@ -131,6 +157,8 @@ export default function VoicePage() {
   }
 
   function interrupt() {
+    // Barge-in stops browser speech too, not just server playback.
+    stopSpeech();
     if (sessionLive) {
       voice.interrupt();
       setLines((prev) => [...prev, "You interrupted — playback stopped."]);
@@ -142,10 +170,12 @@ export default function VoicePage() {
   }
 
   function stop() {
+    stopSpeech();
     voice.disconnect();
     setSessionLive(false);
     clearTimers();
     sentGeoRef.current = null;
+    shownErrorRef.current = null;
     setState("idle");
     setLines([]);
   }

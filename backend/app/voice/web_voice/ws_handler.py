@@ -146,18 +146,28 @@ def _escalate_silence(db: Session, session: VoiceSession) -> str:
 async def _speak(
     ws: WebSocket, session: VoiceSession, text: str, *, state: str
 ) -> bool:
-    """Stream one utterance sentence-by-sentence; False when interrupted."""
+    """Stream one utterance sentence-by-sentence; False when interrupted.
+
+    Text always flows: every sentence is sent as `agent_text` even when
+    server-side synthesis is unavailable (browser clients speak the text
+    via SpeechSynthesis). Audio is best-effort — one `audio_out` per
+    sentence while synthesis works, a single `error` frame once it fails.
+    """
+    audio_failed = False
     for sentence in split_sentences(text):
         if session.interrupted.is_set():
             return False
         await _send(ws, {"type": "agent_text", "text": sentence})
+        if audio_failed:
+            continue
         try:
             audio = await asyncio.to_thread(
                 tts_provider.get_tts_provider().synthesize, sentence
             )
         except Exception as exc:
+            audio_failed = True
             await _send(ws, {"type": "error", "error": f"TTS failed: {exc}"})
-            return True
+            continue
         if session.interrupted.is_set():
             return False
         await _send(
@@ -187,7 +197,9 @@ async def _run_agent_turn(
         # The shared AIContext is keyed by conversation_id, so cross-turn
         # references ("that one") resolve exactly like in text chat. The
         # call's live GPS rides along too, so voice answers rank nearby
-        # care and greet by name just like chat does.
+        # care and greet by name just like chat does. channel="web_voice"
+        # is per-turn only (never persisted): it tells the model the reply
+        # is heard aloud instead of read — same brain as chat, spoken I/O.
         result = await asyncio.to_thread(
             run_conversation,
             db=db,
@@ -198,6 +210,7 @@ async def _run_agent_turn(
             should_stop=session.interrupted.is_set,
             latitude=session.latitude,
             longitude=session.longitude,
+            channel="web_voice",
         )
         reply = str(result.get("reply") or "")
         if session.interrupted.is_set() and not reply:

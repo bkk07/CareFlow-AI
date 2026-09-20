@@ -112,6 +112,17 @@ def test_utterance_partials_and_hangover_end():
     assert len(tracker.take()) > 16000
 
 
+def test_tts_defaults_to_stub_without_external_dependency():
+    """Browser chat uses SpeechSynthesis; server TTS stays a stub interface."""
+    from app.voice import tts_provider
+
+    tts_provider.set_tts_provider(None)
+    assert isinstance(tts_provider.get_tts_provider(), tts_provider.StubTTS)
+    with pytest.raises(tts_provider.TTSError):
+        tts_provider.get_tts_provider().synthesize("Hello.")
+    assert not hasattr(tts_provider, "GroqTTS")
+
+
 def test_split_sentences():
     assert split_sentences("Hi there. Book Monday? Yes!") == [
         "Hi there.",

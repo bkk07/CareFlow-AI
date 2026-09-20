@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useWebRTCAudio } from "../voice/useWebRTCAudio";
+import { useSpeechSynthesis } from "../voice/useSpeechSynthesis";
 import { restoreAccessToken } from "../api";
 import { EASE, Page } from "../motion";
 import { MicIcon } from "../icons";
@@ -15,6 +16,34 @@ export default function VoiceChat() {
   const { state, events, error, connect, disconnect, interrupt } =
     useWebRTCAudio(API_BASE);
   const [authError, setAuthError] = useState<string | null>(null);
+  // Browser-native speech for streamed agent sentences (queued in order).
+  const { enqueue: enqueueSpeech, stop: stopSpeech } = useSpeechSynthesis();
+  const spokenCountRef = useRef(0);
+
+  // Speak each new agent sentence; "TTS failed" frames are benign now
+  // (the browser speaks the text) and are never shown as errors.
+  const ttsFailed = !!error && /tts failed/i.test(error);
+  const shownError = (!error || ttsFailed ? null : error) ?? authError;
+  useEffect(() => {
+    const fresh = events.slice(spokenCountRef.current);
+    spokenCountRef.current = events.length;
+    for (const e of fresh) {
+      if (e.kind === "agent_text" && e.text) enqueueSpeech(e.text);
+      else if (e.kind === "unheard") enqueueSpeech("I couldn't quite catch that — please speak a little louder.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events]);
+
+  function handleInterrupt() {
+    // Barge-in stops browser speech too, not just server playback.
+    stopSpeech();
+    interrupt();
+  }
+
+  function handleHangUp() {
+    stopSpeech();
+    disconnect();
+  }
 
   async function start() {
     setAuthError(null);
@@ -50,7 +79,7 @@ export default function VoiceChat() {
           </motion.span>
         </p>
         <AnimatePresence>
-          {(error ?? authError) && (
+          {(shownError) && (
             <motion.p
               className="error"
               style={{ textAlign: "left" }}
@@ -58,7 +87,7 @@ export default function VoiceChat() {
               animate={{ opacity: 1, height: "auto", marginBottom: "1rem" }}
               exit={{ opacity: 0, height: 0, marginBottom: 0 }}
             >
-              {error ?? authError}
+              {shownError}
             </motion.p>
           )}
         </AnimatePresence>
@@ -104,7 +133,7 @@ export default function VoiceChat() {
                   <motion.button
                     className="btn"
                     type="button"
-                    onClick={interrupt}
+                    onClick={handleInterrupt}
                     whileHover={{ scale: 1.04 }}
                     whileTap={{ scale: 0.96 }}
                   >
@@ -113,7 +142,7 @@ export default function VoiceChat() {
                   <motion.button
                     className="btn"
                     type="button"
-                    onClick={disconnect}
+                    onClick={handleHangUp}
                     whileHover={{ scale: 1.04 }}
                     whileTap={{ scale: 0.96 }}
                   >

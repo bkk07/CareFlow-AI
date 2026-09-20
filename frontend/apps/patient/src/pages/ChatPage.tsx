@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Mic, Navigation, Send, X } from "lucide-react";
+import { Mic, Navigation, Send, Square, X } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { postChat } from "../api";
 import type { BookingSelection } from "../api";
 import { useAuth } from "../context/AuthContext";
 import { ChatBubble, TypingIndicator } from "../components/ai/ai";
 import { readPosition } from "../lib/helpers";
+import { useSpeechSynthesis } from "../voice/useSpeechSynthesis";
 import type { ChatMessage } from "../types";
 
 const CONV_KEY = "careflow_patient_conversation";
@@ -48,10 +49,17 @@ export default function ChatPage() {
   // (only at the date step), driven by each message's bookingStage.
   const [chosenType, setChosenType] = useState<{ name: string; minutes: number } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // Browser-native TTS for AI text replies: no external TTS API is called.
+  const { isSupported: speechSupported, speaking: isSpeaking, speak, stop: stopSpeaking } = useSpeechSynthesis();
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, thinking]);
+
+  // Stop speech when leaving chat.
+  useEffect(() => {
+    return () => stopSpeaking();
+  }, [stopSpeaking]);
 
   useEffect(() => {
     const prompt = (location.state as { prompt?: string } | null)?.prompt;
@@ -83,6 +91,8 @@ export default function ChatPage() {
   async function sendPrompt(text: string, selection?: BookingSelection | null) {
     const clean = text.trim();
     if (!clean || thinking) return;
+    // A new prompt interrupts any in-flight speech (no overlap).
+    stopSpeaking();
     setMessages((prev) => [...prev, { id: `p-${Date.now()}`, from: "patient", text: clean, time: "Now" }]);
     setDraft("");
     setThinking(true);
@@ -99,10 +109,11 @@ export default function ChatPage() {
         /* private mode */
       }
       const suffix = reply.escalated ? "\n\nI've looped in our care team — someone will follow up with you shortly." : "";
+      const fullReply = reply.reply + suffix;
       setMessages((prev) => [...prev, {
         id: `a-${Date.now()}`,
         from: "ai",
-        text: reply.reply + suffix,
+        text: fullReply,
         time: "Now",
         doctors: reply.doctors ?? [],
         doctorsTotal: reply.doctors_total ?? 0,
@@ -114,6 +125,9 @@ export default function ChatPage() {
         bookingStage: reply.booking_stage ?? "browse",
         pendingBooking: reply.pending_booking ?? null,
       }]);
+      // Speak the AI text response via browser SpeechSynthesis only.
+      // The response text is never sent to an external TTS API.
+      speak(fullReply);
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -242,6 +256,18 @@ export default function ChatPage() {
                   {p}
                 </button>
               ))}
+            </div>
+          )}
+          {speechSupported && isSpeaking && (
+            <div className="flex justify-center pb-2">
+              <button
+                type="button"
+                onClick={stopSpeaking}
+                aria-label="Stop voice"
+                className="inline-flex items-center gap-1.5 text-[0.76rem] font-bold border border-border bg-white rounded-full px-3 py-1.5 text-ink-secondary hover:border-healthcare hover:text-healthcare transition"
+              >
+                <Square size={13} /> Stop voice
+              </button>
             </div>
           )}
           <form

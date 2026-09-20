@@ -296,6 +296,18 @@ CALLER_IDENTITY_REQUIRED = (
     "any patient details until it reports verified=true."
 )
 
+#: Web voice turns (per-turn only, never persisted): the patient is
+#: speaking and hearing the reply read aloud in the browser. Unlike the
+#: telephone channel there is no identity gate — the caller is already
+#: signed in — the model just needs to know it is heard, not read.
+WEB_VOICE_PROMPT = """
+This turn is a LIVE VOICE call: the patient is speaking to you out loud
+and hearing your reply read aloud — never claim you are "chatting via
+text" or that you cannot hear them. Keep every reply to short spoken
+sentences (no markdown, no lists, no ids); the browser reads exactly
+what you write.
+"""
+
 
 def _telephony_gate(context, name: str) -> dict | None:
     """Refusal outcome for patient-data tools on unverified calls."""
@@ -1504,6 +1516,7 @@ def run_conversation(
     latitude: float | None = None,
     longitude: float | None = None,
     selection: dict[str, Any] | None = None,
+    channel: str | None = None,
 ) -> dict[str, Any]:
     """One chat turn: guard, tool loop, reply. Never raises for tool faults.
 
@@ -1511,6 +1524,10 @@ def run_conversation(
     (from the app's "Use my location" button). It outranks the saved home
     point for nearby ranking but is never persisted here — the profile
     page owns saving.
+    `channel` is the turn's channel for THIS message only ("web_voice"
+    from the browser voice loop) and is never persisted: it only adds a
+    channel line to this turn's system prompt so the model knows whether
+    the patient is reading or hearing the reply. Text chat passes nothing.
     """
     cid = (conversation_id or "").strip() or str(uuid.uuid4())
     text = user_message.strip()
@@ -1755,6 +1772,10 @@ def run_conversation(
         )
     if context.channel == "telephony":
         system += TELEPHONY_GUARD_PROMPT
+    # Web voice turns hear the reply read aloud; text chat passes no
+    # channel and is unchanged. Per-turn only — never written to context.
+    if channel == "web_voice":
+        system += WEB_VOICE_PROMPT
     # Full patient profile (name + city + coordinates) rides every turn so
     # the model sounds like someone who knows them — and ranks "near me"
     # by real distance instead of guessing.
@@ -2003,6 +2024,7 @@ __all__ = [
     "SYSTEM_PROMPT",
     "TELEPHONY_GUARD_PROMPT",
     "TELEPHONY_OPEN_TOOLS",
+    "WEB_VOICE_PROMPT",
     "booking_stage",
     "detect_consultation_mode",
     "detect_date_iso",
