@@ -6,12 +6,26 @@ and posts it to the OpenAI-compatible transcriptions endpoint.
 """
 
 import io
+import time
 import wave
 from dataclasses import dataclass
 
 import httpx
 
 from app.core.config import settings
+
+#: 429/5xx are retried with backoff (shared-key rate limits hit hardest
+#: exactly when the user is mid-sentence; failing the turn instead would
+#: surface as a dead "Voice error" in the UI).
+_MAX_ATTEMPTS = 3
+
+
+def _retryable(exc: httpx.HTTPError) -> bool:
+    if isinstance(exc, httpx.TimeoutException):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
+        return exc.response.status_code == 429 or 500 <= exc.response.status_code < 600
+    return False
 
 
 @dataclass(frozen=True)
@@ -61,25 +75,34 @@ class GroqSTT(BaseSTT):
             raise STTError("No LLM/GROQ key configured for STT")
         if len(pcm) < 6400:  # <200ms is never real speech, save the call
             return STTResult(text="")
-        try:
-            resp = httpx.post(
-                f"{settings.llm_base_url.rstrip('/')}/audio/transcriptions",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                files={"file": ("audio.wav", pcm_to_wav(pcm, sample_rate), "audio/wav")},
-                # temperature=0 = deterministic, far fewer "Thank you."
-                # hallucinations; language=en sharpens English accuracy
-                # the way Gemini's recognizer is biased.
-                data={
-                    "model": self.model,
-                    "response_format": "json",
-                    "temperature": "0",
-                    "language": "en",
-                },
-                timeout=60.0,
-            )
-            resp.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise STTError(f"Whisper request failed: {exc}") from exc
+        last_exc: httpx.HTTPError | None = None
+        for attempt in range(_MAX_ATTEMPTS):
+            try:
+                resp = httpx.post(
+                    f"{settings.llm_base_url.rstrip('/')}/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    files={"file": ("audio.wav", pcm_to_wav(pcm, sample_rate), "audio/wav")},
+                    # temperature=0 = deterministic, far fewer "Thank you."
+                    # hallucinations; language=en sharpens English accuracy
+                    # the way Gemini's recognizer is biased.
+                    data={
+                        "model": self.model,
+                        "response_format": "json",
+                        "temperature": "0",
+                        "language": "en",
+                    },
+                    timeout=60.0,
+                )
+                resp.raise_for_status()
+                break
+            except httpx.HTTPError as exc:
+                last_exc = exc
+                if attempt + 1 < _MAX_ATTEMPTS and _retryable(exc):
+                    time.sleep(1.0 * (attempt + 1))
+                    continue
+                raise STTError(f"Whisper request failed: {exc}") from exc
+        else:
+            raise STTError(f"Whisper request failed: {last_exc}") from last_exc
         data = resp.json()
         return STTResult(
             text=str(data.get("text") or "").strip(),

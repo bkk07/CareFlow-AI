@@ -124,6 +124,9 @@ def update_contact(
     if "city" in data:
         city = (data["city"] or "").strip()
         profile.city = city or None
+    if "photo_url" in data:
+        photo = (data["photo_url"] or "").strip()
+        profile.photo_url = photo or None
     if "latitude" in data or "longitude" in data:
         lat, lng = data.get("latitude"), data.get("longitude")
         if (lat is None) != (lng is None):

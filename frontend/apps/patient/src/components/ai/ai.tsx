@@ -10,6 +10,7 @@ import "katex/dist/katex.min.css";
 import type { ChatMessage } from "../../types";
 import type { BookingSelection } from "../../api";
 import { formatSlotDate, formatSlotTime } from "../../lib/backend";
+import { doctorImage } from "../../lib/images";
 import { Button, SafeImage } from "../common/ui";
 
 /** AI replies are markdown (+ LaTeX math); patient messages stay plain text. */
@@ -159,6 +160,7 @@ function LiveDoctorCard({
     <div className="bg-white border border-border rounded-card p-3.5 shadow-subtle flex gap-3">
       <SafeImage
         src={doctor.photo_url ?? ""}
+        fallbackSrc={doctorImage(doctor.id || doctor.name)}
         alt={doctor.name}
         name={doctor.name}
         className="w-12 h-12 rounded-full border border-border shrink-0"

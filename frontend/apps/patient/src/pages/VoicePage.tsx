@@ -186,6 +186,18 @@ export default function VoicePage() {
     <div className="max-w-2xl mx-auto">
       <div className="text-center">
         <h1 className="page-title">Voice assistant</h1>
+        <p className="mt-1.5">
+          <span
+            role="status"
+            className={`inline-block text-[0.7rem] font-extrabold tracking-wide rounded-full px-2.5 py-0.5 border ${
+              canGoLive
+                ? "bg-teal-soft/70 text-teal-dark border-teal/30"
+                : "bg-amber-50 text-amber-700 border-amber-300"
+            }`}
+          >
+            {canGoLive ? "● LIVE — microphone connected" : "● SIMULATION — microphone off"}
+          </span>
+        </p>
         <p className="page-sub mt-1">
           {canGoLive ? "Live voice session with CareFlow AI — or play a demo turn." : "Frontend simulation — no microphone, WebSocket, or backend is used."}
         </p>
@@ -255,6 +267,20 @@ export default function VoicePage() {
         <div className="mt-3">
           <VoiceVisualizer state={muted ? "idle" : state} />
         </div>
+
+        {sessionLive && (
+          <div className="mt-3" aria-label="Microphone input level">
+            <div className="h-1.5 rounded-full bg-background border border-border overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-[width] duration-150 ${voice.micLevel > 0.02 ? "bg-teal" : "bg-border"}`}
+                style={{ width: `${Math.round(voice.micLevel * 100)}%` }}
+              />
+            </div>
+            <p className="text-[0.7rem] text-ink-faint mt-1">
+              {voice.micLevel > 0.02 ? "Mic is live — speak normally." : "Mic sounds quiet — move closer and speak up."}
+            </p>
+          </div>
+        )}
 
         <div className="flex justify-center gap-2 mt-4 flex-wrap">
           <Button variant="outline" size="sm" onClick={() => setMuted((v) => !v)}>

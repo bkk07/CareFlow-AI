@@ -31,6 +31,8 @@ interface UseWebRTCAudio {
   state: VoiceState;
   events: VoiceEvent[];
   error: string | null;
+  /** Live mic input level 0..1 (proves the mic is flowing, like Gemini's dots). */
+  micLevel: number;
   connect: (token: string, resumeConversationId?: string | null) => void;
   disconnect: () => void;
   interrupt: () => void;
@@ -106,11 +108,13 @@ export function useWebRTCAudio(apiBase: string): UseWebRTCAudio {
   const [state, setState] = useState<VoiceState>("idle");
   const [events, setEvents] = useState<VoiceEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [micLevel, setMicLevel] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const sourcesRef = useRef<AudioBufferSourceNode[]>([]);
   const playAtRef = useRef(0);
   const streamRef = useRef<MediaStream | null>(null);
+  const meterTimerRef = useRef<number | null>(null);
 
   const pushEvent = useCallback((event: VoiceEvent) => {
     setEvents((prev) => [...prev.slice(-99), event]);
@@ -131,12 +135,17 @@ export function useWebRTCAudio(apiBase: string): UseWebRTCAudio {
 
   const disconnect = useCallback(() => {
     stopPlayback();
+    if (meterTimerRef.current !== null) {
+      window.clearInterval(meterTimerRef.current);
+      meterTimerRef.current = null;
+    }
     wsRef.current?.close();
     wsRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     void audioCtxRef.current?.close();
     audioCtxRef.current = null;
+    setMicLevel(0);
     setState("idle");
   }, [stopPlayback]);
 
@@ -208,20 +217,25 @@ export function useWebRTCAudio(apiBase: string): UseWebRTCAudio {
           };
           switch (payload.type) {
             case "ready":
+              setError(null);
               setState("awaiting_speech");
               break;
             case "partial":
+              setError(null);
               pushEvent({ kind: "partial", text: payload.text });
               setState("listening");
               break;
             case "final":
+              setError(null);
               pushEvent({ kind: "final", text: payload.text });
               setState("thinking");
               break;
             case "agent_text":
+              setError(null);
               pushEvent({ kind: "agent_text", text: payload.text });
               break;
             case "audio_out":
+              setError(null);
               setState("speaking");
               if (payload.data) void playWav(payload.data);
               break;
@@ -231,8 +245,21 @@ export function useWebRTCAudio(apiBase: string): UseWebRTCAudio {
               else if (payload.state === "awaiting_speech")
                 setState("awaiting_speech");
               break;
+            case "unheard":
+              // Server reached an endpoint but STT heard no words:
+              // say so out loud in the transcript instead of silence.
+              pushEvent({ kind: "unheard" });
+              setState("awaiting_speech");
+              break;
             case "error":
-              setError(payload.text ?? "Voice error");
+              // Server sends {type:"error", error:"..."} (STT/TTS failures).
+              // Read `error` first: `text` is undefined on these frames and
+              // the real message was previously masked as "Voice error".
+              setError(
+                (payload as { error?: string }).error
+                  ?? payload.text
+                  ?? "Voice error",
+              );
               break;
             case "ended":
               pushEvent({ kind: "ended", reason: payload.reason });
@@ -260,6 +287,25 @@ export function useWebRTCAudio(apiBase: string): UseWebRTCAudio {
         sink.gain.value = 0;
         node.connect(sink);
         sink.connect(ctx.destination);
+        // Mic meter: same tap proves live input (and diagnoses "it hears
+        // nothing" instantly — flat bar = mic/permission problem, moving
+        // bar + no transcript = server/VAD problem).
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 512;
+        mic.connect(analyser);
+        const samples = new Uint8Array(analyser.fftSize);
+        meterTimerRef.current = window.setInterval(() => {
+          analyser.getByteTimeDomainData(samples);
+          let peak = 0;
+          for (let i = 0; i < samples.length; i++) {
+            const v = Math.abs(samples[i] - 128) / 128;
+            if (v > peak) peak = v;
+          }
+          setMicLevel((prev) => {
+            const next = Math.round(Math.min(1, peak * 1.5) * 100) / 100;
+            return Math.abs(next - prev) < 0.02 ? prev : next;
+          });
+        }, 150);
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Could not access the microphone.",
@@ -286,5 +332,5 @@ export function useWebRTCAudio(apiBase: string): UseWebRTCAudio {
     }
   }, []);
 
-  return { state, events, error, connect, disconnect, interrupt, sendLocation };
+  return { state, events, error, micLevel, connect, disconnect, interrupt, sendLocation };
 }

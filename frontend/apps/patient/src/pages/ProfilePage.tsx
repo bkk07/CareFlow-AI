@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { CalendarDays, Edit3, LogOut, MapPin, Navigation, Phone, ShieldCheck } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -25,6 +25,65 @@ export default function ProfilePage() {
   const [geoError, setGeoError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  /** Downscale to a 256px JPEG data-URL so the photo fits the profile column. */
+  async function fileToPhoto(file: File): Promise<string> {
+    const bitmap = await createImageBitmap(file);
+    try {
+      const size = 256;
+      const scale = Math.max(size / bitmap.width, size / bitmap.height);
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("no 2d context");
+      const w = bitmap.width * scale;
+      const h = bitmap.height * scale;
+      ctx.drawImage(bitmap, (size - w) / 2, (size - h) / 2, w, h);
+      const url = canvas.toDataURL("image/jpeg", 0.82);
+      if (url.length > 400000) throw new Error("photo too large after resize");
+      return url;
+    } finally {
+      bitmap.close();
+    }
+  }
+
+  async function onPhotoFile(file: File | undefined) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setPhotoError("Please choose an image file.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setPhotoError("Image must be under 5 MB.");
+      return;
+    }
+    setPhotoBusy(true);
+    setPhotoError(null);
+    try {
+      await updateContactInfo({ photo_url: await fileToPhoto(file) });
+    } catch {
+      setPhotoError("Could not upload that photo. Try a smaller image.");
+    } finally {
+      setPhotoBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  async function removePhoto() {
+    setPhotoBusy(true);
+    setPhotoError(null);
+    try {
+      await updateContactInfo({ photo_url: "" });
+    } catch {
+      setPhotoError("Could not remove the photo.");
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
 
   const completed = appointments.filter((a) => a.status === "completed").length;
   const upcomingCount = appointments.filter((a) => ["confirmed", "pending", "rescheduled"].includes(a.status)).length;
@@ -93,7 +152,41 @@ export default function ProfilePage() {
     <div className="max-w-3xl mx-auto space-y-4">
       <div className="card-base p-6">
         <div className="flex flex-col sm:flex-row gap-4 sm:items-center">
-          <SafeImage src={patient.avatar} alt={patient.name} name={patient.name} className="w-20 h-20 rounded-2xl border border-border" />
+          <div className="flex flex-col items-center gap-1.5">
+            <SafeImage src={patient.avatar} alt={patient.name} name={patient.name} className="w-20 h-20 rounded-2xl border border-border" />
+            {live && (
+              <>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  aria-label="Upload profile photo"
+                  onChange={(e) => void onPhotoFile(e.target.files?.[0])}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={photoBusy}
+                  className="text-[0.76rem] font-bold text-healthcare hover:underline disabled:opacity-60"
+                >
+                  {photoBusy ? "Uploading…" : patient.avatar ? "Change photo" : "Add photo"}
+                </button>
+                {patient.avatar && !photoBusy && (
+                  <button
+                    type="button"
+                    onClick={() => void removePhoto()}
+                    className="text-[0.72rem] font-semibold text-ink-faint hover:text-danger hover:underline"
+                  >
+                    Remove
+                  </button>
+                )}
+              </>
+            )}
+            {photoError && (
+              <p role="alert" className="text-[0.72rem] font-semibold text-danger text-center max-w-[140px]">{photoError}</p>
+            )}
+          </div>
           <div className="flex-1 min-w-0">
             <h1 className="text-[1.35rem] font-extrabold text-navy">{name}</h1>
             <p className="text-sm text-ink-secondary">Patient since {patient.memberSince} · {patient.email}</p>

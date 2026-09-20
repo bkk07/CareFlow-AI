@@ -1,6 +1,7 @@
 import { Award, Clock, Globe, MapPin, Star } from "lucide-react";
 import type { Doctor } from "../../types";
 import { consultationModeLabel } from "../../lib/helpers";
+import { doctorImage } from "../../lib/images";
 import { Button, SafeImage } from "../common/ui";
 import { Modal } from "../common/Modal";
 
@@ -21,6 +22,7 @@ export function DoctorProfileModal({
       <div className="flex flex-col sm:flex-row gap-5">
         <SafeImage
           src={doctor.photo}
+          fallbackSrc={doctorImage(doctor.id || doctor.name)}
           alt={doctor.name}
           name={doctor.name}
           className="w-28 h-28 rounded-2xl border border-border shrink-0"

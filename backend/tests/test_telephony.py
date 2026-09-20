@@ -361,6 +361,24 @@ def test_contact_roundtrip_normalizes_phone(client):
     assert normalize_phone("") is None
 
 
+def test_contact_photo_roundtrip(client):
+    """Profile photo (URL or resized data-URL) persists and clears."""
+    setup = seed_setup(client, tag="photo")
+    headers = setup["patient"]["headers"]
+    put = client.put(
+        "/patients/me/contact",
+        json={"photo_url": "data:image/jpeg;base64,/9j/abc"},
+        headers=headers,
+    )
+    assert put.status_code == 200, put.text
+    assert put.json()["photo_url"] == "data:image/jpeg;base64,/9j/abc"
+    got = client.get("/patients/me/contact", headers=headers).json()
+    assert got["photo_url"] == "data:image/jpeg;base64,/9j/abc"
+    clear = client.put("/patients/me/contact", json={"photo_url": ""}, headers=headers)
+    assert clear.status_code == 200, clear.text
+    assert clear.json()["photo_url"] is None
+
+
 # -- identity service --------------------------------------------------------------
 
 

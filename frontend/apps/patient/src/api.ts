@@ -399,6 +399,7 @@ export interface Contact {
   city: string | null;
   latitude: number | null;
   longitude: number | null;
+  photo_url: string | null;
   updated_at: string;
 }
 
@@ -413,6 +414,7 @@ export async function saveContact(args: {
   city?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  photo_url?: string | null;
 }): Promise<Contact> {
   return (await api.put("/patients/me/contact", args)).data;
 }

@@ -57,14 +57,22 @@ export function SafeImage({
   alt,
   name,
   className = "",
+  fallbackSrc = "",
 }: {
   src: string;
   alt: string;
   name: string;
   className?: string;
+  /** Tried once when `src` is empty/broken, before falling back to initials. */
+  fallbackSrc?: string;
 }) {
-  const [failed, setFailed] = useState(false);
-  if (failed) {
+  // Empty src would render a broken-image icon: start at the fallback
+  // (or initials when there is nothing to try).
+  const [stage, setStage] = useState<"src" | "fallback" | "initials">(() =>
+    src ? "src" : fallbackSrc ? "fallback" : "initials",
+  );
+  const shown = stage === "src" ? src : stage === "fallback" ? fallbackSrc : "";
+  if (!shown) {
     return (
       <div className={`flex items-center justify-center bg-healthcare-soft text-healthcare font-extrabold ${className}`} aria-label={alt} role="img">
         {initials(name)}
@@ -73,10 +81,10 @@ export function SafeImage({
   }
   return (
     <img
-      src={src}
+      src={shown}
       alt={alt}
       loading="lazy"
-      onError={() => setFailed(true)}
+      onError={() => setStage(stage === "src" && fallbackSrc ? "fallback" : "initials")}
       className={`object-cover ${className}`}
     />
   );

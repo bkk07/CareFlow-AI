@@ -112,10 +112,91 @@ def test_utterance_partials_and_hangover_end():
     assert len(tracker.take()) > 16000
 
 
+def test_adaptive_vad_hears_soft_voice():
+    """A quiet mic (RMS ~155) must count as speech adaptively.
+
+    Regression for 'Gemini hears me but CareFlow hears nothing': the
+    legacy fixed threshold (200) drops soft voices entirely.
+    """
+    soft = make_tone(0.5, amplitude=220)  # RMS ≈ 155
+    tracker = UtteranceTracker()
+    tracker.push(soft)
+    assert tracker.in_utterance is True
+    fixed = UtteranceTracker(adaptive=False)
+    fixed.push(soft)
+    assert fixed.in_utterance is False
+
+
+def test_noise_floor_adapts_downward_but_threshold_floored():
+    tracker = UtteranceTracker()
+    assert tracker.threshold == 120.0  # hears soft voices from frame one
+    tracker.push(make_silence(2.0))
+    assert tracker.noise_floor < 40.0
+    assert tracker.threshold >= 120.0
+    assert tracker.stats()["total_frames"] > 0
+
+
+def test_force_endpoint_constant_sane():
+    from app.voice.web_voice.ws_handler import FORCE_ENDPOINT_BYTES
+
+    assert FORCE_ENDPOINT_BYTES == 6 * 16000 * 2
+
+
+def _groq_status_error(code: int):
+    import httpx
+
+    req = httpx.Request("POST", "https://api.groq.com/openai/v1/audio/transcriptions")
+    return httpx.HTTPStatusError(
+        f"{code} test", request=req, response=httpx.Response(code, request=req)
+    )
+
+
+def test_stt_retries_rate_limit_then_succeeds(monkeypatch):
+    """Two 429s mid-sentence must not surface as a dead 'Voice error'."""
+    import httpx
+
+    from app.voice.stt_provider import GroqSTT
+
+    failures = [_groq_status_error(429), _groq_status_error(429)]
+
+    class _Ok:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self):
+            return {"text": "book monday morning"}
+
+    def fake_post(*args, **kwargs):
+        if failures:
+            raise failures.pop(0)
+        return _Ok()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr("app.voice.stt_provider.time.sleep", lambda s: None)
+    result = GroqSTT(api_key="test-key").transcribe(make_tone(0.5))
+    assert result.text == "book monday morning"
+
+
+def test_stt_does_not_retry_client_errors(monkeypatch):
+    """A 400 must fail fast (one call) instead of burning quota."""
+    import httpx
+
+    from app.voice.stt_provider import GroqSTT, STTError
+
+    calls = []
+
+    def fake_post(*args, **kwargs):
+        calls.append(True)
+        raise _groq_status_error(400)
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    with pytest.raises(STTError):
+        GroqSTT(api_key="test-key").transcribe(make_tone(0.5))
+    assert len(calls) == 1
+
+
 def test_tts_defaults_to_stub_without_external_dependency():
     """Browser chat uses SpeechSynthesis; server TTS stays a stub interface."""
-    from app.voice import tts_provider
-
     tts_provider.set_tts_provider(None)
     assert isinstance(tts_provider.get_tts_provider(), tts_provider.StubTTS)
     with pytest.raises(tts_provider.TTSError):

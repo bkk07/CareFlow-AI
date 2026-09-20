@@ -2,6 +2,7 @@ import { motion } from "framer-motion";
 import { Clock, MapPin, Star } from "lucide-react";
 import type { Doctor, Hospital } from "../../types";
 import { consultationModeLabel } from "../../lib/helpers";
+import { doctorImage, hospitalImage } from "../../lib/images";
 import { Button, SafeImage, StatusBadge } from "../common/ui";
 
 export function DoctorCard({
@@ -24,6 +25,7 @@ export function DoctorCard({
       <div className="flex gap-4">
         <SafeImage
           src={doctor.photo}
+          fallbackSrc={doctorImage(doctor.id || doctor.name)}
           alt={`${doctor.name} photo`}
           name={doctor.name}
           className="w-16 h-16 rounded-full shrink-0 border border-border"
@@ -74,7 +76,7 @@ export function HospitalCard({
   return (
     <article className="card-base overflow-hidden hover:shadow-card transition-shadow">
       <div className="relative h-36">
-        <SafeImage src={hospital.image} alt={hospital.name} name={hospital.name} className="w-full h-full" />
+        <SafeImage src={hospital.image} fallbackSrc={hospitalImage(hospital.id || hospital.name)} alt={hospital.name} name={hospital.name} className="w-full h-full" />
         <span className="absolute top-3 left-3 bg-white/95 text-navy text-[0.75rem] font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
           <Star size={12} className="text-warning fill-warning" /> {hospital.rating}
         </span>

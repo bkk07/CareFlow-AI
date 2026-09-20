@@ -50,6 +50,7 @@ class ContactOut(BaseModel):
     city: str | None
     latitude: float | None = None
     longitude: float | None = None
+    photo_url: str | None = None
     updated_at: datetime
 
 
@@ -60,6 +61,9 @@ class ContactUpdateIn(BaseModel):
     city: str | None = Field(default=None, max_length=120)
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
+    # Profile photo: https URL or resized data-URL (Profile page uploads
+    # a 256px JPEG, ~20-60KB). Empty string clears the photo.
+    photo_url: str | None = Field(default=None, max_length=500000)
 
     def model_post_init(self, _context) -> None:
         if (self.latitude is None) != (self.longitude is None):

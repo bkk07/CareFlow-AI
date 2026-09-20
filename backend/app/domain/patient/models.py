@@ -16,7 +16,7 @@ import enum
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Enum, Float, String, Uuid, func
+from sqlalchemy import Date, DateTime, Enum, Float, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -92,6 +92,9 @@ class PatientProfile(Base):
     # distance-based doctor/hospital ordering in search tools + chat.
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Patient profile photo: https URL or resized data-URL uploaded from
+    # the Profile page. Text (not capped at 1000) so small data-URLs fit.
+    photo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

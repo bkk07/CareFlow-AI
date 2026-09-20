@@ -2,6 +2,7 @@ import { motion } from "framer-motion";
 import { CalendarDays, Clock, MapPin, Video, Phone, Building2 } from "lucide-react";
 import type { Appointment } from "../../types";
 import { consultationModeLabel } from "../../lib/helpers";
+import { doctorImage } from "../../lib/images";
 import { Button, SafeImage, StatusBadge } from "../common/ui";
 
 function ModeIcon({ mode }: { mode: Appointment["consultationMode"] }) {
@@ -34,6 +35,7 @@ export function AppointmentCard({
       <div className="flex gap-3.5">
         <SafeImage
           src={appointment.doctorPhoto}
+          fallbackSrc={doctorImage(appointment.doctorId || appointment.doctorName)}
           alt={appointment.doctorName}
           name={appointment.doctorName}
           className="w-14 h-14 rounded-full border border-border shrink-0"

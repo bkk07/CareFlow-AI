@@ -7,6 +7,7 @@ Protocol (all JSON text frames):
   server -> client: {"type": "ready", ...}
   server -> client: {"type": "partial", "text": ...} # display only, NO tools
   server -> client: {"type": "final", "text": ...}
+  server -> client: {"type": "unheard"} # endpoint heard, STT heard no words
   server -> client: {"type": "agent_text", "text": ...}   # per sentence
   server -> client: {"type": "audio_out", "data": ...}    # base64 wav
   server -> client: {"type": "state", "state": ...}
@@ -26,10 +27,19 @@ import asyncio
 import base64
 import binascii
 import json
+import logging
 import re
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
+
+#: Speech bytes after which an utterance is force-ended even without a
+#: 600 ms pause (6 s at 16 kHz 16-bit mono). Soft, continuous talkers who
+#: never pause long enough for the hangover gate still get transcribed
+#: instead of buffering forever unheard.
+FORCE_ENDPOINT_BYTES = 6 * 16000 * 2
 
 from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
@@ -351,6 +361,15 @@ async def handle_voice_socket(
                 except (binascii.Error, ValueError):
                     continue
                 partial_due, done = tracker.push(pcm)
+                if not done and len(tracker.buffer) >= FORCE_ENDPOINT_BYTES:
+                    # Talked straight through the pause gate: endpoint now
+                    # and transcribe what we have rather than buffering
+                    # unheard audio forever.
+                    done = True
+                    logger.info(
+                        "voice force-endpoint session=%s bytes=%d",
+                        session.id, len(tracker.buffer),
+                    )
                 if partial_due and not done:
                     # Interim display only: partials NEVER reach the
                     # orchestrator, so no capability fires off a guess.
@@ -364,11 +383,13 @@ async def handle_voice_socket(
                             text = await asyncio.to_thread(
                                 stt_provider.get_stt_provider().transcribe, interim
                             )
-                        except Exception:
+                        except Exception as exc:
+                            logger.warning("voice partial STT failed: %s", exc)
                             text = None
                         if text is not None and text.text.strip():
                             await _send(ws, {"type": "partial", "text": text.text.strip()})
                 if done:
+                    stats = tracker.stats()
                     utterance = tracker.take()
                     if len(utterance) < 6400:
                         continue
@@ -379,10 +400,21 @@ async def handle_voice_socket(
                     except Exception as exc:
                         # Never kill the call on one bad STT chunk —
                         # Gemini keeps listening too; surface and continue.
+                        logger.warning("voice final STT failed: %s", exc)
                         await _send(ws, {"type": "error", "error": f"STT failed: {exc}"})
                         continue
                     text = result.text.strip()
+                    logger.info(
+                        "voice final session=%s bytes=%d chars=%d "
+                        "threshold=%.0f floor=%.0f",
+                        session.id, len(utterance), len(text),
+                        stats["threshold"], stats["noise_floor"],
+                    )
                     if not text:
+                        # Heard the endpoint but no words: tell the UI so
+                        # it can say "I couldn't catch that" instead of
+                        # going silently dead (the old behavior).
+                        await _send(ws, {"type": "unheard"})
                         continue
                     await _send(ws, {"type": "final", "text": text})
                     await _pump_turn(ws, session, text)

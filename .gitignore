@@ -1,7 +1,7 @@
 # Secrets / local env
 .env
 *.env
-!.env.example
+!**/.env.example
 infra/.env
 frontend/apps/patient/.env
 
@@ -29,3 +29,56 @@ playwright/.cache/
 Thumbs.db
 .vscode/
 .idea/
+
+# Python - coverage / typecheck / build
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+build/
+*.egg-info/
+.eggs/
+*.egg
+*.whl
+
+# SQLite / local test DBs (tests use SQLite, prod is Postgres)
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Frontend - Vite / TS / coverage
+*.tsbuildinfo
+.vite/
+coverage/
+
+# Deploy / local tooling
+.vercel/
+.railway/
+celerybeat-schedule
+celerybeat.pid
+
+# Secrets / keys (healthcare repo - never commit)
+*.pem
+*.key
+*.p12
+.env.vault
+
+# Local uploads / media (preventive - photo_url feature)
+uploads/
+media/
+
+# OS / editors - extra
+*.swp
+*.swo
+*~

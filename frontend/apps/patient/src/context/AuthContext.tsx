@@ -29,7 +29,7 @@ interface AuthState {
   register: (email: string, password: string) => Promise<void>;
   logout: () => void;
   refreshProfile: () => Promise<void>;
-  updateContactInfo: (patch: { full_name?: string; phone?: string; date_of_birth?: string; city?: string | null; latitude?: number | null; longitude?: number | null }) => Promise<void>;
+  updateContactInfo: (patch: { full_name?: string; phone?: string; date_of_birth?: string; city?: string | null; latitude?: number | null; longitude?: number | null; photo_url?: string | null }) => Promise<void>;
   updateAccountEmail: (email: string) => Promise<void>;
 }
 
@@ -57,6 +57,7 @@ function profileFromBackend(user: CurrentUser, contact: Contact | null): Patient
     name: contact?.full_name ?? user.email.split("@")[0],
     phone: contact?.phone ?? "",
     dob: contact?.date_of_birth ?? "",
+    avatar: contact?.photo_url ?? "",
   };
 }
 
@@ -144,7 +145,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateContactInfo = useCallback(
-    async (patch: { full_name?: string; phone?: string; date_of_birth?: string; city?: string | null; latitude?: number | null; longitude?: number | null }) => {
+    async (patch: { full_name?: string; phone?: string; date_of_birth?: string; city?: string | null; latitude?: number | null; longitude?: number | null; photo_url?: string | null }) => {
       const next = await apiSaveContact(patch);
       setContact(next);
     },

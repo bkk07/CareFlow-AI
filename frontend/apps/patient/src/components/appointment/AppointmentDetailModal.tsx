@@ -2,6 +2,7 @@ import { motion } from "framer-motion";
 import { ArrowLeft, CalendarDays, CheckCircle2, Clock } from "lucide-react";
 import type { Appointment } from "../../types";
 import { consultationModeLabel } from "../../lib/helpers";
+import { doctorImage } from "../../lib/images";
 import { Button, SafeImage, StatusBadge } from "../common/ui";
 import { Modal } from "../common/Modal";
 import { AppointmentTimeline } from "./AppointmentCard";
@@ -31,7 +32,7 @@ export function AppointmentDetailModal({
       </div>
 
       <div className="flex gap-4 mt-4">
-        <SafeImage src={appointment.doctorPhoto} alt={appointment.doctorName} name={appointment.doctorName} className="w-16 h-16 rounded-2xl border border-border" />
+        <SafeImage src={appointment.doctorPhoto} fallbackSrc={doctorImage(appointment.doctorId || appointment.doctorName)} alt={appointment.doctorName} name={appointment.doctorName} className="w-16 h-16 rounded-2xl border border-border" />
         <div>
           <h3 className="text-lg font-extrabold text-navy">{appointment.doctorName}</h3>
           <p className="text-sm text-ink-secondary">{appointment.specialty} · {appointment.department}</p>

@@ -36,30 +36,69 @@ def frame_energy(frame: bytes) -> float:
     return math.sqrt(sum(s * s for s in samples) / FRAME_SAMPLES)
 
 
+#: Floor below which the adaptive threshold never drops: typical room
+#: tone sits under 100 RMS, so 120 keeps silence silent while still
+#: hearing soft voices (~150 RMS) that a fixed 200 threshold drops.
+MIN_ADAPTIVE_THRESHOLD = 120.0
+
+#: Additive margin over the tracked noise floor. A multiplier would chase
+#: a steady signal upward (floor → signal level, threshold → 3x signal:
+#: a soft continuous voice could never cross it). Margin hears from the
+#: very first frame instead of needing silence to calibrate downward.
+FLOOR_MARGIN = 80.0
+
+
 class UtteranceTracker:
-    """Accumulates one utterance; reports partials and end-of-speech."""
+    """Accumulates one utterance; reports partials and end-of-speech.
+
+    Adaptive mode (default) tracks the room's noise floor from quiet
+    frames and sets the speech threshold to floor + FLOOR_MARGIN
+    (never below MIN_ADAPTIVE_THRESHOLD). Fixed-threshold laptop mics
+    with auto-gain miss soft voices entirely — the assistant then "hears
+    nothing" no matter how clearly the user speaks. Pass adaptive=False
+    for the legacy fixed threshold (tests, telephony parity).
+    """
 
     def __init__(
         self,
         energy_threshold: float = ENERGY_THRESHOLD,
         hangover_frames: int = HANGOVER_FRAMES,
         partial_every_frames: int = PARTIAL_EVERY_FRAMES,
+        adaptive: bool = True,
     ) -> None:
         self.energy_threshold = energy_threshold
         self.hangover_frames = hangover_frames
         self.partial_every_frames = partial_every_frames
+        self.adaptive = adaptive
+        self.noise_floor = 40.0
         self.buffer = bytearray()
         self.speech_frames = 0
         self.quiet_frames = 0
         self.in_utterance = False
         self.frames_since_partial = 0
+        self.total_frames = 0
+
+    @property
+    def threshold(self) -> float:
+        if not self.adaptive:
+            return self.energy_threshold
+        return max(MIN_ADAPTIVE_THRESHOLD, self.noise_floor + FLOOR_MARGIN)
 
     def push(self, pcm: bytes) -> tuple[bool, bool]:
         """Feed raw PCM; returns (partial_due, utterance_done)."""
         partial_due, done = False, False
         for offset in range(0, len(pcm) - FRAME_BYTES + 1, FRAME_BYTES):
             frame = pcm[offset : offset + FRAME_BYTES]
-            speech = frame_energy(frame) >= self.energy_threshold
+            energy = frame_energy(frame)
+            speech = energy >= self.threshold
+            self.total_frames += 1
+            if not speech and self.adaptive:
+                # Quiet frame: fold it into the noise floor (slow EMA so
+                # a loud room doesn't yank the threshold mid-sentence).
+                # Speech frames never move the floor: a steady soft voice
+                # must not calibrate itself out of audibility.
+                self.noise_floor += 0.05 * (min(energy, 800.0) - self.noise_floor)
+                self.noise_floor = max(30.0, min(700.0, self.noise_floor))
             if speech:
                 if not self.in_utterance:
                     self.in_utterance = True
@@ -86,7 +125,18 @@ class UtteranceTracker:
         self.quiet_frames = 0
         self.in_utterance = False
         self.frames_since_partial = 0
+        self.total_frames = 0
         return data
+
+    def stats(self) -> dict[str, float]:
+        """Diagnostic snapshot for server logs (no audio content)."""
+        return {
+            "buffer_bytes": float(len(self.buffer)),
+            "speech_frames": float(self.speech_frames),
+            "total_frames": float(self.total_frames),
+            "threshold": float(self.threshold),
+            "noise_floor": float(self.noise_floor),
+        }
 
     def peek(self) -> bytes:
         """Return a copy of accumulated audio WITHOUT consuming it.
@@ -120,6 +170,7 @@ __all__ = [
     "FRAME_BYTES",
     "FRAME_MS",
     "HANGOVER_FRAMES",
+    "MIN_ADAPTIVE_THRESHOLD",
     "PARTIAL_EVERY_FRAMES",
     "SAMPLE_RATE",
     "UtteranceTracker",
