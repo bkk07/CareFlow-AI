@@ -339,3 +339,64 @@ def test_correlation_id_propagates_to_audit(client, db):
         .one()
     )
     assert str(event.correlation_id) == correlation
+
+
+def test_platform_admin_invite_flow(client):
+    platform = register_platform_admin(client)
+    second = client.post(
+        "/platform/admins",
+        json={"email": "root-second@example.com", "password": "correct-horse-42"},
+        headers=platform,
+    )
+    assert second.status_code == 201, second.text
+    assert second.json()["role"] == "platform_admin"
+
+    # The invited admin can log in and act as platform.
+    tokens = client.post(
+        "/auth/login",
+        json={"email": "root-second@example.com", "password": "correct-horse-42"},
+    )
+    assert tokens.status_code == 200, tokens.text
+    headers = {"Authorization": f"Bearer {tokens.json()['access_token']}"}
+    assert client.get("/platform/audit-events", headers=headers).status_code == 200
+
+    # Duplicate email is a conflict, not a second row.
+    assert (
+        client.post(
+            "/platform/admins",
+            json={
+                "email": "root-second@example.com",
+                "password": "correct-horse-42",
+            },
+            headers=platform,
+        ).status_code
+        == 409
+    )
+
+    # Non-platform callers cannot mint platform admins.
+    assert client.post("/platform/admins").status_code in (401, 422)
+    patient = client.post(
+        "/auth/register",
+        json={
+            "email": "plat-invite-patient@example.com",
+            "password": "correct-horse-42",
+            "role": "patient",
+        },
+    )
+    assert patient.status_code == 201
+    ptokens = client.post(
+        "/auth/login",
+        json={
+            "email": "plat-invite-patient@example.com",
+            "password": "correct-horse-42",
+        },
+    ).json()
+    pheaders = {"Authorization": f"Bearer {ptokens['access_token']}"}
+    assert (
+        client.post(
+            "/platform/admins",
+            json={"email": "root-evil@example.com", "password": "correct-horse-42"},
+            headers=pheaders,
+        ).status_code
+        == 403
+    )

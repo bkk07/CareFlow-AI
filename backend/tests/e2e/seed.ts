@@ -27,6 +27,32 @@ async function post(path: string, body: unknown, token?: string): Promise<any> {
   return res.json();
 }
 
+// One shared platform admin for the whole E2E run: self-registration is
+// the first-user bootstrap only, so every spec file reuses the same
+// known credentials (register-or-ignore, then login).
+const SHARED_ROOT_EMAIL = "root-e2e@example.com";
+const SHARED_ROOT_PASSWORD = "correct-horse-42";
+
+async function platformToken(): Promise<string> {
+  const res = await fetch(API + "/auth/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email: SHARED_ROOT_EMAIL,
+      password: SHARED_ROOT_PASSWORD,
+      role: "platform_admin",
+    }),
+  });
+  if (!res.ok && res.status !== 400 && res.status !== 403) {
+    throw new Error(`POST /auth/register: ${res.status} ${await res.text()}`);
+  }
+  const tok = await post("/auth/login", {
+    email: SHARED_ROOT_EMAIL,
+    password: SHARED_ROOT_PASSWORD,
+  });
+  return tok.access_token;
+}
+
 export async function seed(tag: string): Promise<Seed> {
   const uid = Math.random().toString(36).slice(2, 8);
   const password = "correct-horse-42";
@@ -42,14 +68,9 @@ export async function seed(tag: string): Promise<Seed> {
     admin_email: `a-${tag}-${uid}@example.com`,
     admin_password: password,
   });
-  const rootEmail = `root-${tag}-${uid}@example.com`;
-  await post("/auth/register", {
-    email: rootEmail,
-    password,
-    role: "platform_admin",
-  });
-  const ptok = await post("/auth/login", { email: rootEmail, password });
-  await post(`/platform/hospitals/${reg.id}/approve`, {}, ptok.access_token);
+  const rootEmail = SHARED_ROOT_EMAIL;
+  const ptok = await platformToken();
+  await post(`/platform/hospitals/${reg.id}/approve`, {}, ptok);
 
   const atok = await post("/auth/login", {
     email: `a-${tag}-${uid}@example.com`,
