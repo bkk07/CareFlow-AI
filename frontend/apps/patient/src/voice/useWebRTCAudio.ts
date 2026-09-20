@@ -42,7 +42,13 @@ const WORKLET_SOURCE = `
 class CaptureProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    this._kept = new Float32Array(0);
+    // Fractional resampler state: keeps phase across process() calls so
+    // 44.1kHz / 48kHz mics downsample to exactly 16kHz without drift.
+    // Gemini-quality capture needs this — integer-floor stepping drops
+    // or duplicates samples and Whisper hears slurred speech.
+    this._prev = 0;
+    this._phase = 0;
+    this._pending = [];
   }
   // Downsample to 16 kHz and emit int16 frames of 320 samples (20 ms).
   process(inputs) {
@@ -51,23 +57,25 @@ class CaptureProcessor extends AudioWorkletProcessor {
     const channel = input[0];
     const inRate = sampleRate;
     const outRate = 16000;
-    const ratio = inRate / outRate;
-    const joined = new Float32Array(this._kept.length + channel.length);
-    joined.set(this._kept, 0);
-    joined.set(channel, this._kept.length);
-    let offset = 0;
-    const frame = new Int16Array(320);
-    while (offset + 320 * ratio <= joined.length) {
-      for (let i = 0; i < 320; i++) {
-        const at = Math.floor(offset + i * ratio);
-        const sample = Math.max(-1, Math.min(1, joined[at]));
-        frame[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+    const step = inRate / outRate;
+    for (let n = 0; n < channel.length; n++) {
+      const cur = channel[n];
+      // Emit output samples while the phase falls inside this input step,
+      // linearly interpolating between previous and current sample.
+      while (this._phase < 1) {
+        const sample = this._prev + (cur - this._prev) * this._phase;
+        const clamped = Math.max(-1, Math.min(1, sample));
+        this._pending.push(clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff);
+        if (this._pending.length === 320) {
+          const frame = new Int16Array(this._pending);
+          this._pending = [];
+          this.port.postMessage(frame.buffer, [frame.buffer]);
+        }
+        this._phase += step;
       }
-      const copy = frame.slice();
-      this.port.postMessage(copy.buffer, [copy.buffer]);
-      offset += Math.floor(320 * ratio);
+      this._phase -= 1;
+      this._prev = cur;
     }
-    this._kept = joined.slice(offset);
     return true;
   }
 }
@@ -158,9 +166,23 @@ export function useWebRTCAudio(apiBase: string): UseWebRTCAudio {
       setError(null);
       setState("connecting");
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Same constraints the big assistants use: echo cancellation +
+        // noise suppression + auto gain, so Whisper hears voice not room.
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+          },
+        });
         streamRef.current = stream;
-        const ctx = new AudioContext({ sampleRate: 48000 });
+        // Use the device's native sample rate — the worklet resamples to
+        // exactly 16 kHz with a fractional accumulator. Forcing 48 kHz
+        // here made the browser resample first AND the worklet resample
+        // again, which smeared consonants on 44.1 kHz hardware.
+        const ctx = new AudioContext();
+        if (ctx.state === "suspended") await ctx.resume();
         audioCtxRef.current = ctx;
         const blob = new Blob([WORKLET_SOURCE], { type: "application/javascript" });
         const url = URL.createObjectURL(blob);
@@ -231,6 +253,13 @@ export function useWebRTCAudio(apiBase: string): UseWebRTCAudio {
           }
         };
         mic.connect(node);
+        // Keep-alive: Chrome/Safari throttle an AudioWorklet graph whose
+        // output goes nowhere, so process() stops and the server hears
+        // silence. A zero-gain sink keeps the graph running inaudibly.
+        const sink = ctx.createGain();
+        sink.gain.value = 0;
+        node.connect(sink);
+        sink.connect(ctx.destination);
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Could not access the microphone.",

@@ -66,7 +66,15 @@ class GroqSTT(BaseSTT):
                 f"{settings.llm_base_url.rstrip('/')}/audio/transcriptions",
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 files={"file": ("audio.wav", pcm_to_wav(pcm, sample_rate), "audio/wav")},
-                data={"model": self.model, "response_format": "json"},
+                # temperature=0 = deterministic, far fewer "Thank you."
+                # hallucinations; language=en sharpens English accuracy
+                # the way Gemini's recognizer is biased.
+                data={
+                    "model": self.model,
+                    "response_format": "json",
+                    "temperature": "0",
+                    "language": "en",
+                },
                 timeout=60.0,
             )
             resp.raise_for_status()

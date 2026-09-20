@@ -16,7 +16,10 @@ FRAME_BYTES = FRAME_SAMPLES * 2
 
 #: RMS of int16 samples above which a frame counts as speech. Conversational
 #: speech at normal mic gain sits well above 500; room tone below 100.
-ENERGY_THRESHOLD = 300.0
+#: Lowered from 300 -> 200: laptop mics with auto-gain + noise suppression
+#: (like the frontend now requests) land around 200-400 on quiet speech,
+#: and the old threshold silently dropped first syllables / soft voices.
+ENERGY_THRESHOLD = 200.0
 
 #: Quiet frames (600 ms) that close an utterance.
 HANGOVER_FRAMES = 30
@@ -86,15 +89,16 @@ class UtteranceTracker:
         return data
 
     def peek(self) -> bytes:
-        """Drain accumulated audio WITHOUT resetting utterance state.
+        """Return a copy of accumulated audio WITHOUT consuming it.
 
-        Used for interim partials: the hangover continues from here, so
-        the eventual `take()` still yields the whole utterance.
+        Used for interim partials: the buffer is left intact so the
+        eventual `take()` still yields the WHOLE utterance. The old
+        implementation cleared the buffer here, which truncated the
+        first ~1s of every long utterance before the final STT call —
+        the main "it doesn't hear what I said" bug.
         """
-        data = bytes(self.buffer)
-        self.buffer.clear()
         self.frames_since_partial = 0
-        return data
+        return bytes(self.buffer)
 
 
 def make_tone(seconds: float, amplitude: int = 3000, hz: float = 440.0) -> bytes:

@@ -341,19 +341,33 @@ async def handle_voice_socket(
                 if partial_due and not done:
                     # Interim display only: partials NEVER reach the
                     # orchestrator, so no capability fires off a guess.
+                    # peek() is non-destructive, so the final take()
+                    # below still gets the whole utterance.
                     interim = tracker.peek()
-                    text = await asyncio.to_thread(
-                        stt_provider.get_stt_provider().transcribe, interim
-                    )
-                    if text.text.strip():
-                        await _send(ws, {"type": "partial", "text": text.text.strip()})
+                    if len(interim) < 6400:
+                        pass
+                    else:
+                        try:
+                            text = await asyncio.to_thread(
+                                stt_provider.get_stt_provider().transcribe, interim
+                            )
+                        except Exception:
+                            text = None
+                        if text is not None and text.text.strip():
+                            await _send(ws, {"type": "partial", "text": text.text.strip()})
                 if done:
                     utterance = tracker.take()
                     if len(utterance) < 6400:
                         continue
-                    result = await asyncio.to_thread(
-                        stt_provider.get_stt_provider().transcribe, utterance
-                    )
+                    try:
+                        result = await asyncio.to_thread(
+                            stt_provider.get_stt_provider().transcribe, utterance
+                        )
+                    except Exception as exc:
+                        # Never kill the call on one bad STT chunk —
+                        # Gemini keeps listening too; surface and continue.
+                        await _send(ws, {"type": "error", "error": f"STT failed: {exc}"})
+                        continue
                     text = result.text.strip()
                     if not text:
                         continue
