@@ -2,7 +2,8 @@ import axios from "axios";
 
 const baseURL =
   (import.meta as unknown as { env?: Record<string, string | undefined> }).env
-    ?.VITE_API_URL ?? "http://localhost:8000";
+    // Production fallback: a build without VITE_API_URL still hits prod.
+    ?.VITE_API_URL ?? "https://careflow-ai-production.up.railway.app";
 
 export const api = axios.create({ baseURL });
 
