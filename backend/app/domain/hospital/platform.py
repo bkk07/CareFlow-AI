@@ -7,13 +7,16 @@ import uuid
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import case, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.audit import AuditEvent
 from app.core.db import get_db
 from app.core.deps import RequestContext, require_role
+from app.core.security import hash_password
 from app.domain.appointment import service as appointment_service
 from app.domain.appointment.models import Appointment, AppointmentState
 from app.domain.appointment.schemas import AppointmentOut
@@ -40,6 +43,43 @@ from app.reliability.models import (
 router = APIRouter(tags=["platform"])
 
 _platform = require_role(Role.platform_admin)
+
+
+class PlatformAdminCreateIn(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+
+
+@router.post("/platform/admins", status_code=201)
+def platform_create_admin(
+    body: PlatformAdminCreateIn,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_platform),
+) -> dict:
+    """Invite a further platform administrator.
+
+    Self-registration cannot create these (first-user bootstrap only),
+    so this authenticated flow is the way to grow the operator set.
+    """
+    del ctx
+    user = User(
+        email=body.email.lower(),
+        password_hash=hash_password(body.password),
+        role=Role.platform_admin,
+        hospital_id=None,
+        is_active=True,
+    )
+    db.add(user)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email is already registered",
+        ) from None
+    db.refresh(user)
+    return {"id": str(user.id), "email": user.email, "role": user.role.value}
 
 
 @router.get("/platform/doctors", response_model=list[DoctorOut])

@@ -8,6 +8,7 @@ and SQLite.
 
 from datetime import datetime, timezone
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -55,9 +56,14 @@ def _counts(session: Session, model, column) -> dict[str, int]:
     return {getattr(key, "value", key): int(n) for key, n in rows}
 
 
-def booking_metrics(session: Session) -> dict[str, Any]:
+def booking_metrics(
+    session: Session, hospital_id: UUID | None = None
+) -> dict[str, Any]:
     """Booking success rate over terminal states + raw state counts."""
-    by_state = _counts(session, Appointment, Appointment.state)
+    query = session.query(Appointment.state, func.count()).select_from(Appointment)
+    if hospital_id is not None:
+        query = query.filter(Appointment.hospital_id == hospital_id)
+    by_state = {getattr(key, "value", key): int(n) for key, n in query.group_by(Appointment.state).all()}
     success = sum(by_state.get(s.value, 0) for s in _SUCCESS_STATES)
     total = sum(by_state.get(s.value, 0) for s in _COUNTED_STATES)
     return {
@@ -68,11 +74,19 @@ def booking_metrics(session: Session) -> dict[str, Any]:
     }
 
 
-def reconciliation_metrics(session: Session) -> dict[str, Any]:
+def reconciliation_metrics(
+    session: Session, hospital_id: UUID | None = None
+) -> dict[str, Any]:
     """Operator queue depth by resolution status."""
-    by_status = _counts(
-        session, ReconciliationRecord, ReconciliationRecord.resolution_status
-    )
+    query = session.query(
+        ReconciliationRecord.resolution_status, func.count()
+    ).select_from(ReconciliationRecord)
+    if hospital_id is not None:
+        query = query.filter(ReconciliationRecord.hospital_id == hospital_id)
+    by_status = {
+        getattr(key, "value", key): int(n)
+        for key, n in query.group_by(ReconciliationRecord.resolution_status).all()
+    }
     return {
         "by_status": by_status,
         "open": by_status.get(ResolutionStatus.open.value, 0),
@@ -80,12 +94,16 @@ def reconciliation_metrics(session: Session) -> dict[str, Any]:
     }
 
 
-def _chat_turn_durations_ms(session: Session) -> list[float]:
-    rows = (
-        session.query(AuditEvent)
-        .filter(AuditEvent.action == SPAN_ACTION)
-        .all()
-    )
+def _chat_turn_durations_ms(
+    session: Session, hospital_id: UUID | None = None
+) -> list[float]:
+    query = session.query(AuditEvent).filter(AuditEvent.action == SPAN_ACTION)
+    if hospital_id is not None:
+        cids = _hospital_correlation_ids(session, hospital_id)
+        query = query.filter(
+            _tenant_or_own_correlation_filter(AuditEvent, hospital_id, cids)
+        )
+    rows = query.all()
     durations = [
         float(row.meta["duration_ms"])
         for row in rows
@@ -96,18 +114,24 @@ def _chat_turn_durations_ms(session: Session) -> list[float]:
     return sorted(durations)
 
 
-def ai_latency_metrics(session: Session) -> dict[str, Any]:
+def ai_latency_metrics(
+    session: Session, hospital_id: UUID | None = None
+) -> dict[str, Any]:
     """Chat-turn latency (p50/p95) + per-tool mean latency from executions."""
-    durations = _chat_turn_durations_ms(session)
-    per_tool_rows = (
-        session.query(
-            CapabilityExecution.tool_name,
-            func.count(),
-            func.avg(CapabilityExecution.latency_ms),
-        )
-        .group_by(CapabilityExecution.tool_name)
-        .all()
+    durations = _chat_turn_durations_ms(session, hospital_id)
+    tool_query = session.query(
+        CapabilityExecution.tool_name,
+        func.count(),
+        func.avg(CapabilityExecution.latency_ms),
     )
+    if hospital_id is not None:
+        cids = _hospital_correlation_ids(session, hospital_id)
+        tool_query = tool_query.filter(
+            _tenant_or_own_correlation_filter(
+                CapabilityExecution, hospital_id, cids
+            )
+        )
+    per_tool_rows = tool_query.group_by(CapabilityExecution.tool_name).all()
     return {
         "chat_turn": {
             "count": len(durations),
@@ -123,36 +147,94 @@ def ai_latency_metrics(session: Session) -> dict[str, Any]:
     }
 
 
-def workflow_metrics(session: Session) -> dict[str, Any]:
-    """Workflow, notification, and escalation health at a glance."""
-    open_escalations = (
-        session.query(func.count())
-        .select_from(Escalation)
-        .filter(Escalation.status == EscalationStatus.open)
-        .scalar()
+def _hospital_correlation_ids(
+    session: Session, hospital_id: UUID
+) -> set[Any]:
+    """Correlation ids of a hospital's appointments.
+
+    Workflow executions and notifications carry no hospital column, so a
+    hospital-scoped view joins them through the appointments they belong
+    to. Anything unattributable is excluded from the scoped view rather
+    than leaked across tenants.
+    """
+    rows = (
+        session.query(Appointment.correlation_id)
+        .filter(Appointment.hospital_id == hospital_id)
+        .all()
     )
+    return {row[0] for row in rows}
+
+
+def _tenant_or_own_correlation_filter(model, hospital_id: UUID, cids: set[Any]):
+    """Rows attributed to this hospital, plus unattributed rows whose
+    correlation belongs to one of the hospital's appointments (e.g.
+    patient-driven tool calls and spans, which carry no hospital id)."""
+    return (
+        (model.hospital_id == hospital_id)
+        | (
+            model.hospital_id.is_(None)
+            & model.correlation_id.in_(cids)
+        )
+    )
+
+
+def workflow_metrics(
+    session: Session, hospital_id: UUID | None = None
+) -> dict[str, Any]:
+    """Workflow, notification, and escalation health at a glance."""
+    esc_query = session.query(func.count()).select_from(Escalation)
+    esc_status_query = session.query(Escalation.status, func.count()).select_from(
+        Escalation
+    )
+    wf_query = session.query(
+        WorkflowExecution.status, func.count()
+    ).select_from(WorkflowExecution)
+    notif_query = session.query(Notification.status, func.count()).select_from(
+        Notification
+    )
+    if hospital_id is not None:
+        esc_query = esc_query.filter(Escalation.hospital_id == hospital_id)
+        esc_status_query = esc_status_query.filter(
+            Escalation.hospital_id == hospital_id
+        )
+        cids = _hospital_correlation_ids(session, hospital_id)
+        wf_query = wf_query.filter(WorkflowExecution.correlation_id.in_(cids))
+        notif_query = notif_query.filter(Notification.correlation_id.in_(cids))
+    open_escalations = esc_query.filter(
+        Escalation.status == EscalationStatus.open
+    ).scalar()
     return {
-        "workflows_by_status": _counts(
-            session, WorkflowExecution, WorkflowExecution.status
-        ),
-        "notifications_by_status": _counts(
-            session, Notification, Notification.status
-        ),
+        "workflows_by_status": {
+            getattr(key, "value", key): int(n)
+            for key, n in wf_query.group_by(WorkflowExecution.status).all()
+        },
+        "notifications_by_status": {
+            getattr(key, "value", key): int(n)
+            for key, n in notif_query.group_by(Notification.status).all()
+        },
         "open_escalations": int(open_escalations or 0),
-        "escalation_statuses": _counts(
-            session, Escalation, Escalation.status
-        ),
+        "escalation_statuses": {
+            getattr(key, "value", key): int(n)
+            for key, n in esc_status_query.group_by(Escalation.status).all()
+        },
     }
 
 
-def overview(session: Session) -> dict[str, Any]:
-    """Everything the metrics endpoint returns."""
+def overview(
+    session: Session, hospital_id: UUID | None = None
+) -> dict[str, Any]:
+    """Everything the metrics endpoint returns.
+
+    With `hospital_id` set, every section is scoped to that hospital;
+    rows that cannot be attributed to a hospital are excluded rather
+    than leaked across tenants.
+    """
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "booking": booking_metrics(session),
-        "reconciliation": reconciliation_metrics(session),
-        "ai_latency": ai_latency_metrics(session),
-        "workflow": workflow_metrics(session),
+        "booking": booking_metrics(session, hospital_id),
+        "reconciliation": reconciliation_metrics(session, hospital_id),
+        "ai_latency": ai_latency_metrics(session, hospital_id),
+        "workflow": workflow_metrics(session, hospital_id),
     }
 
 

@@ -188,7 +188,7 @@ def test_trace_view_shows_full_chain(client, db, tool_factory):
     assert out["outcome"] == "confirmed", out
 
     view = client.get(
-        f"/observability/trace/{cid}", headers=setup["patient"]["headers"]
+        f"/observability/trace/{cid}", headers=setup["hosp"]["owner"]
     )
     assert view.status_code == 200, view.text
     body = view.json()
@@ -201,7 +201,7 @@ def test_trace_view_shows_full_chain(client, db, tool_factory):
     appt_id = out["appointment_id"]
     via_booking = client.get(
         f"/observability/trace/{uuid.uuid4()}?appointment_id={appt_id}",
-        headers=setup["patient"]["headers"],
+        headers=setup["hosp"]["owner"],
     )
     assert via_booking.status_code == 200, via_booking.text
     assert via_booking.json()["correlation_id"] == str(cid)
@@ -211,9 +211,77 @@ def test_trace_unknown_id_is_404(client):
     setup = seed_setup(client, tag="ob404")
     resp = client.get(
         f"/observability/trace/{uuid.uuid4()}",
-        headers=setup["patient"]["headers"],
+        headers=setup["hosp"]["owner"],
     )
     assert resp.status_code == 404
+
+
+def test_trace_and_metrics_require_operator_role(client):
+    setup = seed_setup(client, tag="obrbac")
+    cid = _cid()
+    for path in (f"/observability/trace/{cid}", "/observability/metrics"):
+        resp = client.get(path, headers=setup["patient"]["headers"])
+        assert resp.status_code == 403, (path, resp.text)
+    assert client.get(f"/observability/trace/{cid}").status_code == 401
+
+
+def test_trace_is_tenant_isolated(client, db, tool_factory):
+    own = seed_setup(client, tag="obtenA")
+    other = seed_setup(client, tag="obtenB", platform=own["hosp"]["platform"])
+    ctx = patient_ctx(own)
+    cid = _cid()
+    ctx.correlation_id = cid
+    out = _book(client, db, own, ctx, "ob-ten-1")
+    assert out["outcome"] == "confirmed", out
+
+    # Owning hospital's admin can view it.
+    assert (
+        client.get(
+            f"/observability/trace/{cid}", headers=own["hosp"]["owner"]
+        ).status_code
+        == 200
+    )
+    # Another hospital's admin reads it as 404 (no cross-tenant probe).
+    assert (
+        client.get(
+            f"/observability/trace/{cid}", headers=other["hosp"]["owner"]
+        ).status_code
+        == 404
+    )
+    # Platform admin keeps the global view.
+    assert (
+        client.get(
+            f"/observability/trace/{cid}", headers=own["hosp"]["platform"]
+        ).status_code
+        == 200
+    )
+
+
+def test_metrics_are_tenant_scoped(client, db, tool_factory):
+    own = seed_setup(client, tag="obmetA")
+    other = seed_setup(client, tag="obmetB", platform=own["hosp"]["platform"])
+    ctx = patient_ctx(own)
+    ctx.correlation_id = _cid()
+    out = _book(client, db, own, ctx, "ob-met-1")
+    assert out["outcome"] == "confirmed", out
+
+    scoped = client.get(
+        "/observability/metrics", headers=own["hosp"]["owner"]
+    )
+    assert scoped.status_code == 200, scoped.text
+    assert scoped.json()["booking"]["by_state"].get("confirmed", 0) == 1
+
+    foreign = client.get(
+        "/observability/metrics", headers=other["hosp"]["owner"]
+    )
+    assert foreign.status_code == 200, foreign.text
+    assert foreign.json()["booking"]["by_state"].get("confirmed", 0) in (None, 0)
+
+    platform = client.get(
+        "/observability/metrics", headers=own["hosp"]["platform"]
+    )
+    assert platform.status_code == 200, platform.text
+    assert platform.json()["booking"]["by_state"].get("confirmed", 0) >= 1
 
 
 # -- metrics ------------------------------------------------------------------
@@ -226,7 +294,7 @@ def test_metrics_reports_booking_rate_and_latency(client, db, tool_factory):
     out = _book(client, db, setup, ctx, "ob-metrics-1")
     assert out["outcome"] == "confirmed", out
 
-    resp = client.get("/observability/metrics", headers=setup["patient"]["headers"])
+    resp = client.get("/observability/metrics", headers=setup["hosp"]["owner"])
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["booking"]["success_rate"] == 1.0
@@ -319,7 +387,7 @@ def test_call_conversation_maps_to_stable_correlation(client, db, monkeypatch):
     assert rows[0].correlation_id == expected
 
     view = client.get(
-        f"/observability/trace/{expected}", headers=setup["patient"]["headers"]
+        f"/observability/trace/{expected}", headers=setup["hosp"]["owner"]
     )
     assert view.status_code == 200, view.text
     assert "conversation" in view.json()["layers"]

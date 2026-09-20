@@ -26,7 +26,7 @@ Base URL locally: `http://localhost:8000`. Production fallback compiled into fro
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| `POST` | `/auth/register` | public | `201`. Requires `hospital_id` for hospital-scoped roles (`hospital_admin`, `doctor`); forbidden otherwise |
+| `POST` | `/auth/register` | public | `201`. Self-registration for `patient` (and `doctor` bound to a hospital). `hospital_admin` and second-or-later `platform_admin` return `403`; privileged provisioning flows only |
 | `POST` | `/auth/login` | public | OAuth2 password flow, returns access + refresh tokens |
 | `POST` | `/auth/refresh` | public + refresh token in body | Rejects non-`refresh` token types and inactive users |
 | `GET` | `/auth/me` | `get_current_context` | Session restore / boot |
@@ -157,8 +157,8 @@ Admin = `hospital_admin`; answerer = `patient, hospital_admin, doctor`; viewer a
 | `POST` (`201`) | `/hospitals/{hospital_id}/questionnaires/{questionnaire_id}/questions` | admin + managed |
 | `GET` / `PUT` / `DELETE` (`204`) | `/hospitals/{hospital_id}/questionnaires/{questionnaire_id}` | admin + managed |
 | `PUT` / `DELETE` (`204`) | `/hospitals/{hospital_id}/questionnaires/questions/{question_id}` | admin + managed |
-| `GET` | `/appointments/{appointment_id}/questionnaire` | answerer |
-| `POST` | `/appointments/{appointment_id}/questionnaire/responses` | answerer |
+| `GET` | `/appointments/{appointment_id}/questionnaire` | answerer (`patient` own, `hospital_admin` same hospital, `doctor` own linked calendar) |
+| `POST` | `/appointments/{appointment_id}/questionnaire/responses` | submitter (`patient` own, `hospital_admin` same hospital — doctors read but never file) |
 | `GET` | `/appointments/{appointment_id}/questionnaire/responses` | viewer |
 
 ## Scheduling (`backend/app/domain/scheduling/router.py`, `tags=["scheduling"]`)
@@ -240,7 +240,7 @@ Requires `hospital_admin` or `platform_admin`; hospital admins are forced to the
 
 ## Observability (`backend/app/observability/router.py`, `prefix="/observability"`, `tags=["observability"]`)
 
-Any authenticated user (`get_current_context`).
+Operator roles only (`hospital_admin, platform_admin`). Hospital admins see their own hospital's data (other tenants' traces read as 404); platform admins see the global view.
 
 | Method | Path |
 |---|---|

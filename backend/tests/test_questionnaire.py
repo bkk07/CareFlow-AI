@@ -299,7 +299,7 @@ def test_doctor_can_view_response(client, stub_integration):
         headers=h,
     )
 
-    # A doctor of the same hospital reads the response (dashboard stub).
+    # The appointment's own doctor (linked login) reads the response.
     uid = uuid.uuid4().hex[:6]
     email = f"doc-{uid}@example.com"
     assert (
@@ -318,11 +318,63 @@ def test_doctor_can_view_response(client, stub_integration):
         "/auth/login", json={"email": email, "password": "correct-horse-42"}
     ).json()
     doc_h = {"Authorization": f"Bearer {tokens['access_token']}"}
+    me = client.get("/auth/me", headers=doc_h).json()
+    link = client.put(
+        f"/hospitals/{setup['hid']}/doctors/{setup['doctor']['id']}",
+        json={"user_id": me["id"]},
+        headers=setup["hosp"]["owner"],
+    )
+    assert link.status_code == 200, link.text
     seen = client.get(
         f"/appointments/{appt['id']}/questionnaire/responses", headers=doc_h
     )
     assert seen.status_code == 200, seen.text
     assert seen.json()[0]["answers"] == {q1["id"]: "none"}
+
+    # Doctors never file answers on a patient's behalf.
+    denied_submit = client.post(
+        f"/appointments/{appt['id']}/questionnaire/responses",
+        json={"answers": {q1["id"]: "doctor-typed"}},
+        headers=doc_h,
+    )
+    assert denied_submit.status_code == 403, denied_submit.text
+
+    # A doctor linked to a DIFFERENT calendar cannot read them either.
+    other_doc = client.post(
+        f"/hospitals/{setup['hid']}/doctors",
+        json={"name": "Dr. Other"},
+        headers=setup["hosp"]["owner"],
+    ).json()
+    other_email = f"doc-other-{uid}@example.com"
+    assert (
+        client.post(
+            "/auth/register",
+            json={
+                "email": other_email,
+                "password": "correct-horse-42",
+                "role": "doctor",
+                "hospital_id": setup["hid"],
+            },
+        ).status_code
+        == 201
+    )
+    other_tokens = client.post(
+        "/auth/login", json={"email": other_email, "password": "correct-horse-42"}
+    ).json()
+    other_h = {"Authorization": f"Bearer {other_tokens['access_token']}"}
+    other_me = client.get("/auth/me", headers=other_h).json()
+    other_link = client.put(
+        f"/hospitals/{setup['hid']}/doctors/{other_doc['id']}",
+        json={"user_id": other_me["id"]},
+        headers=setup["hosp"]["owner"],
+    )
+    assert other_link.status_code == 200, other_link.text
+    assert (
+        client.get(
+            f"/appointments/{appt['id']}/questionnaire/responses", headers=other_h
+        ).status_code
+        == 403
+    )
 
     # A stranger patient still cannot.
     from tests.test_mcp_agent import register_patient

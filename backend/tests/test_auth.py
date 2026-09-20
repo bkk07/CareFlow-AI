@@ -35,8 +35,6 @@ def login(client, email, password=PASSWORD):
 @pytest.mark.parametrize(
     "role,needs_hospital",
     [
-        ("platform_admin", False),
-        ("hospital_admin", True),
         ("doctor", True),
         ("patient", False),
     ],
@@ -87,9 +85,6 @@ def test_duplicate_email_rejected(client):
 def test_role_hospital_id_validation(client):
     # Hospital-bound roles require a hospital.
     assert register(client, "doc@example.com", "doctor").status_code == 422
-    assert (
-        register(client, "admin@example.com", "hospital_admin").status_code == 422
-    )
     # Non-hospital roles must not carry one.
     assert (
         register(
@@ -106,6 +101,37 @@ def test_role_hospital_id_validation(client):
         ).status_code
         == 422
     )
+
+
+def test_privileged_roles_cannot_self_register(client):
+    # hospital_admin is never self-registered: provisioned via
+    # POST /hospitals (first admin) or POST /hospitals/{id}/staff.
+    assert (
+        register(
+            client,
+            "sneaky-admin@example.com",
+            "hospital_admin",
+            hospital_id=make_hospital_id(),
+        ).status_code
+        == 403
+    )
+    assert (
+        register(client, "sneaky-admin2@example.com", "hospital_admin").status_code
+        == 403
+    )
+
+
+def test_platform_admin_bootstrap_only_when_none_exists(client):
+    # First platform_admin (deployment bootstrap) is allowed.
+    assert (
+        register(client, "root@example.com", "platform_admin").status_code == 201
+    )
+    # A second one must not be self-registered once an admin exists.
+    assert (
+        register(client, "root2@example.com", "platform_admin").status_code == 403
+    )
+    # The bootstrapped admin can still log in.
+    assert login(client, "root@example.com").status_code == 200
 
 
 # --- login failures ----------------------------------------------------------
@@ -226,11 +252,26 @@ def _ctx_for(db, email) -> RequestContext:
     )
 
 
+def _make_user(db, email, role, hospital_id=None):
+    """Create a user row directly (bypasses /auth/register, which forbids
+    privileged self-registration by design)."""
+    user = User(
+        email=email,
+        password_hash=hash_password(PASSWORD),
+        role=role,
+        hospital_id=uuid.UUID(hospital_id) if hospital_id is not None else None,
+        is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    return user
+
+
 def test_hospital_scoped_query_isolates_tenants(client, db):
     hosp_a, hosp_b = make_hospital_id(), make_hospital_id()
-    register(client, "root@example.com", "platform_admin")
-    register(client, "admin-a@example.com", "hospital_admin", hosp_a)
-    register(client, "admin-b@example.com", "hospital_admin", hosp_b)
+    _make_user(db, "root@example.com", Role.platform_admin)
+    _make_user(db, "admin-a@example.com", Role.hospital_admin, hosp_a)
+    _make_user(db, "admin-b@example.com", Role.hospital_admin, hosp_b)
 
     rows_a = (
         hospital_scoped_query(User, _ctx_for(db, "admin-a@example.com"), db).all()
@@ -250,7 +291,7 @@ def test_hospital_scoped_query_isolates_tenants(client, db):
 def test_context_uses_db_hospital_id_not_stale_claim(client, db):
     """A token minted before a user changes hospitals must not leak the old scope."""
     hosp_a, hosp_b = make_hospital_id(), make_hospital_id()
-    register(client, "mover@example.com", "hospital_admin", hosp_a)
+    _make_user(db, "mover@example.com", Role.hospital_admin, hosp_a)
     stale_token = login(client, "mover@example.com").json()["access_token"]
 
     user = db.query(User).filter(User.email == "mover@example.com").one()

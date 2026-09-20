@@ -355,6 +355,7 @@ def test_platform_ai_evaluation_aggregates(client, stub_integration, tool_factor
                     "recipient_user_id": setup["patient"]["id"],
                     "channel": "in_app",
                     "message": "hello",
+                    "dedupe_key": "aie-denied-1",
                 },
             },
             headers=setup["patient"]["headers"],

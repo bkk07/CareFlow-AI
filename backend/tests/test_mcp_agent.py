@@ -156,8 +156,8 @@ def register_patient(client, tag):
     return {"headers": headers, "id": me["id"]}
 
 
-def seed_setup(client, tag="mcp"):
-    hosp = approved_hospital(client, tag=tag)
+def seed_setup(client, tag="mcp", platform=None):
+    hosp = approved_hospital(client, tag=tag, platform=platform)
     hid = hosp["id"]
     spec = client.post(
         f"/hospitals/{hid}/specialties",
@@ -264,6 +264,7 @@ def test_role_enforcement_and_error_audit(client, db, tool_factory):
                 "recipient_user_id": setup["patient"]["id"],
                 "channel": "in_app",
                 "message": "hello",
+                "dedupe_key": "role-denied-1",
             },
         },
         headers=setup["patient"]["headers"],
@@ -2404,6 +2405,7 @@ def test_chat_endpoint_maps_missing_key_to_503(client, monkeypatch, tool_factory
 
     setup = seed_setup(client, tag="nokey")
     monkeypatch.setattr(settings, "llm_api_key", "")
+    monkeypatch.setattr(settings, "inception_api_key", "")
     resp = client.post(
         "/chat",
         json={"message": "I need a cardiologist"},
@@ -2446,6 +2448,7 @@ def test_tool_reschedule_cancel_and_sync_roundtrip(client, tool_factory):
                 "appointment_id": appt_id,
                 "slot_start": start2,
                 "slot_end": end2,
+                "idempotency_key": "move-2",
             },
         },
         headers=h,
@@ -2463,7 +2466,10 @@ def test_tool_reschedule_cancel_and_sync_roundtrip(client, tool_factory):
 
     cancelled = client.post(
         "/mcp/call",
-        json={"tool": "cancel_appointment", "input": {"appointment_id": appt_id}},
+        json={
+            "tool": "cancel_appointment",
+            "input": {"appointment_id": appt_id, "idempotency_key": "move-3"},
+        },
         headers=h,
     )
     assert cancelled.json()["result"]["state"] == "cancelled"

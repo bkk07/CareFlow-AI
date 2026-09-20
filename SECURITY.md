@@ -20,7 +20,8 @@ Grounded in `backend/app/core/security.py`, `backend/app/core/deps.py`, `backend
 
 - The reloaded database user row is authoritative; the token's `hospital_id` claim is treated as a hint only.
 - `hospital_scoped_query()` (`backend/app/core/tenant.py:9-19`) filters tenant queries; only `platform_admin` bypasses scoping.
-- Registration enforces `hospital_id` required for `hospital_admin`/`doctor` and forbidden for other roles (`backend/app/domain/auth/router.py`).
+- Registration enforces `hospital_id` required for `doctor` and forbidden for `patient`/`platform_admin`. Privileged roles are not self-registerable: `hospital_admin` accounts are provisioned via hospital registration or staff invite, and `platform_admin` only via first-user bootstrap; direct requests return 403 (`backend/app/domain/auth/router.py`).
+- Observability trace/metrics require `hospital_admin`/`platform_admin`; hospital admins see only their own hospital's data (`backend/app/observability/`).
 
 ## AI / voice safety boundaries
 

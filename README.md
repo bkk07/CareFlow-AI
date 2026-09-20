@@ -615,13 +615,28 @@ docker compose logs -f backend worker beat
 
 | Suite | Framework / location | Run |
 |---|---|---|
-| Backend (30+ files: auth, scheduling, appointments, double-booking, lifecycle, reliability, workflow, questionnaire, dashboards, voice, telephony, MCP/agent, observability, geo, dashboards…) | pytest, SQLite + `TestClient`, `TASK_EAGER` eager mode | `cd backend && pytest` |
+| Backend (30+ files: auth, scheduling, appointments, double-booking, lifecycle, reliability, workflow, questionnaire, dashboards, voice, telephony, MCP/agent, observability, geo, dashboards…) | pytest, SQLite + `TestClient`, eager Celery + in-memory AI context (no Redis needed) | `cd backend && pytest` |
 | Booking-state determinism (45 tests) | `backend/tests/test_booking_state.py` | `pytest tests/test_booking_state.py` |
 | Categorized suites | `backend/tests/{unit,integration,ai,ehr}/` | `pytest tests/unit tests/integration tests/ai tests/ehr` |
 | E2E (`happy_path_spec`, `failure_recovery_spec` + `seed.ts`) | Playwright + Chromium headless, `backend/tests/e2e/` | `cd backend/tests/e2e && npm install && npx playwright test` |
 | Frontend typecheck + build | `tsc --noEmit && vite build` per app | `npm run build` in `frontend/apps/<app>` |
 
 Documented suite sizes grew per phase (up to 376+ passing) in `docs/opencode-prompts.md`.
+
+Test environment: the suite is self-contained — `backend/tests/conftest.py` forces Celery eager mode and the in-memory AI-context store, so `pytest` needs no running Redis, Postgres, or LLM keys (LLM calls are scripted/monkeypatched; the vendor EHR is stubbed). A full run takes ~6 minutes. The Playwright E2E specs additionally need the live stack (backend + frontend dev servers + Redis) described above.
+
+### First-run demo accounts (no seed script — create in order)
+
+1. Register the first `platform_admin` via `POST /auth/register` (allowed only while no platform admin exists — deployment bootstrap; later attempts return 403).
+2. Register a hospital via `POST /hospitals` (creates the hospital as `submitted` plus its first `hospital_admin` login).
+3. Approve it as platform admin (`POST /platform/hospitals/{id}/approve`), then configure catalog, doctors, calendars, and availability from the Hospital Admin app.
+4. Self-register `patient` accounts via `POST /auth/register` (patients and doctors are the only self-registerable roles; `hospital_admin` must come from hospital registration or `POST /hospitals/{id}/staff`).
+
+### Voice provider requirements
+
+- Web voice works out of the box for capture/VAD/streaming UI, but transcription defaults to a stub that hears nothing: set `STT_PROVIDER=groq` plus `LLM_API_KEY`/`GROQ_API_KEY` for real Groq Whisper transcription.
+- Spoken replies on web are browser speech synthesis (no key needed). There is no server-side TTS — the telephone path therefore has no voice output until a TTS provider is wired (`StubTTS` raises by design).
+- The AI chat/telephone agent needs an LLM key (`INCEPTION_API_KEY` preferred, Groq fallback); without one, chat fails closed (503) and telephony cannot converse.
 
 ---
 
@@ -659,7 +674,9 @@ Documented suite sizes grew per phase (up to 376+ passing) in `docs/opencode-pro
 Implemented (verified in code — not a claim of production-hardening; see [`SECURITY.md`](SECURITY.md) for the full model):
 
 - Argon2 password hashing; JWT HS256 access + refresh (2 d / 2 d); per-request DB user reload with inactive rejection; no sessions/SSO.
+- Self-registration is limited to `patient` (and `doctor` bound to a hospital); `hospital_admin` is provisioned only via hospital registration/staff invite, and `platform_admin` only via first-user bootstrap — direct self-registration of privileged roles returns 403.
 - `require_role()` on routers; `allowed_roles` on all 20 MCP tools (denied calls still audited); patient self-booking constraint in write tools.
+- Observability trace/metrics require an operator role; hospital admins see only their own hospital's data, platform admins the global view.
 - Hospital tenancy via `hospital_scoped_query`; token `hospital_id` treated as a hint only; `platform_admin` sole bypass.
 - CORS allowlist; Pydantic validation on every router/tool input; email validation; phone digit-normalization; Twilio HMAC-SHA1 check when token configured.
 - Orchestrator confirmation gate on booking writes; `idempotency_key` required on writes + DB unique backstop; slot reservation under `FOR UPDATE` lock; EHR writes verified before confirm.

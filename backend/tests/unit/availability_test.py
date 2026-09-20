@@ -26,8 +26,9 @@ def test_weekly_rule_yields_sixteen_monday_slots(client):
     assert resp.status_code == 200, resp.text
     slots = resp.json()
     assert len(slots) == 16  # 8h x 30min
-    assert slots[0]["start"] == "2026-10-05T09:00:00Z"
-    assert slots[-1]["end"] == "2026-10-05T17:00:00Z"
+    # Rules are IST wall-time: 09:00 IST = 03:30 UTC.
+    assert slots[0]["start"] == "2026-10-05T03:30:00Z"
+    assert slots[-1]["end"] == "2026-10-05T11:30:00Z"
 
 
 def test_other_weekday_has_no_slots(client):

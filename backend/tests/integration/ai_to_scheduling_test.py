@@ -1,6 +1,7 @@
 """integration/ai_to_scheduling: the agent's words become slot lookups."""
 
 from app.ai.agent import orchestrator
+from app.ai.context.ai_context import get_ai_context, save_ai_context
 from app.mcp_server.models import CapabilityExecution
 from tests.test_mcp_agent import patient_ctx, scripted, seed_setup
 
@@ -8,6 +9,16 @@ from tests.test_mcp_agent import patient_ctx, scripted, seed_setup
 def test_agent_check_availability_returns_real_slots(client, db, ehr_stub):
     setup = seed_setup(client, tag="i2sched")
     ctx = patient_ctx(setup)
+    # The visit-type step precedes availability by design (visit_type_gate
+    # + booking_completeness): seed a conversation that already picked a
+    # type and mode, so this turn exercises the tool path, not the gates.
+    seeded = get_ai_context("conv-i2sched")
+    seeded.user_id = setup["patient"]["id"]
+    seeded.visit_types_seen = True
+    seeded.selected_appointment_type_id = setup["type"]["id"]
+    seeded.selected_consultation_mode = "in_person"
+    seeded.selected_doctor_id = setup["doctor"]["id"]
+    save_ai_context(seeded)
     complete = scripted(
         {
             "content": None,

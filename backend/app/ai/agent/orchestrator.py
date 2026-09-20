@@ -528,6 +528,7 @@ def _booking_confirmation_gate(context, user_text: str, name: str, args: dict) -
         context.pending_clarification = "booking_confirmation"
         return {"ok": False, "error": CONFIRM_REQUIRED}
     if name == "reschedule_appointment":
+        _ensure_booking_idempotency(args)
         if _is_confirmation(user_text) and _slot_known(context, args):
             return None
         context.pending_booking = {
@@ -542,6 +543,7 @@ def _booking_confirmation_gate(context, user_text: str, name: str, args: dict) -
     # cancel_appointment: confirmation language alone unlocks it — the
     # appointment was resolved via read-only tools, and the user must still
     # say yes explicitly.
+    _ensure_booking_idempotency(args)
     if _is_confirmation(user_text):
         return None
     context.pending_booking = {

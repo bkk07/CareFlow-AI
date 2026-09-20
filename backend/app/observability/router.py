@@ -19,8 +19,9 @@ from sqlalchemy.orm import Session
 
 from app.core.audit import AuditEvent
 from app.core.db import get_db
-from app.core.deps import RequestContext, get_current_context
+from app.core.deps import RequestContext, require_role
 from app.domain.appointment.models import Appointment, AppointmentHistory
+from app.domain.auth.models import Role
 from app.mcp_server.models import CapabilityExecution, Escalation
 from app.notification.models import Notification
 from app.observability import metrics as metrics_mod
@@ -276,22 +277,87 @@ def trace_timeline(session: Session, correlation_id: uuid.UUID) -> dict[str, Any
     }
 
 
+_ops = require_role(Role.hospital_admin, Role.platform_admin)
+
+
+def _trace_hospital_ids(
+    session: Session, correlation_id: uuid.UUID
+) -> set[uuid.UUID]:
+    """Every non-null hospital attribution on this correlation's rows."""
+    found: set[uuid.UUID] = set()
+    for row in (
+        session.query(Appointment.hospital_id)
+        .filter(Appointment.correlation_id == correlation_id)
+        .all()
+    ):
+        if row[0] is not None:
+            found.add(row[0])
+    for row in (
+        session.query(AuditEvent.hospital_id)
+        .filter(AuditEvent.correlation_id == correlation_id)
+        .all()
+    ):
+        if row[0] is not None:
+            found.add(row[0])
+    for row in (
+        session.query(CapabilityExecution.hospital_id)
+        .filter(CapabilityExecution.correlation_id == correlation_id)
+        .all()
+    ):
+        if row[0] is not None:
+            found.add(row[0])
+    appointment_ids = {
+        a.id
+        for a in session.query(Appointment.id)
+        .filter(Appointment.correlation_id == correlation_id)
+        .all()
+    }
+    if appointment_ids:
+        for row in (
+            session.query(ReconciliationRecord.hospital_id)
+            .filter(ReconciliationRecord.appointment_id.in_(appointment_ids))
+            .all()
+        ):
+            if row[0] is not None:
+                found.add(row[0])
+        for row in (
+            session.query(Escalation.hospital_id)
+            .filter(Escalation.appointment_id.in_(appointment_ids))
+            .all()
+        ):
+            if row[0] is not None:
+                found.add(row[0])
+    return found
+
+
 @router.get("/trace/{correlation_id}")
 def get_trace(
     correlation_id: uuid.UUID,
     appointment_id: uuid.UUID | None = Query(default=None),
     db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(get_current_context),
+    ctx: RequestContext = Depends(_ops),
 ) -> dict[str, Any]:
     """Full trace/log view for one correlation id.
 
     With `?appointment_id=` the booking's own correlation is resolved
     first — the booking turn's id is the one the UI holds.
+
+    Hospital admins may only view traces attributed to their own
+    hospital; anything else (including other tenants' traces) reads as
+    404 so one tenant cannot probe another's activity. Correlation ids
+    are unguessable UUIDs, so there is no list/enumeration surface.
     """
-    del ctx
     if appointment_id is not None:
         appointment = db.get(Appointment, appointment_id)
         if appointment is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Appointment not found",
+            )
+        if (
+            ctx.role != Role.platform_admin
+            and appointment.hospital_id != ctx.hospital_id
+        ):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Appointment not found",
@@ -303,17 +369,29 @@ def get_trace(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No records for this correlation id",
         )
+    if ctx.role != Role.platform_admin:
+        attributed = _trace_hospital_ids(db, correlation_id)
+        if any(hid != ctx.hospital_id for hid in attributed):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No records for this correlation id",
+            )
     return view
 
 
 @router.get("/metrics")
 def get_metrics(
     db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(get_current_context),
+    ctx: RequestContext = Depends(_ops),
 ) -> dict[str, Any]:
-    """Booking success rate, reconciliation depth, AI latency."""
-    del ctx
-    return metrics_mod.overview(db)
+    """Booking success rate, reconciliation depth, AI latency.
+
+    Platform admins see the global view; hospital admins see only their
+    own hospital's data.
+    """
+    if ctx.role == Role.platform_admin:
+        return metrics_mod.overview(db)
+    return metrics_mod.overview(db, hospital_id=ctx.hospital_id)
 
 
 __all__ = ["router", "trace_timeline"]

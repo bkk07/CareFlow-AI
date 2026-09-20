@@ -32,6 +32,24 @@ from app.workflow import models as workflow_models  # noqa: F401
 from app.core import audit as audit_module  # noqa: F401
 from app.main import app
 
+# Tests must run with zero infrastructure: Celery eager mode executes
+# published workflow events inline in-process, so `pytest` never blocks
+# on a Redis broker connection. The eager task looks its execution row
+# up in its own session (which never sees the test transaction), records
+# "execution not found", and returns — handlers that need the test DB
+# opt in explicitly via set_session_factory (see test_workflow.py).
+from app.workflow.celery_app import celery_app  # noqa: E402
+
+celery_app.conf.task_always_eager = True
+
+# Same zero-infra rule for conversation memory: AIContext tries Redis on
+# every get/save (each attempt stalls ~2s with no server running), so
+# tests pin the documented process-local fallback store, which shares
+# the same TTL semantics.
+import app.ai.context.ai_context as _ai_context  # noqa: E402
+
+_ai_context._redis = lambda: None  # noqa: E731
+
 engine = create_engine(
     "sqlite://",
     connect_args={"check_same_thread": False},
@@ -41,9 +59,15 @@ TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=Fals
 
 Base.metadata.create_all(bind=engine)
 
+# Email/password of this test's bootstrapped platform_admin, if one has
+# been created. Reset by the `db` fixture before every test.
+_bootstrap_platform: dict | None = None
+
 
 @pytest.fixture()
 def db():
+    global _bootstrap_platform
+    _bootstrap_platform = None
     session = TestingSessionLocal()
     try:
         yield session
@@ -192,11 +216,15 @@ def ehr_stub(db):
     tool_base.set_integration_factory(None)
 
 
-def approved_hospital(client, tag="x"):
+def approved_hospital(client, tag="x", platform=None):
     """Register + approve a hospital.
 
     Returns {"id", "owner", "platform", "admin_email"} where owner/platform
     are ready-to-use Authorization header dicts.
+
+    Only the first platform_admin can self-register (deployment
+    bootstrap); pass an existing hospital's ``platform`` headers when a
+    test needs more than one hospital so all approvals share it.
     """
     uid = uuid.uuid4().hex[:6]
     payload = {
@@ -211,22 +239,33 @@ def approved_hospital(client, tag="x"):
     assert reg.status_code == 201, reg.text
     hospital_id = reg.json()["id"]
 
-    root_email = f"root-{tag}-{uid}@example.com"
-    assert (
-        client.post(
-            "/auth/register",
-            json={
+    if platform is None:
+        global _bootstrap_platform
+        if _bootstrap_platform is None:
+            root_email = f"root-{tag}-{uid}@example.com"
+            assert (
+                client.post(
+                    "/auth/register",
+                    json={
+                        "email": root_email,
+                        "password": "correct-horse-42",
+                        "role": "platform_admin",
+                    },
+                ).status_code
+                == 201
+            )
+            _bootstrap_platform = {
                 "email": root_email,
                 "password": "correct-horse-42",
-                "role": "platform_admin",
+            }
+        ptokens = client.post(
+            "/auth/login",
+            json={
+                "email": _bootstrap_platform["email"],
+                "password": _bootstrap_platform["password"],
             },
-        ).status_code
-        == 201
-    )
-    ptokens = client.post(
-        "/auth/login", json={"email": root_email, "password": "correct-horse-42"}
-    ).json()
-    platform = {"Authorization": f"Bearer {ptokens['access_token']}"}
+        ).json()
+        platform = {"Authorization": f"Bearer {ptokens['access_token']}"}
 
     approval = client.post(
         f"/platform/hospitals/{hospital_id}/approve", headers=platform

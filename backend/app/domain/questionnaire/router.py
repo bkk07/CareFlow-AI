@@ -36,6 +36,10 @@ router = APIRouter(tags=["questionnaires"])
 
 _admin = require_role(Role.hospital_admin)
 _answerer = require_role(Role.patient, Role.hospital_admin, Role.doctor)
+# Submitting answers is the owning patient or a hospital admin (front
+# desk); doctors read responses but never file them. This matches the
+# MCP submit_questionnaire roles.
+_submitter = require_role(Role.patient, Role.hospital_admin)
 _viewer = require_role(Role.patient, Role.hospital_admin, Role.platform_admin, Role.doctor)
 
 
@@ -63,16 +67,32 @@ def _question_out(row) -> QuestionOut:
     )
 
 
-def _check_appointment_access(ctx: RequestContext, appointment: Appointment) -> None:
+def _check_appointment_access(
+    ctx: RequestContext, appointment: Appointment, db: Session
+) -> None:
     if ctx.role == Role.platform_admin:
         return
     if ctx.role == Role.patient and appointment.patient_id == ctx.user_id:
         return
     if (
-        ctx.role in (Role.hospital_admin, Role.doctor)
+        ctx.role == Role.hospital_admin
         and ctx.hospital_id == appointment.hospital_id
     ):
         return
+    if ctx.role == Role.doctor:
+        # Doctors see only their own linked calendar's appointments —
+        # same rule as the appointment endpoints.
+        from app.domain.doctor import dashboard as doctor_dashboard
+
+        try:
+            linked = doctor_dashboard.get_linked_doctor(db, ctx)
+        except HTTPException:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not allowed to access this appointment",
+            ) from None
+        if appointment.doctor_id == linked.id:
+            return
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Not allowed to access this appointment",
@@ -256,7 +276,7 @@ def get_appointment_questionnaire(
     ctx: RequestContext = Depends(_answerer),
 ) -> QuestionnaireDetailOut | None:
     appointment = get_appointment_or_404(db, appointment_id)
-    _check_appointment_access(ctx, appointment)
+    _check_appointment_access(ctx, appointment, db)
     questionnaire = service.resolve_for_appointment(db, appointment)
     if questionnaire is None:
         return None
@@ -276,10 +296,10 @@ def submit_response(
     appointment_id: uuid.UUID,
     body: ResponseSubmitIn,
     db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(_answerer),
+    ctx: RequestContext = Depends(_submitter),
 ) -> ResponseOut:
     appointment = get_appointment_or_404(db, appointment_id)
-    _check_appointment_access(ctx, appointment)
+    _check_appointment_access(ctx, appointment, db)
     questionnaire = service.resolve_for_appointment(db, appointment)
     if questionnaire is None:
         raise HTTPException(
@@ -311,7 +331,7 @@ def list_responses(
     ctx: RequestContext = Depends(_viewer),
 ) -> list:
     appointment = get_appointment_or_404(db, appointment_id)
-    _check_appointment_access(ctx, appointment)
+    _check_appointment_access(ctx, appointment, db)
     return [
         _response_out(row)
         for row in db.query(QuestionnaireResponse)

@@ -37,6 +37,28 @@ def _issue_tokens(user: User) -> TokenOut:
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def register(body: RegisterIn, db: Session = Depends(get_db)) -> User:
+    # Privileged roles are never self-registered here:
+    # - hospital_admin accounts are provisioned via POST /hospitals
+    #   (first admin) or POST /hospitals/{id}/staff (invited by an admin).
+    # - platform_admin has no inviter by definition, so only the very
+    #   first platform_admin account (deployment bootstrap) may be
+    #   created through this endpoint.
+    if body.role == Role.hospital_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="hospital_admin accounts must be created through hospital "
+            "registration or staff invitation, not self-registration",
+        )
+    if body.role == Role.platform_admin:
+        existing_admin = (
+            db.query(User.id).filter(User.role == Role.platform_admin).first()
+        )
+        if existing_admin is not None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="platform_admin accounts can only be created when no "
+                "platform administrator exists yet",
+            )
     if body.role in HOSPITAL_SCOPED_ROLES and body.hospital_id is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
