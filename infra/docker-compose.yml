@@ -37,6 +37,10 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-careflow}:${POSTGRES_PASSWORD:-careflow}@postgres:5432/${POSTGRES_DB:-careflow}
       REDIS_URL: redis://redis:6379/0
+      # Split layout: worker + beat run as their own containers below, so the
+      # backend container serves the API only (ALL_IN_ONE defaults to true
+      # for single-container Railway deploys).
+      ALL_IN_ONE: "false"
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-2880}
       REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-2}
     ports:

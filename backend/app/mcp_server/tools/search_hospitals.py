@@ -35,10 +35,11 @@ def run(
     db: Session,
     integration: IntegrationService,
 ) -> dict:
-    """List approved hospitals, optionally filtered by name.
+    """List approved hospitals, optionally filtered by name or city.
 
-    `city` ranks same-city hospitals first so "near me" works off the
-    patient's saved city; it never excludes other cities. When
+    `query` matches hospital name or city so free-text "Find care" search
+    just works. `city` ranks same-city hospitals first so "near me" works
+    off the patient's saved city; it never excludes other cities. When
     `latitude`+`longitude` are given, hits are ordered by real distance
     (nearest first, each carrying `distance_km`); `radius_km` additionally
     filters out anything farther away.
@@ -46,7 +47,10 @@ def run(
     del ctx, integration
     q = db.query(Hospital).filter(Hospital.status == HospitalStatus.approved)
     if input.query:
-        q = q.filter(Hospital.name.ilike(f"%{input.query.strip()}%"))
+        text = input.query.strip()
+        q = q.filter(
+            Hospital.name.ilike(f"%{text}%") | Hospital.city.ilike(f"%{text}%")
+        )
     city = (input.city or "").strip()
     has_point = geo.validate_point(input.latitude, input.longitude)
     if has_point:

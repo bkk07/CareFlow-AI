@@ -259,6 +259,7 @@ export async function searchDoctors(args: {
   specialty?: string;
   query?: string;
   city?: string;
+  consultation_mode?: string;
   latitude?: number;
   longitude?: number;
   radius_km?: number;
@@ -270,6 +271,7 @@ export async function searchDoctors(args: {
   if (args.specialty) input.specialty = args.specialty;
   if (args.query) input.query = args.query;
   if (args.city) input.city = args.city;
+  if (args.consultation_mode) input.consultation_mode = args.consultation_mode;
   if (args.latitude !== undefined) input.latitude = args.latitude;
   if (args.longitude !== undefined) input.longitude = args.longitude;
   if (args.radius_km !== undefined) input.radius_km = args.radius_km;
@@ -287,10 +289,15 @@ export async function listSpecialties(hospitalId: string): Promise<Specialty[]> 
 }
 
 export async function listAppointmentTypes(hospitalId: string): Promise<AppointmentType[]> {
-  const { data } = await api.get("/directory/appointment-types", {
-    params: { hospital_id: hospitalId },
-  });
-  return data.appointment_types;
+  // Live catalog via the MCP tool (not a cached REST copy): visit types may
+  // change per hospital, so every load resolves ids + durations from the DB.
+  // Each type carries its own duration; booking validates the slot is
+  // exactly that long server-side.
+  const result = await mcpCall<{ appointment_types: AppointmentType[] }>(
+    "list_appointment_types",
+    { hospital_id: hospitalId },
+  );
+  return result.appointment_types;
 }
 
 export async function checkAvailability(args: {
@@ -483,6 +490,7 @@ export interface ChatPendingBooking {
   slot_start: string | null;
   slot_end: string | null;
   appointment_id: string | null;
+  consultation_mode?: string | null;
 }
 
 export interface ChatAppointmentType {
@@ -512,6 +520,7 @@ export interface ChatReply {
   slots: ChatSlot[];
   appointment_types: ChatAppointmentType[];
   day_schedule: ChatDaySchedule | null;
+  consultation_modes: string[];
   booking_stage: BookingStage;
   pending_booking: ChatPendingBooking | null;
 }

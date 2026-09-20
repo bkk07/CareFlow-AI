@@ -4,31 +4,35 @@ import { ArrowRight, CheckCircle2, Search } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   apiError as apiErrorText,
-  checkAvailability as apiCheckAvailability,
   createAppointment as apiCreateAppointment,
   fetchContact as apiFetchContact,
+  fetchDaySchedule as apiDaySchedule,
   listAppointmentTypes as apiListTypes,
   listSpecialties as apiListSpecialties,
   searchDoctors as apiSearchDoctors,
   searchHospitals as apiSearchHospitals,
   type AppointmentType as ApiAppointmentType,
-  type Slot,
+  type DayScheduleWindow,
 } from "../api";
 import {
   mapDoctorResult,
   mapHospitalResult,
-  mapSlot,
 } from "../lib/backend";
-import { consultationModeLabel, nextSevenDays, readPosition, type GeoCoords } from "../lib/helpers";
+import { consultationModeLabel, formatDayKeyLong, parseDayKey, sevenDaysFrom, toLocalKey, readPosition, type GeoCoords } from "../lib/helpers";
 import { useAppState } from "../context/AppStateContext";
 import { useAuth } from "../context/AuthContext";
 import { DoctorCard } from "../components/doctor/cards";
 import { HospitalCard } from "../components/hospital/HospitalCard";
 import { DoctorProfileModal } from "../components/doctor/DoctorProfileModal";
-import { SlotPicker } from "../components/appointment/SlotPicker";
+import DaySchedulePicker, {
+  endIsoFor,
+  fmtRange,
+  isRangeAvailable,
+} from "../components/appointment/DaySchedulePicker";
+import DayStripWithCalendar from "../components/appointment/DayStripWithCalendar";
 import { BookingSuccessPanel } from "../components/appointment/AppointmentDetailModal";
 import { Button, CardSkeleton, EmptyState, ErrorState } from "../components/common/ui";
-import type { Appointment, Doctor, Hospital, TimeSlot } from "../types";
+import type { Appointment, Doctor, Hospital } from "../types";
 
 type Step = "search" | "availability" | "review" | "success";
 
@@ -44,7 +48,7 @@ export default function BookPage() {
   const [specialty, setSpecialty] = useState("All");
   const [hospitalId, setHospitalId] = useState<string>(preset.hospitalId ?? "all");
   const [mode, setMode] = useState("any");
-  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [allDoctors, setAllDoctors] = useState<Doctor[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [specialtyOptions, setSpecialtyOptions] = useState<string[]>([]);
   const [liveTypes, setLiveTypes] = useState<ApiAppointmentType[]>([]);
@@ -54,69 +58,122 @@ export default function BookPage() {
   const [geoError, setGeoError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const rawSlots = useRef<Record<string, Slot>>({});
 
   const [activeDoctor, setActiveDoctor] = useState<Doctor | null>(null);
   const [profileDoctor, setProfileDoctor] = useState<Doctor | null>(null);
-  const [dayKey, setDayKey] = useState(nextSevenDays()[0].key);
-  const [slots, setSlots] = useState<TimeSlot[]>([]);
-  const [slotsLoading, setSlotsLoading] = useState(false);
-  const [slotsError, setSlotsError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<TimeSlot | null>(null);
-  // Bumped to force a fresh slot fetch (e.g. after a booking conflict,
-  // so a just-taken time never stays selectable from a stale list).
-  const [slotRefreshKey, setSlotRefreshKey] = useState(0);
+  // Anchor for the day strip: picking any calendar day re-anchors the strip
+  // to start from that day, and the schedule below fetches that day.
+  const [anchorDate, setAnchorDate] = useState(() => new Date());
+  const [dayKey, setDayKey] = useState(() => toLocalKey(new Date()));
+  const [workingHours, setWorkingHours] = useState<DayScheduleWindow[]>([]);
+  const [busy, setBusy] = useState<DayScheduleWindow[]>([]);
+  const [schedLoading, setSchedLoading] = useState(false);
+  const [schedError, setSchedError] = useState<string | null>(null);
+  // Chosen range: start picked by the patient, end = start + event duration.
+  const [sel, setSel] = useState<{ start: string; end: string } | null>(null);
+  // Bumped to force a fresh schedule fetch (e.g. after a booking conflict,
+  // so a just-taken time shows as unavailable instead of staying bookable).
+  const [schedRefreshKey, setSchedRefreshKey] = useState(0);
   const [typeId, setTypeId] = useState("");
-  const [consultMode, setConsultMode] = useState<Appointment["consultationMode"]>("in_person");
+  // Required explicit pick — no pre-selected default, so the patient always
+  // confirms how they want to meet the doctor (backend re-validates it
+  // against the doctor's offered consultation types).
+  const [consultMode, setConsultMode] = useState<Appointment["consultationMode"] | "">("");
+  const [consultError, setConsultError] = useState<string | null>(null);
   const [booking, setBooking] = useState(false);
   const [bookingError, setBookingError] = useState<string | null>(null);
 
-  const days = useMemo(() => nextSevenDays(), []);
+  const days = useMemo(() => sevenDaysFrom(anchorDate), [anchorDate]);
   const dayLabel = useMemo(() => {
     const d = days.find((x) => x.key === dayKey);
-    return d ? `${d.label}, ${d.sub}` : dayKey;
+    return d ? `${d.label}, ${d.sub}` : formatDayKeyLong(dayKey);
   }, [days, dayKey]);
 
-  async function loadDoctors(cityOverride?: string | null) {
+  // Consultation-type is filtered server-side; the client memo re-applies
+  // it as a safety net (e.g. legacy doctors with unconfigured types).
+  const doctors = useMemo(
+    () =>
+      mode === "any"
+        ? allDoctors
+        : allDoctors.filter((d) =>
+            d.consultationModes.includes(mode as Appointment["consultationMode"]),
+          ),
+    [allDoctors, mode],
+  );
+
+  interface SearchOverrides {
+    city?: string | null;
+    query?: string;
+    specialty?: string;
+    hospitalId?: string;
+    mode?: string;
+    geo?: GeoCoords | null;
+    doctorId?: string | null;
+  }
+
+  async function loadDoctors(overrides?: SearchOverrides | string | null) {
+    // Back-compat: loadDoctors(cityOverride) from older call sites.
+    const opts: SearchOverrides =
+      typeof overrides === "string" || overrides === null || overrides === undefined
+        ? overrides === undefined
+          ? {}
+          : { city: overrides }
+        : overrides;
+    const effCity = opts.city !== undefined ? opts.city : myCity;
+    const effQuery = (opts.query !== undefined ? opts.query : query).trim();
+    const effSpecialty = opts.specialty !== undefined ? opts.specialty : specialty;
+    const effHospitalId = opts.hospitalId !== undefined ? opts.hospitalId : hospitalId;
+    const effMode = opts.mode !== undefined ? opts.mode : mode;
+    const effGeo = opts.geo !== undefined ? opts.geo : geo;
+    const effDoctorId = opts.doctorId !== undefined ? opts.doctorId : preset.doctorId;
     setLoading(true);
     setError(false);
-    const city = cityOverride !== undefined ? cityOverride : myCity;
     try {
       const [foundHospitals, foundDoctors] = await Promise.all([
-        apiSearchHospitals("", city ?? undefined, geo ?? undefined),
+        apiSearchHospitals(effQuery || "", effCity ?? undefined, effGeo ?? undefined),
         apiSearchDoctors({
-          query: query.trim() || undefined,
-          specialty: specialty !== "All" ? specialty : undefined,
-          hospital_id: hospitalId !== "all" ? hospitalId : undefined,
-          city: city ?? undefined,
-          latitude: geo?.latitude,
-          longitude: geo?.longitude,
+          // Free text matches doctor name, specialty, or hospital name.
+          query: effQuery || undefined,
+          // Structured filters narrow the free-text result set.
+          specialty: effSpecialty !== "All" ? effSpecialty : undefined,
+          hospital_id: effHospitalId !== "all" ? effHospitalId : undefined,
+          consultation_mode: effMode !== "any" ? effMode : undefined,
+          city: effCity ?? undefined,
+          latitude: effGeo?.latitude,
+          longitude: effGeo?.longitude,
+          limit: 20,
         }),
       ]);
       const mappedHospitals = foundHospitals.map(mapHospitalResult);
       setHospitals(mappedHospitals);
       const mapped = foundDoctors.map(mapDoctorResult);
-      const filtered = mode === "any" ? mapped : mapped.filter((d) => d.consultationModes.includes(mode as Appointment["consultationMode"]));
-      setDoctors(filtered);
+      setAllDoctors(mapped);
       const derived = Array.from(new Set(foundDoctors.map((d) => d.specialty).filter((s): s is string => !!s))).sort();
-      if (hospitalId !== "all") {
+      if (effHospitalId !== "all") {
         try {
-          const dir = await apiListSpecialties(hospitalId);
+          const dir = await apiListSpecialties(effHospitalId);
           setSpecialtyOptions(dir.map((s) => s.name));
         } catch {
           setSpecialtyOptions(derived);
         }
+      } else if (effSpecialty !== "All") {
+        // A specialty filter narrows the results to that specialty, so the
+        // derived list would collapse to one chip and trap the user.
+        // Merge instead of replacing so other specialties stay selectable.
+        setSpecialtyOptions((prev) =>
+          Array.from(new Set([...prev, ...derived, effSpecialty])).sort(),
+        );
       } else {
         setSpecialtyOptions(derived);
       }
-      if (preset.doctorId && !activeDoctor) {
-        const hit = mapped.find((d) => d.id === preset.doctorId) ?? null;
+      if (effDoctorId) {
+        const hit = mapped.find((d) => d.id === effDoctorId) ?? null;
         if (hit) {
           setActiveDoctor(hit);
-          setConsultMode(hit.consultationModes[0] ?? "in_person");
+          setConsultMode("");
+          setConsultError(null);
           setTypeId("");
-          setSlots([]);
-          setSelected(null);
+          setSel(null);
           setStep("availability");
         } else {
           setStep("search");
@@ -146,21 +203,65 @@ export default function BookPage() {
   useEffect(() => {
     if (!live) return;
     // Saved city first (taken once), then search so nearby ranks correctly.
+    // Preset values from navigation (Home hero query, hospital/doctor cards)
+    // are passed explicitly so the first search uses them even though
+    // setState below is async.
     apiFetchContact()
       .then((c) => {
         setMyCity(c.city ?? null);
-        void loadDoctors(c.city ?? null);
+        void loadDoctors({
+          city: c.city ?? null,
+          query: preset.query ?? "",
+          specialty: "All",
+          hospitalId: preset.hospitalId ?? "all",
+          doctorId: preset.doctorId ?? null,
+        });
       })
       .catch(() => {
         setMyCity(null);
-        void loadDoctors(null);
+        void loadDoctors({
+          city: null,
+          query: preset.query ?? "",
+          specialty: "All",
+          hospitalId: preset.hospitalId ?? "all",
+          doctorId: preset.doctorId ?? null,
+        });
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live]);
 
+  // Incoming navigation state (Home hero search, Recommended/Hospital cards)
+  // while this page is already mounted: sync the form and re-search with the
+  // new values explicitly (setState alone would leave a stale search).
+  // The first mount is skipped — the live effect above already searched.
+  const navKey = JSON.stringify(location.state ?? null);
+  const firstNav = useRef(false);
+  useEffect(() => {
+    if (!live) return;
+    if (!firstNav.current) {
+      firstNav.current = true;
+      return;
+    }
+    const incoming = (location.state as { doctorId?: string; hospitalId?: string; query?: string } | null) ?? {};
+    if (incoming.query === undefined && incoming.hospitalId === undefined && incoming.doctorId === undefined) return;
+    if (incoming.query !== undefined) setQuery(incoming.query);
+    if (incoming.hospitalId !== undefined) setHospitalId(incoming.hospitalId);
+    if (incoming.doctorId !== undefined) {
+      setStep("availability");
+    } else {
+      setStep("search");
+    }
+    void loadDoctors({
+      query: incoming.query ?? query,
+      hospitalId: incoming.hospitalId ?? hospitalId,
+      doctorId: incoming.doctorId ?? null,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navKey, live]);
+
   // Re-rank by distance as soon as the patient shares a position.
   useEffect(() => {
-    if (live && geo && step === "search") void loadDoctors();
+    if (live && geo && step === "search") void loadDoctors({ geo });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geo]);
 
@@ -187,12 +288,11 @@ export default function BookPage() {
         const chosen = pool.find((t) => t.id === typeId) ?? pool[0];
         if (!chosen) {
           setTypeId("");
-          setSlots([]);
           return;
         }
         if (chosen.id !== typeId) setTypeId(chosen.id);
       } catch (e) {
-        if (!cancelled) setSlotsError(apiErrorText(e));
+        if (!cancelled) setSchedError(apiErrorText(e));
       }
     })();
     return () => {
@@ -201,80 +301,83 @@ export default function BookPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, activeDoctor, live]);
 
-  // Step 2 — load slots whenever day, doctor, or visit type changes.
-  // Picking a slot here only SELECTS it; booking happens solely via
-  // Confirm appointment on the review step (see confirmBooking).
+  // Step 2 — load the doctor's working day (hours + anonymous busy blocks).
+  // Type-independent: the timeline is the same whatever the event; only
+  // the duration math changes. Picking a start time only SELECTS it;
+  // booking happens solely via Confirm appointment on the review step.
   useEffect(() => {
-    if (step !== "availability" || !activeDoctor || !live || !typeId) return;
+    if (step !== "availability" || !activeDoctor || !live) return;
     let cancelled = false;
-    setSlotsLoading(true);
-    setSlotsError(null);
-    setSelected(null);
+    setSchedLoading(true);
+    setSchedError(null);
+    setSel(null);
     (async () => {
       try {
-        const found = await apiCheckAvailability({
-          doctor_id: activeDoctor.id,
-          appointment_type_id: typeId,
-          date_from: dayKey,
-          date_to: dayKey,
-        });
+        const sched = await apiDaySchedule(activeDoctor.id, dayKey);
         if (cancelled) return;
-        rawSlots.current = {};
-        setSlots(
-          found.map((s, i) => {
-            const mapped = mapSlot(s, i);
-            rawSlots.current[mapped.id] = s;
-            return mapped;
-          }),
-        );
+        setWorkingHours(sched.working_hours);
+        setBusy(sched.busy);
       } catch (e) {
-        if (!cancelled) setSlotsError(apiErrorText(e));
+        if (!cancelled) setSchedError(apiErrorText(e));
       } finally {
-        if (!cancelled) setSlotsLoading(false);
+        if (!cancelled) setSchedLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [step, activeDoctor, dayKey, typeId, live, slotRefreshKey]);
+  }, [step, activeDoctor, dayKey, live, schedRefreshKey]);
 
   function openAvailability(d: Doctor) {
     setActiveDoctor(d);
-    setConsultMode(d.consultationModes[0] ?? "in_person");
+    setConsultMode("");
+    setConsultError(null);
     setTypeId("");
-    setSlots([]);
-    setSelected(null);
-    setSlotsError(null);
+    setSel(null);
+    setSchedError(null);
     setBookingError(null);
     setStep("availability");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function handleStartSelect(startIso: string | null) {
+    if (!startIso || !activeType) {
+      setSel(null);
+      return;
+    }
+    setSel({ start: startIso, end: endIsoFor(startIso, activeType.durationMinutes) });
+  }
+
   async function confirmBooking() {
-    if (!activeDoctor || !selected) return;
+    if (!activeDoctor || !sel) return;
+    if (!consultMode) {
+      setConsultError("Choose how you want to meet — in person, video, or phone.");
+      setStep("availability");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
     setBooking(true);
     setBookingError(null);
     try {
-      const raw = rawSlots.current[selected.id];
-      if (!raw || !user) throw new Error("slot-missing");
+      if (!user) throw new Error("slot-missing");
       await apiCreateAppointment({
         patient_id: user.id,
         doctor_id: activeDoctor.id,
         appointment_type_id: typeId,
-        slot_start: raw.start,
-        slot_end: raw.end,
+        slot_start: sel.start,
+        slot_end: sel.end,
         consultation_mode: consultMode,
       });
       await refresh();
       pushNotification({
         category: "appointments",
         title: "Appointment requested",
-        body: `${activeDoctor.specialty} with ${activeDoctor.name} · ${dayLabel} at ${selected.start}.`,
+        body: `${activeDoctor.specialty} with ${activeDoctor.name} · ${dayLabel} at ${fmtRange(sel.start, sel.end)}.`,
         unread: true,
       });
       setBooking(false);
-      // Fresh availability for the next booking — the taken slot is gone.
-      setSlotRefreshKey((k) => k + 1);
+      // Fresh schedule for the next booking — the taken time is now busy.
+      setSchedRefreshKey((k) => k + 1);
       setStep("success");
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (e) {
@@ -282,11 +385,12 @@ export default function BookPage() {
       const raw = apiErrorText(e);
       const taken = /409|not available|taken|conflict/i.test(raw);
       if (taken) {
-        // Someone just took this time: refetch so it disappears from the
-        // list instead of staying selectable.
-        setSlotRefreshKey((k) => k + 1);
+        // Someone just took this time: refetch so the timeline shows it
+        // as busy instead of staying bookable.
+        setSel(null);
+        setSchedRefreshKey((k) => k + 1);
         setStep("availability");
-        setBookingError("That time was just taken. The list has been refreshed — please pick another time.");
+        setBookingError("That time was just taken. The schedule has been refreshed — please pick another time.");
       } else {
         setBookingError(raw);
       }
@@ -346,7 +450,7 @@ export default function BookPage() {
                   <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-1.5 w-fit">
                     Ranked by distance from you
                   </p>
-                  <button onClick={() => { setGeo(null); }} className="text-[0.78rem] font-semibold text-ink-secondary hover:text-healthcare hover:underline">
+                  <button onClick={() => { setGeo(null); void loadDoctors({ geo: null }); }} className="text-[0.78rem] font-semibold text-ink-secondary hover:text-healthcare hover:underline">
                     Clear location
                   </button>
                 </>
@@ -371,8 +475,8 @@ export default function BookPage() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && void loadDoctors()}
-                  placeholder="Doctor, specialty, or hospital"
-                  aria-label="Search doctors"
+                  placeholder="Search by doctor name, specialty, or hospital…"
+                  aria-label="Search by doctor name, specialty, or hospital"
                   className="w-full bg-transparent outline-none py-2.5 text-[0.92rem]"
                 />
               </div>
@@ -382,7 +486,7 @@ export default function BookPage() {
               {["All", ...specialtyOptions].map((s) => (
                 <button
                   key={s}
-                  onClick={() => setSpecialty(s)}
+                  onClick={() => { setSpecialty(s); void loadDoctors({ specialty: s }); }}
                   className={`chip ${specialty === s ? "bg-navy text-white border-navy" : "bg-white text-ink-secondary border-border hover:border-healthcare"}`}
                   aria-pressed={specialty === s}
                 >
@@ -393,7 +497,7 @@ export default function BookPage() {
             <div className="grid sm:grid-cols-3 gap-2 mt-3">
               <label className="text-[0.8rem] font-semibold text-ink-secondary">
                 Hospital
-                <select value={hospitalId} onChange={(e) => setHospitalId(e.target.value)} className="input-base mt-1">
+                <select value={hospitalId} onChange={(e) => { setHospitalId(e.target.value); void loadDoctors({ hospitalId: e.target.value }); }} className="input-base mt-1">
                   <option value="all">All hospitals</option>
                   {hospitals.map((h) => (
                     <option key={h.id} value={h.id}>{h.name}</option>
@@ -402,7 +506,7 @@ export default function BookPage() {
               </label>
               <label className="text-[0.8rem] font-semibold text-ink-secondary">
                 Consultation type
-                <select value={mode} onChange={(e) => setMode(e.target.value)} className="input-base mt-1">
+                <select value={mode} onChange={(e) => { setMode(e.target.value); void loadDoctors({ mode: e.target.value }); }} className="input-base mt-1">
                   <option value="any">Any type</option>
                   <option value="in_person">In person</option>
                   <option value="video">Video</option>
@@ -410,7 +514,7 @@ export default function BookPage() {
                 </select>
               </label>
               <div className="flex items-end">
-                <Button variant="outline" className="w-full" onClick={() => { setQuery(""); setSpecialty("All"); setHospitalId("all"); setMode("any"); }}>
+                <Button variant="outline" className="w-full" onClick={() => { setQuery(""); setSpecialty("All"); setHospitalId("all"); setMode("any"); void loadDoctors({ query: "", specialty: "All", hospitalId: "all", mode: "any" }); }}>
                   Clear filters
                 </Button>
               </div>
@@ -433,7 +537,18 @@ export default function BookPage() {
             </div>
           ) : (
             <>
-              <p className="text-sm text-ink-secondary font-medium">{doctors.length} doctor{doctors.length === 1 ? "" : "s"} available</p>
+              <p className="text-sm text-ink-secondary font-medium">
+                {doctors.length} doctor{doctors.length === 1 ? "" : "s"} available
+                {(query.trim() || specialty !== "All" || hospitalId !== "all" || mode !== "any") && (
+                  <span className="text-ink-faint">
+                    {" "}· filtered
+                    {query.trim() ? ` by “${query.trim()}”` : ""}
+                    {specialty !== "All" ? ` · ${specialty}` : ""}
+                    {hospitalId !== "all" ? ` · ${hospitals.find((h) => h.id === hospitalId)?.name ?? "hospital"}` : ""}
+                    {mode !== "any" ? ` · ${mode.replace("_", " ")}` : ""}
+                  </span>
+                )}
+              </p>
               <div className="grid md:grid-cols-2 gap-3">
                 {doctors.map((d) => (
                   <DoctorCard key={d.id} doctor={d} onView={() => setProfileDoctor(d)} onBook={() => openAvailability(d)} />
@@ -443,7 +558,7 @@ export default function BookPage() {
                 <h2 className="section-title mb-3 mt-2">Hospitals</h2>
                 <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3">
                   {hospitals.map((h) => (
-                    <HospitalCard key={h.id} hospital={h} onView={() => { setHospitalId(h.id); void loadDoctors(); }} />
+                    <HospitalCard key={h.id} hospital={h} onView={() => { setHospitalId(h.id); void loadDoctors({ hospitalId: h.id }); }} />
                   ))}
                 </div>
               </div>
@@ -459,60 +574,92 @@ export default function BookPage() {
             <h1 className="text-[1.3rem] font-extrabold text-navy">Book with {activeDoctor.name}</h1>
             <p className="text-sm text-ink-secondary">{activeDoctor.specialty} · {activeDoctor.hospitalName}</p>
             <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit mt-2">
-              Live slots from {activeDoctor.name}&rsquo;s working hours
+              Live schedule from {activeDoctor.name}&rsquo;s working hours
               {offeredDurations.length > 0 ? ` · ${offeredDurations.join(", ")} min visits` : ""}
             </p>
 
             <div className="grid sm:grid-cols-2 gap-2 mt-4">
               <label className="text-[0.8rem] font-semibold text-ink-secondary">
                 Visit type
-                <select value={typeId} onChange={(e) => setTypeId(e.target.value)} className="input-base mt-1">
+                <select
+                  value={typeId}
+                  onChange={(e) => {
+                    setTypeId(e.target.value);
+                    setSel(null);
+                    setBookingError(null);
+                  }}
+                  className="input-base mt-1"
+                >
                   {typeOptions.map((t) => (
                     <option key={t.id} value={t.id}>{t.name} · {t.durationMinutes} min</option>
                   ))}
                 </select>
               </label>
               <div className="text-[0.8rem] font-semibold text-ink-secondary">
-                Consultation
-                <div className="flex gap-1.5 mt-1">
+                Consultation <span className="text-danger">*</span>
+                <div className="flex gap-1.5 mt-1" role="radiogroup" aria-label="Consultation type (required)">
                   {activeDoctor.consultationModes.map((m) => (
                     <button
                       key={m}
-                      onClick={() => setConsultMode(m)}
-                      aria-pressed={consultMode === m}
+                      role="radio"
+                      aria-checked={consultMode === m}
+                      onClick={() => { setConsultMode(m); setConsultError(null); }}
                       className={`flex-1 text-[0.8rem] font-bold border rounded-control py-2.5 transition ${consultMode === m ? "bg-navy text-white border-navy" : "bg-white border-border hover:border-healthcare"}`}
                     >
                       {consultationModeLabel(m)}
                     </button>
                   ))}
                 </div>
+                {consultError ? (
+                  <p role="alert" className="text-[0.78rem] font-semibold text-danger mt-1">{consultError}</p>
+                ) : (
+                  !consultMode && (
+                    <p className="text-[0.76rem] text-ink-faint mt-1">Required — pick how you want to meet.</p>
+                  )
+                )}
               </div>
             </div>
 
             <h3 className="font-bold text-ink mt-5 mb-2 text-[0.95rem]">Choose a day</h3>
-            <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1" role="tablist" aria-label="Days">
-              {days.map((d) => (
-                <button
-                  key={d.key}
-                  role="tab"
-                  aria-selected={dayKey === d.key}
-                  onClick={() => setDayKey(d.key)}
-                  className={`min-w-[86px] px-3 py-2.5 rounded-control border text-center transition shrink-0 ${
-                    dayKey === d.key ? "bg-healthcare text-white border-healthcare-dark" : "bg-white border-border hover:border-healthcare"
-                  }`}
-                >
-                  <span className="block text-[0.78rem] font-bold">{d.label}</span>
-                  <span className={`block text-[0.75rem] ${dayKey === d.key ? "text-white/85" : "text-ink-secondary"}`}>{d.sub}</span>
-                </button>
-              ))}
-            </div>
+            <DayStripWithCalendar
+              days={days}
+              dayKey={dayKey}
+              anchorDate={anchorDate}
+              onSelect={(k) => { setDayKey(k); setBookingError(null); }}
+              onPickDate={(d) => { setAnchorDate(d); setDayKey(toLocalKey(d)); setBookingError(null); }}
+            />
+            {parseDayKey(dayKey).getTime() !== new Date(new Date().setHours(0, 0, 0, 0)).getTime() && (
+              <button
+                onClick={() => { const t = new Date(); setAnchorDate(t); setDayKey(toLocalKey(t)); }}
+                className="text-[0.78rem] font-bold text-healthcare hover:underline mt-1.5"
+              >
+                Back to today
+              </button>
+            )}
 
-            <h3 className="font-bold text-ink mt-5 mb-2 text-[0.95rem]">Available times</h3>
-            <p className="text-[0.78rem] text-ink-secondary mb-2">Pick a time to select it — nothing is booked until you confirm on the next step.</p>
-            {slotsError ? (
-              <ErrorState title="Unable to load availability" body={slotsError} onRetry={() => setDayKey(days[0].key)} />
+            <h3 className="font-bold text-ink mt-5 mb-2 text-[0.95rem]">Day schedule</h3>
+            <p className="text-[0.78rem] text-ink-secondary mb-2">Colored blocks are already taken — choose your preferred start time below. Nothing is booked until you confirm on the next step.</p>
+            {bookingError && (
+              <p role="alert" className="mb-3 text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">
+                {bookingError}
+              </p>
+            )}
+            {schedError ? (
+              <ErrorState title="Unable to load availability" body={schedError} onRetry={() => setSchedRefreshKey((k) => k + 1)} />
+            ) : !activeType ? (
+              <p className="text-[0.86rem] text-ink-secondary border border-dashed border-border rounded-control px-4 py-6 text-center">
+                No visit types available for this doctor.
+              </p>
             ) : (
-              <SlotPicker slots={slots} selectedId={selected?.id ?? null} onSelect={setSelected} loading={slotsLoading} />
+              <DaySchedulePicker
+                workingHours={workingHours}
+                busy={busy}
+                durationMinutes={activeType.durationMinutes}
+                dayKey={dayKey}
+                selectedStart={sel?.start ?? null}
+                onSelect={handleStartSelect}
+                loading={schedLoading}
+              />
             )}
           </div>
 
@@ -523,9 +670,9 @@ export default function BookPage() {
                 ["Doctor", activeDoctor.name],
                 ["Hospital", activeDoctor.hospitalName],
                 ["Date", dayLabel],
-                ["Time", selected ? selected.start : "—"],
+                ["Time", sel ? fmtRange(sel.start, sel.end) : "—"],
                 ["Type", activeType ? `${activeType.name} · ${activeType.durationMinutes} min` : "—"],
-                ["Visit", consultationModeLabel(consultMode)],
+                ["Visit", consultMode ? consultationModeLabel(consultMode) : "— (required)"],
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between gap-3">
                   <dt className="text-ink-secondary">{k}</dt>
@@ -533,15 +680,26 @@ export default function BookPage() {
                 </div>
               ))}
             </dl>
-            <Button disabled={!selected} onClick={() => setStep("review")} className="w-full mt-4">
+            <Button
+              disabled={!sel || !consultMode || !isRangeAvailable(workingHours, busy, sel.start, sel.end)}
+              onClick={() => {
+                if (!consultMode) {
+                  setConsultError("Choose how you want to meet — in person, video, or phone.");
+                  return;
+                }
+                setStep("review");
+              }}
+              className="w-full mt-4"
+            >
               Review booking <ArrowRight size={16} />
             </Button>
-            {!selected && <p className="text-[0.78rem] text-ink-faint text-center mt-2">Select a time to continue — selecting does not book anything yet</p>}
+            {!sel && <p className="text-[0.78rem] text-ink-faint text-center mt-2">Choose a start time to continue — choosing does not book anything yet</p>}
+            {sel && !consultMode && <p className="text-[0.78rem] font-semibold text-danger text-center mt-2">Pick a consultation type to continue.</p>}
           </aside>
         </div>
       )}
 
-      {step === "review" && activeDoctor && selected && (
+      {step === "review" && activeDoctor && sel && (
         <div className="max-w-2xl mx-auto card-base p-6">
           <button onClick={() => setStep("availability")} className="text-[0.83rem] font-bold text-ink-secondary hover:text-healthcare mb-2">← Change time</button>
           <h1 className="text-[1.3rem] font-extrabold text-navy">Review your appointment</h1>
@@ -550,8 +708,8 @@ export default function BookPage() {
               ["Doctor", `${activeDoctor.name} · ${activeDoctor.specialty}`],
               ["Hospital", activeDoctor.hospitalName],
               ["Date", dayLabel],
-              ["Time", `${selected.start} · ${activeType?.durationMinutes ?? ""} min`],
-              ["Type", `${activeType?.name ?? ""} · ${consultationModeLabel(consultMode)}`],
+              ["Time", `${fmtRange(sel.start, sel.end)} · ${activeType?.durationMinutes ?? ""} min`],
+              ["Type", `${activeType?.name ?? ""} · ${consultMode ? consultationModeLabel(consultMode) : "—"}`],
             ].map(([k, v]) => (
               <div key={k} className="flex justify-between gap-4 px-4 py-3 text-sm bg-white">
                 <span className="text-ink-secondary">{k}</span>

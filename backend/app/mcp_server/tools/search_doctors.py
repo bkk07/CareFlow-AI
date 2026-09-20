@@ -3,7 +3,7 @@
 import uuid
 
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.deps import RequestContext
@@ -49,11 +49,29 @@ def _specialty_stem(lowered: str) -> str:
     return lowered if len(lowered) >= 4 else ""
 
 
+def _offers_mode(doctor: Doctor, mode: str | None) -> bool:
+    """True when the doctor offers the requested consultation mode.
+
+    Doctors with no configured types (legacy rows) match every mode so
+    the filter never hides unconfigured-but-valid doctors.
+    """
+    if mode is None:
+        return True
+    types = list(getattr(doctor, "consultation_types", None) or [])
+    if not types:
+        return True
+    return mode in [str(t).strip().lower() for t in types]
+
+
 class SearchDoctorsIn(BaseModel):
     hospital_id: uuid.UUID | None = None
     specialty: str | None = None
     query: str | None = None
     city: str | None = None
+    consultation_mode: str | None = Field(
+        default=None,
+        description="Filter by how the patient wants to meet: in_person, video, or phone.",
+    )
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     radius_km: float | None = Field(default=None, gt=0, le=20000)
@@ -79,18 +97,29 @@ def run(
 ) -> dict:
     """Search active doctors; specialty matches name or id.
 
-    `city` matches the hospital's city and ranks same-city doctors first
-    so "near me" works off the patient's saved city; other cities are
-    still included below. When `latitude`+`longitude` are given, hits are
-    ordered by real hospital distance (nearest first, each carrying
-    `distance_km`); `radius_km` additionally filters out doctors whose
-    hospital is farther away. Results are paged (`limit`/`offset`) and
-    always report `total` so chat can offer "explore more" while matches
-    remain.
+    `query` is free text matching doctor name, hospital name, or specialty
+    (including people-words like "cardiologist" -> "Cardiology").
+    `specialty` narrows to one specialty, `hospital_id` to one hospital,
+    and `consultation_mode` (in_person/video/phone) to doctors offering
+    that visit mode. `city` matches the hospital's city and ranks
+    same-city doctors first so "near me" works off the patient's saved
+    city; other cities are still included below. When
+    `latitude`+`longitude` are given, hits are ordered by real hospital
+    distance (nearest first, each carrying `distance_km`); `radius_km`
+    additionally filters out doctors whose hospital is farther away.
+    Results are paged (`limit`/`offset`) and always report `total` so
+    chat can offer "explore more" while matches remain.
     """
     del ctx, integration
     limit = max(1, min(input.limit or 5, 50))
     offset = max(0, input.offset or 0)
+    mode = (input.consultation_mode or "").strip().lower() or None
+    if mode is not None and mode not in ("in_person", "video", "phone"):
+        from app.mcp_server.errors import CapabilityValidationError
+
+        raise CapabilityValidationError(
+            f"consultation_mode must be in_person, video, or phone (got {input.consultation_mode!r})"
+        )
     q = (
         db.query(
             Doctor,
@@ -132,11 +161,30 @@ def run(
                 | Specialty.name.ilike(f"%{stem}%")
             )
     if input.query:
-        q = q.filter(Doctor.name.ilike(f"%{input.query.strip()}%"))
+        text = input.query.strip()
+        lowered = text.lower()
+        # Free-text "Find care" search: match doctor name, hospital name,
+        # or specialty (including people-words like "cardiologist" ->
+        # "Cardiology"). Specialty matching reuses the synonym/stem logic
+        # so typing a specialty in the search box just works.
+        synonym = _SPECIALTY_SYNONYMS.get(lowered, text)
+        stem = _specialty_stem(lowered)
+        clauses = [
+            Doctor.name.ilike(f"%{text}%"),
+            Hospital.name.ilike(f"%{text}%"),
+            func.lower(Specialty.name).in_([text.lower(), synonym.lower()]),
+            Specialty.name.ilike(f"%{text}%"),
+            Specialty.name.ilike(f"%{synonym}%"),
+        ]
+        if stem:
+            clauses.append(Specialty.name.ilike(f"%{stem}%"))
+        q = q.filter(or_(*clauses))
     city = (input.city or "").strip()
     has_point = geo.validate_point(input.latitude, input.longitude)
     if has_point:
         rows = q.all()
+        if mode is not None:
+            rows = [r for r in rows if _offers_mode(r[0], mode)]
         scored = []
         for row in rows:
             d, hospital_name, specialty_name, hospital_city, hlat, hlng = row
@@ -190,6 +238,8 @@ def run(
     else:
         q = q.order_by(Doctor.name)
     rows = q.all()
+    if mode is not None:
+        rows = [r for r in rows if _offers_mode(r[0], mode)]
     total = len(rows)
     page = rows[offset : offset + limit]
     return {
