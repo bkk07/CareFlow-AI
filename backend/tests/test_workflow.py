@@ -185,8 +185,11 @@ def test_chat_booking_notifies(client, db, eager_tasks):
     prior = get_ai_context("conv-wfchat")
     prior.offered_doctors = [{"id": setup["doctor"]["id"], "name": "Dr. wfchat"}]
     prior.offered_slots = [{"start": start, "end": end}]
-    # The scripted confirmation jumps past the visit-type step: simulate it.
+    # The scripted confirmation jumps past the early steps: simulate them
+    # (day comes from the "Monday morning" message itself).
     prior.visit_types_seen = True
+    prior.selected_appointment_type_id = setup["type"]["id"]
+    prior.selected_consultation_mode = "in_person"
     save_ai_context(prior)
     complete = scripted(
         {

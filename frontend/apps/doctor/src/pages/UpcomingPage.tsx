@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Search, SlidersHorizontal } from "lucide-react";
 import { useSchedule } from "../context/ScheduleContext";
 import { AppointmentCard } from "../components/appointments/AppointmentCard";
+import CalendarPickButton from "../components/calendar/CalendarPickButton";
 import { Drawer } from "../components/common/Modal";
 import { Button, CardSkeleton, EmptyState, ErrorState } from "../components/common/ui";
 import type { Appointment } from "../types";
@@ -19,6 +20,12 @@ export default function UpcomingPage() {
   const [status, setStatus] = useState("all");
   const [qstate, setQstate] = useState("all");
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // Calendar-icon date jump: pick any day in any month to show just that day.
+  const [pickedDate, setPickedDate] = useState<Date | null>(null);
+
+  const pickedLabel = pickedDate
+    ? pickedDate.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })
+    : null;
 
   const visible = useMemo(() => {
     const q = query.toLowerCase().trim();
@@ -26,11 +33,20 @@ export default function UpcomingPage() {
       if (q && !a.patient.name.toLowerCase().includes(q) && !a.type.toLowerCase().includes(q)) return false;
       if (status !== "all" && a.status !== status) return false;
       if (qstate !== "all" && a.questionnaire !== qstate) return false;
+      if (pickedDate) {
+        const d = new Date(a.sortKey);
+        if (Number.isNaN(d.getTime())) return false;
+        if (
+          d.getFullYear() !== pickedDate.getFullYear() ||
+          d.getMonth() !== pickedDate.getMonth() ||
+          d.getDate() !== pickedDate.getDate()
+        ) return false;
+      }
       return true;
     });
-  }, [appointments, query, status, qstate]);
+  }, [appointments, query, status, qstate, pickedDate]);
 
-  const searching = query.trim() !== "" || status !== "all" || qstate !== "all";
+  const searching = query.trim() !== "" || status !== "all" || qstate !== "all" || pickedDate !== null;
 
   function filterBody() {
     return (
@@ -47,17 +63,29 @@ export default function UpcomingPage() {
             {["completed", "in_progress", "assigned", "not_assigned"].map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
           </select>
         </label>
-        <Button variant="outline" className="w-full" onClick={() => { setStatus("all"); setQstate("all"); setQuery(""); }}>Clear all</Button>
+        <Button variant="outline" className="w-full" onClick={() => { setStatus("all"); setQstate("all"); setQuery(""); setPickedDate(null); }}>Clear all</Button>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="page-title">Upcoming appointments</h1>
-        <p className="page-sub mt-1">Grouped by day. Search by patient name or appointment type.</p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="page-title">Upcoming appointments</h1>
+          <p className="page-sub mt-1">Grouped by day. Search by patient name or appointment type.</p>
+        </div>
+        <CalendarPickButton selected={pickedDate ?? new Date()} onPick={setPickedDate} />
       </div>
+
+      {pickedDate && (
+        <div className="flex items-center gap-2 flex-wrap text-[0.83rem]">
+          <span className="font-bold text-navy bg-navy-soft/60 border border-navy/20 rounded-control px-3 py-1.5">
+            Showing {pickedLabel} · {visible.length} appointment{visible.length === 1 ? "" : "s"}
+          </span>
+          <button onClick={() => setPickedDate(null)} className="font-bold text-healthcare hover:underline">Clear date</button>
+        </div>
+      )}
 
       <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">
         {loading ? "Syncing live schedule…" : "Live schedule from your hospital"}
@@ -92,9 +120,14 @@ export default function UpcomingPage() {
         </div>
       ) : searching ? (
         visible.length === 0 ? (
-          <div className="card-base"><EmptyState title="No matching appointments" body="Try a different patient name, type, or clear the filters." /></div>
+          <div className="card-base"><EmptyState title={pickedDate ? `No appointments on ${pickedLabel}` : "No matching appointments"} body="Try a different patient name, type, date, or clear the filters." /></div>
         ) : (
-          <div className="space-y-2.5">{visible.map((a) => <AppointmentCard key={a.id} appointment={a} showDate />)}</div>
+          <>
+            {pickedDate && (
+              <h2 className="section-title">{pickedLabel} <span className="text-ink-faint font-semibold text-[0.8rem]">· {visible.length}</span></h2>
+            )}
+            <div className="space-y-2.5">{visible.map((a) => <AppointmentCard key={a.id} appointment={a} showDate />)}</div>
+          </>
         )
       ) : (
         GROUPS.map((g) => {

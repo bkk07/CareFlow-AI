@@ -7,11 +7,17 @@ import { Modal } from "../../components/common/Modal";
 import type { Doctor } from "../../types";
 
 export default function DoctorsPage() {
-  const { doctors, specialties, departments, setDoctorStatus, createDoctor, inviteDoctorLogin, removeDoctorLogin, live, loading, backendError, refreshAll } = useAdmin();
+  const { doctors, specialties, departments, setDoctorStatus, createDoctor, updateDoctor, deleteDoctor, inviteDoctorLogin, removeDoctorLogin, live, loading, backendError, refreshAll } = useAdmin();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [selected, setSelected] = useState<Doctor | null>(null);
   const [confirm, setConfirm] = useState<{ id: string; to: Doctor["status"] } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Doctor | null>(null);
+  const [editing, setEditing] = useState<Doctor | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editSpecialty, setEditSpecialty] = useState("");
+  const [editDepartment, setEditDepartment] = useState("");
+  const [editExperience, setEditExperience] = useState("0");
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [newSpecialty, setNewSpecialty] = useState("");
@@ -115,6 +121,7 @@ export default function DoctorsPage() {
               <td className="td-cell">
                 <div className="flex gap-2 flex-wrap">
                   <button onClick={() => setSelected(d)} className="text-[0.78rem] font-bold text-healthcare hover:underline">View</button>
+                  <button onClick={() => { setEditing(d); setEditName(d.name); setEditSpecialty(specialties.find((s) => s.name === d.specialty)?.id ?? ""); setEditDepartment(departments.find((x) => x.name === d.department)?.id ?? ""); setEditExperience(String(d.experience ?? 0)); }} className="text-[0.78rem] font-bold text-healthcare hover:underline">Edit</button>
                   {d.status !== "active" ? (
                     <button onClick={() => setConfirm({ id: d.id, to: "active" })} className="text-[0.78rem] font-bold text-success hover:underline">Activate</button>
                   ) : (
@@ -128,6 +135,7 @@ export default function DoctorsPage() {
                   ) : (
                     <button onClick={() => { setInviteFor(d); setInviteEmail(""); setInvitePassword(""); }} className="text-[0.78rem] font-bold text-healthcare hover:underline">Create login</button>
                   )}
+                  <button onClick={() => setConfirmDelete(d)} className="text-[0.78rem] font-bold text-ink-secondary hover:text-danger">Delete</button>
                 </div>
               </td>
             </tr>
@@ -193,6 +201,44 @@ export default function DoctorsPage() {
         danger={confirm?.to !== "active"}
         onConfirm={() => confirm && void run(async () => { await setDoctorStatus(confirm.id, confirm.to); setConfirm(null); })}
       />
+
+      <ConfirmDialog
+        open={!!confirmDelete}
+        onClose={() => setConfirmDelete(null)}
+        title="Delete doctor"
+        body={`Delete ${confirmDelete?.name ?? "this doctor"}? This cannot be undone. Doctors with upcoming visits cannot be deleted — deactivate them instead.`}
+        confirmLabel="Delete"
+        danger
+        onConfirm={() => confirmDelete && void run(async () => { await deleteDoctor(confirmDelete.id); setConfirmDelete(null); })}
+      />
+
+      <Modal open={!!editing} onClose={() => setEditing(null)} title={`Edit doctor${editing ? ` · ${editing.name}` : ""}`}>
+        <div className="space-y-3">
+          <label className="block text-[0.83rem] font-bold">Name<input value={editName} onChange={(e) => setEditName(e.target.value)} className="input-base mt-1" /></label>
+          <label className="block text-[0.83rem] font-bold">Specialty
+            <select value={editSpecialty} onChange={(e) => setEditSpecialty(e.target.value)} className="input-base mt-1">
+              <option value="">— None —</option>
+              {specialties.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </label>
+          <label className="block text-[0.83rem] font-bold">Department
+            <select value={editDepartment} onChange={(e) => setEditDepartment(e.target.value)} className="input-base mt-1">
+              <option value="">— None —</option>
+              {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </label>
+          <label className="block text-[0.83rem] font-bold">Experience (years)<input type="number" min={0} value={editExperience} onChange={(e) => setEditExperience(e.target.value)} className="input-base mt-1" /></label>
+          <Button className="w-full" disabled={!editName.trim()} onClick={() => editing && void run(async () => {
+            await updateDoctor(editing.id, {
+              name: editName.trim(),
+              specialty_id: editSpecialty || null,
+              department_id: editDepartment || null,
+              experience_years: Math.max(0, parseInt(editExperience, 10) || 0),
+            });
+            setEditing(null);
+          })}>Save</Button>
+        </div>
+      </Modal>
 
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Add doctor">
         <div className="space-y-3">

@@ -4,7 +4,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from app.domain.appointment.models import Appointment
+from app.domain.appointment.models import Appointment, AppointmentState
 from app.notification.service import create_in_app
 from app.workflow.models import WorkflowExecution
 from app.workflow.tasks._base import handler, note
@@ -17,6 +17,11 @@ def on_appointment_booked(
     appointment = session.get(Appointment, uuid.UUID(str(payload["appointment_id"])))
     if appointment is None:
         note(execution, "appointment gone; nothing to notify")
+        return
+    # R6: the booking may have been cancelled/failed between publish and
+    # execution — never announce "confirmed" for a non-confirmed booking.
+    if appointment.state != AppointmentState.confirmed:
+        note(execution, f"appointment is {appointment.state.value}; skipping confirmation")
         return
     slot = appointment.slot_start.isoformat()
     row, created = create_in_app(

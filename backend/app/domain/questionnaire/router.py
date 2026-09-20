@@ -27,6 +27,7 @@ from app.domain.questionnaire.schemas import (
     QuestionnaireOut,
     QuestionnaireUpdateIn,
     QuestionOut,
+    QuestionUpdateIn,
     ResponseOut,
     ResponseSubmitIn,
 )
@@ -185,6 +186,61 @@ def update_questionnaire(
     del ctx
     questionnaire = service.get_hospital_questionnaire(db, hospital, questionnaire_id)
     return service.update_questionnaire(db, questionnaire, body)
+
+
+@router.delete(
+    "/hospitals/{hospital_id}/questionnaires/{questionnaire_id}",
+    status_code=204,
+)
+def delete_questionnaire(
+    questionnaire_id: uuid.UUID,
+    hospital: Hospital = Depends(require_managed_hospital),
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_admin),
+) -> None:
+    """C2: delete a form and its questions. Past responses are kept."""
+    del ctx
+    questionnaire = service.get_hospital_questionnaire(db, hospital, questionnaire_id)
+    service.delete_questionnaire(db, questionnaire)
+    return None
+
+
+@router.put(
+    "/hospitals/{hospital_id}/questionnaires/{questionnaire_id}/questions/{question_id}",
+    response_model=QuestionOut,
+)
+def update_question(
+    questionnaire_id: uuid.UUID,
+    question_id: uuid.UUID,
+    body: QuestionUpdateIn,
+    hospital: Hospital = Depends(require_managed_hospital),
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_admin),
+) -> object:
+    """C2: edit one question (prompt / options / required / order / type)."""
+    del ctx
+    questionnaire = service.get_hospital_questionnaire(db, hospital, questionnaire_id)
+    question = service.get_question(db, questionnaire, question_id)
+    return service.update_question(db, question, body)
+
+
+@router.delete(
+    "/hospitals/{hospital_id}/questionnaires/{questionnaire_id}/questions/{question_id}",
+    status_code=204,
+)
+def delete_question(
+    questionnaire_id: uuid.UUID,
+    question_id: uuid.UUID,
+    hospital: Hospital = Depends(require_managed_hospital),
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_admin),
+) -> None:
+    """C2: delete one question."""
+    del ctx
+    questionnaire = service.get_hospital_questionnaire(db, hospital, questionnaire_id)
+    question = service.get_question(db, questionnaire, question_id)
+    service.delete_question(db, question)
+    return None
 
 
 # -- appointment answering -----------------------------------------------------

@@ -18,3 +18,6 @@ class NotificationOut(BaseModel):
     error: str | None
     sent_at: datetime | None
     created_at: datetime
+    # C4: read state (defaults keep old clients working).
+    is_read: bool = False
+    read_at: datetime | None = None

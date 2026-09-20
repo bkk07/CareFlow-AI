@@ -536,8 +536,11 @@ def test_full_call_verifies_then_books(client, db, tool_factory, telephony_env):
             "end": (start + timedelta(minutes=30)).isoformat(),
         }
     ]
-    # The scripted confirmation jumps past the visit-type step: simulate it.
+    # The scripted confirmation jumps past the early steps: simulate them
+    # (day comes from the "Monday morning" transcript itself).
     prior.visit_types_seen = True
+    prior.selected_appointment_type_id = setup["type"]["id"]
+    prior.selected_consultation_mode = "in_person"
     save_ai_context(prior)
     telephony.set_agent_complete(
         scripted(

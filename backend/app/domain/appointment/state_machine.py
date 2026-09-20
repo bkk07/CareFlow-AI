@@ -59,6 +59,9 @@ ALLOWED_TRANSITIONS: dict[AppointmentState, set[AppointmentState]] = {
         AppointmentState.confirmed,
         AppointmentState.reconciliation_required,
         AppointmentState.failed,
+        # R6: a parked booking whose vendor call is in-flight can still be
+        # torn down — cancel releases the hold + best-effort vendor cancel.
+        AppointmentState.cancelled,
     },
     AppointmentState.reconciliation_required: {
         AppointmentState.confirmed,

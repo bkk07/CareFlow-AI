@@ -89,6 +89,9 @@ export interface BlockedSlot {
   end: string;
   reason: "Lunch" | "Meeting" | "Leave" | "Administrative work" | "Personal time";
   note?: string;
+  /** Raw ISO bounds (local render source for the schedule grid). */
+  startIso: string;
+  endIso: string;
 }
 
 export type NotificationCategory = "appointments" | "questionnaires" | "system";

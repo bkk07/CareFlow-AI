@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { api, apiError, type Notification } from "../api";
+import { api, apiError, deleteNotification, markNotificationRead, type Notification } from "../api";
 import { EASE, Page } from "../motion";
 import { BellIcon } from "../icons";
 
@@ -8,6 +8,7 @@ export default function Inbox() {
   const [items, setItems] = useState<Notification[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -24,11 +25,37 @@ export default function Inbox() {
     void refresh();
   }, [refresh]);
 
+  async function onMarkRead(id: string) {
+    setBusyId(id);
+    try {
+      const updated = await markNotificationRead(id);
+      setItems((prev) => prev.map((n) => (n.id === id ? updated : n)));
+    } catch (e) {
+      setError(apiError(e));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function onDelete(id: string) {
+    setBusyId(id);
+    try {
+      await deleteNotification(id);
+      setItems((prev) => prev.filter((n) => n.id !== id));
+    } catch (e) {
+      setError(apiError(e));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  const unread = items.filter((n) => !n.is_read).length;
+
   return (
     <Page>
       <div className="card">
         <div className="section-head" style={{ marginTop: 0 }}>
-          <h2>Inbox</h2>
+          <h2>Inbox{unread > 0 ? ` (${unread} unread)` : ""}</h2>
           <motion.button
             className="btn btn-sm btn-ghost"
             onClick={() => void refresh()}
@@ -66,6 +93,7 @@ export default function Inbox() {
                 }}
               >
                 <span className={`pill pill-${n.status}`}>{n.status}</span>
+                {!n.is_read && <span className="pill pill-sync_pending">unread</span>}
                 <div className="grow">
                   <p className="title">{n.subject ?? n.type.replace(/_/g, " ")}</p>
                   {n.body && <p className="sub">{n.body}</p>}
@@ -78,6 +106,25 @@ export default function Inbox() {
                     hour: "numeric",
                     minute: "2-digit",
                   })}
+                </span>
+                <span style={{ display: "flex", gap: 8 }}>
+                  {!n.is_read && (
+                    <button
+                      className="btn btn-sm btn-ghost"
+                      disabled={busyId === n.id}
+                      onClick={() => void onMarkRead(n.id)}
+                    >
+                      Mark read
+                    </button>
+                  )}
+                  <button
+                    className="btn btn-sm btn-ghost"
+                    disabled={busyId === n.id}
+                    onClick={() => void onDelete(n.id)}
+                    aria-label={`Delete notification ${n.id}`}
+                  >
+                    Delete
+                  </button>
                 </span>
               </motion.div>
             ))}

@@ -163,6 +163,59 @@ def list_questions(
     )
 
 
+def delete_questionnaire(session: Session, questionnaire: Questionnaire) -> None:
+    """C2: delete a form and its questions. Responses are kept (history)."""
+    session.query(QuestionnaireQuestion).filter(
+        QuestionnaireQuestion.questionnaire_id == questionnaire.id
+    ).delete()
+    session.delete(questionnaire)
+    session.commit()
+
+
+def get_question(
+    session: Session, questionnaire: Questionnaire, question_id: uuid.UUID
+) -> QuestionnaireQuestion:
+    row = session.get(QuestionnaireQuestion, question_id)
+    if row is None or row.questionnaire_id != questionnaire.id:
+        raise _not_found("Question not found in this questionnaire")
+    return row
+
+
+def update_question(
+    session: Session, question: QuestionnaireQuestion, body
+) -> QuestionnaireQuestion:
+    """C2: edit prompt / options / required / order / type."""
+    data = body.model_dump(exclude_unset=True)
+    if "prompt" in data:
+        prompt = str(data["prompt"]).strip()
+        if not prompt:
+            raise _unprocessable("prompt must not be empty")
+        question.prompt = prompt
+    if "type" in data and data["type"] is not None:
+        question.type = data["type"]
+    if "options" in data:
+        options = data["options"]
+        if question.type in (QuestionType.choice, QuestionType.multi_choice):
+            if not options:
+                raise _unprocessable(f"{question.type.value} questions require options")
+            question.options = list(options)
+        else:
+            question.options = list(options) if options else None
+    if "required" in data and data["required"] is not None:
+        question.required = bool(data["required"])
+    if "order" in data and data["order"] is not None:
+        question.order = int(data["order"])
+    session.commit()
+    session.refresh(question)
+    return question
+
+
+def delete_question(session: Session, question: QuestionnaireQuestion) -> None:
+    """C2: delete one question; sibling order values are left as-is."""
+    session.delete(question)
+    session.commit()
+
+
 # -- resolution --------------------------------------------------------------
 
 

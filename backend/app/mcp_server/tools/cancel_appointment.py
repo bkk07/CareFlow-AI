@@ -20,12 +20,13 @@ TOOL_NAME = "cancel_appointment"
 class CancelAppointmentIn(BaseModel):
     appointment_id: uuid.UUID
     reason: str | None = None
+    idempotency_key: str
 
 
 @mcp_tool(
     TOOL_NAME,
     retry_safe=False,
-    requires_idempotency=False,
+    requires_idempotency=True,
     allowed_roles=[Role.patient, Role.hospital_admin],
 )
 def run(
@@ -45,6 +46,7 @@ def run(
             actor_user_id=ctx.user_id,
             integration=integration,
             reason=input.reason,
+            idempotency_key=input.idempotency_key.strip(),
         )
     except InvalidTransition as exc:
         raise CapabilityValidationError(str(exc)) from exc

@@ -2,6 +2,7 @@
 
 import uuid
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.integration.mapping.models import (
@@ -46,6 +47,28 @@ def get_or_create_mapping(
         healthcare_system_connection_id=healthcare_system_connection_id,
     )
     session.add(mapping)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        # R4: concurrent first-time syncs race the same link — return the
+        # winner instead of 500ing the loser.
+        session.rollback()
+        winner = get_mapping(session, hospital_id, entity_type, internal_id)
+        if winner is not None:
+            return winner
+        # Unique on (hospital, entity, external_id) fired instead: fetch by
+        # external side.
+        winner = (
+            session.query(ExternalIdentifierMapping)
+            .filter(
+                ExternalIdentifierMapping.hospital_id == hospital_id,
+                ExternalIdentifierMapping.entity_type == entity_type,
+                ExternalIdentifierMapping.external_id == external_id,
+            )
+            .first()
+        )
+        if winner is not None:
+            return winner
+        raise
     session.refresh(mapping)
     return mapping

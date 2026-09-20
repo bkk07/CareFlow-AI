@@ -21,7 +21,7 @@ class SendNotificationIn(BaseModel):
     message: str = ""
     subject: str | None = None
     type: str = "manual"
-    dedupe_key: str | None = None
+    dedupe_key: str
 
 
 @mcp_tool(
@@ -47,7 +47,13 @@ def run(
     recipient = db.get(User, input.recipient_user_id)
     if recipient is None:
         raise HTTPException(status_code=404, detail="Recipient not found")
-    key = input.dedupe_key or f"manual:{recipient.id}:{uuid.uuid4().hex}"
+    # R2/R6: caller-supplied dedupe key — retries reuse it, never mint random.
+    key = input.dedupe_key.strip()
+    if not key:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="dedupe_key must not be empty",
+        )
     if input.channel == "email":
         row, created = notification_service.deliver_email(
             db,

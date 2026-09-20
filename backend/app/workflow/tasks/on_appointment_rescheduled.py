@@ -4,7 +4,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from app.domain.appointment.models import Appointment
+from app.domain.appointment.models import Appointment, AppointmentState
 from app.notification.service import create_in_app
 from app.workflow.models import WorkflowExecution
 from app.workflow.tasks._base import handler, note
@@ -18,7 +18,13 @@ def on_appointment_rescheduled(
     if appointment is None:
         note(execution, "appointment gone; nothing to notify")
         return
-    slot = appointment.slot_start.isoformat()
+    # R6: only announce moves for live moved bookings; carry the slot the
+    # move settled on (payload slot wins when present) so rapid double-moves
+    # cannot announce a stale slot.
+    if appointment.state != AppointmentState.rescheduled:
+        note(execution, f"appointment is {appointment.state.value}; skipping move notice")
+        return
+    slot = str(payload.get("slot_start") or appointment.slot_start.isoformat())
     row, created = create_in_app(
         session,
         recipient_user_id=appointment.patient_id,

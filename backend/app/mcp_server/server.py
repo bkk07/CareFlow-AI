@@ -18,6 +18,7 @@ from app.mcp_server.tools import (
     create_appointment,
     get_appointment,
     get_context,
+    get_day_schedule,
     get_questionnaire,
     list_appointment_types,
     lookup_patient,
@@ -55,6 +56,7 @@ for _module in (
     search_hospitals,
     search_doctors,
     check_availability,
+    get_day_schedule,
     lookup_patient,
     get_appointment,
     create_appointment,
@@ -75,8 +77,9 @@ for _module in (
     _register(_module)
 
 # 17 tools through Phase 13; verify_caller_identity (Phase 14) makes 18;
-# list_appointment_types (nearby-care polish) makes 19.
-assert len(_TOOLS) == 19, f"expected 19 tools, registered {len(_TOOLS)}"
+# list_appointment_types (nearby-care polish) makes 19;
+# get_day_schedule (patient timeline UI) makes 20.
+assert len(_TOOLS) == 20, f"expected 20 tools, registered {len(_TOOLS)}"
 
 
 def list_tools() -> list[dict]:

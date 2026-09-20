@@ -47,6 +47,17 @@ class AIContext(BaseModel):
     visit_types_seen: bool = False
     visit_types: list[dict[str, Any]] = Field(default_factory=list)
     visit_type_name: str | None = None
+    # How the patient wants to meet: video / phone / in_person. Asked like
+    # normal booking asks it; recorded deterministically, passed to booking.
+    selected_consultation_mode: str | None = None
+    # Whether a booking flow is currently open. Set by search success or
+    # any deterministic pick; cleared ONLY by a completed booking. While
+    # closed (never started, or already booked), no step widgets render —
+    # a later unrelated question never resurrects the flow's UI.
+    flow_open: bool = False
+    # Last how-to-meet options offered (mirrors visit_types): re-shown only
+    # when the mode step is genuinely pending, never blasted every turn.
+    consultation_modes: list[str] = Field(default_factory=list)
     # The visit day (YYYY-MM-DD) when the patient already gave it
     # ("tomorrow", "Monday", "Sep 21"). Recorded deterministically so the
     # assistant uses it directly instead of asking for the date again.
@@ -54,8 +65,10 @@ class AIContext(BaseModel):
     pending_clarification: str | None = None
     # P0 confirm-gate: a proposed booking waiting for the patient's
     # explicit "yes". Set when the assistant attempts create_appointment
-    # without confirmation; cleared on successful booking.
-    pending_booking: dict[str, str] | None = None
+    # without confirmation; cleared on successful booking. Loose value
+    # type on purpose: working memory must always reload, even if an
+    # older writer stored an unexpected shape.
+    pending_booking: dict[str, Any] | None = None
     awaiting_confirmation: bool = False
     last_appointment_id: str | None = None
     history: list[dict[str, str]] = Field(default_factory=list)

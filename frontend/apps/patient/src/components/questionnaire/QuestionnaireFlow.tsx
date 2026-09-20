@@ -1,35 +1,132 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { CheckCircle2 } from "lucide-react";
-import type { Appointment, QuestionnaireQuestion } from "../../types";
+import type { QuestionnaireQuestion } from "../../types";
 import { Button } from "../common/ui";
+
+function isAnsweredValue(v: unknown): boolean {
+  if (v === undefined || v === null || v === "") return false;
+  if (Array.isArray(v)) return v.length > 0;
+  if (typeof v === "object")
+    return Object.values(v as Record<string, unknown>).some(
+      (x) => x !== undefined && x !== null && x !== "",
+    );
+  return true;
+}
+
+function firstUnansweredIndex(
+  questions: QuestionnaireQuestion[],
+  answers: Record<string, unknown>,
+): number {
+  const i = questions.findIndex((q) => q.required && !isAnsweredValue(answers[q.id]));
+  return i === -1 ? 0 : i;
+}
 
 export function QuestionnaireFlow({
   questions,
   initialAnswers,
+  initialIndex,
+  alreadyCompleted = false,
+  saving = false,
+  onSaveDraft,
   onComplete,
 }: {
   questions: QuestionnaireQuestion[];
   initialAnswers?: Record<string, unknown>;
-  onComplete: (answers: Record<string, unknown>) => void;
+  /** Resume position — parent computes first unanswered draft question. */
+  initialIndex?: number;
+  /** True when the backend already has a completed response. */
+  alreadyCompleted?: boolean;
+  /** True while a save/submit request is in flight. */
+  saving?: boolean;
+  /** Persist a partial draft (3/5 answered stays resumable). */
+  onSaveDraft?: (answers: Record<string, unknown>) => void | Promise<unknown>;
+  onComplete: (answers: Record<string, unknown>) => void | Promise<unknown>;
 }) {
-  const [index, setIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, unknown>>(initialAnswers ?? {});
-  const [done, setDone] = useState(false);
-  const q = questions[index];
   const total = questions.length;
+  const [answers, setAnswers] = useState<Record<string, unknown>>(initialAnswers ?? {});
+  const [index, setIndex] = useState(() => {
+    if (typeof initialIndex === "number" && initialIndex >= 0 && initialIndex < total)
+      return initialIndex;
+    return firstUnansweredIndex(questions, initialAnswers ?? {});
+  });
+  const [done, setDone] = useState(alreadyCompleted);
+  const [draftMsg, setDraftMsg] = useState<string | null>(null);
+  const synced = useRef(false);
+
+  // Late-arriving draft (fetched after the modal opened) — adopt once.
+  useEffect(() => {
+    if (synced.current || !initialAnswers) return;
+    synced.current = true;
+    setAnswers((prev) => (Object.keys(prev).length > 0 ? prev : { ...initialAnswers }));
+    if (typeof initialIndex !== "number") {
+      setIndex(firstUnansweredIndex(questions, initialAnswers));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialAnswers]);
+
+  useEffect(() => {
+    if (alreadyCompleted) setDone(true);
+  }, [alreadyCompleted]);
+
+  const answeredCount = useMemo(
+    () => questions.filter((q) => isAnsweredValue(answers[q.id])).length,
+    [questions, answers],
+  );
+
+  if (total === 0) {
+    return <p className="text-sm text-ink-secondary py-6 text-center">No questions in this form.</p>;
+  }
+
+  const q = questions[Math.min(index, total - 1)];
 
   function setAnswer(id: string, v: unknown) {
     setAnswers((prev) => ({ ...prev, [id]: v }));
+    setDraftMsg(null);
   }
 
   function canContinue(): boolean {
     if (!q.required) return true;
-    const v = answers[q.id];
-    if (v === undefined || v === null || v === "") return false;
-    if (Array.isArray(v)) return v.length > 0;
-    if (typeof v === "object") return Object.values(v as Record<string, unknown>).some((x) => x);
-    return true;
+    return isAnsweredValue(answers[q.id]);
+  }
+
+  function persistDraft(next: Record<string, unknown>) {
+    if (!onSaveDraft) return;
+    try {
+      const r = onSaveDraft(next);
+      if (r && typeof (r as Promise<unknown>).then === "function") {
+        (r as Promise<unknown>).then(
+          () => setDraftMsg(`Draft saved · ${answeredCount} of ${total} answered`),
+          () => undefined,
+        );
+      } else {
+        setDraftMsg(`Draft saved · ${answeredCount} of ${total} answered`);
+      }
+    } catch {
+      // Draft save is best-effort — the explicit button surfaces errors via parent.
+    }
+  }
+
+  function goNext() {
+    persistDraft(answers);
+    setIndex((i) => Math.min(total - 1, i + 1));
+  }
+
+  function goPrev() {
+    persistDraft(answers);
+    setIndex((i) => Math.max(0, i - 1));
+  }
+
+  async function handleSave() {
+    if (!onSaveDraft) return;
+    await onSaveDraft(answers);
+    const n = questions.filter((qq) => isAnsweredValue(answers[qq.id])).length;
+    setDraftMsg(`Draft saved · ${n} of ${total} answered — you can continue later.`);
+  }
+
+  async function handleSubmit() {
+    await onComplete(answers);
+    setDone(true);
   }
 
   if (done) {
@@ -44,7 +141,17 @@ export function QuestionnaireFlow({
           <CheckCircle2 size={30} />
         </motion.div>
         <h3 className="font-bold text-ink">Responses submitted</h3>
-        <p className="text-sm text-ink-secondary mt-1">The care team will have this before your visit.</p>
+        <p className="text-sm text-ink-secondary mt-1">
+          {answeredCount} of {total} answered · the care team will have this before your visit.
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-4"
+          onClick={() => setDone(false)}
+        >
+          Review or edit answers
+        </Button>
       </motion.div>
     );
   }
@@ -53,7 +160,7 @@ export function QuestionnaireFlow({
     <div>
       <div className="flex items-center justify-between text-[0.8rem] font-semibold text-ink-secondary mb-1.5">
         <span>
-          Question {index + 1} of {total}
+          Question {index + 1} of {total} · {answeredCount}/{total} answered
         </span>
         <span>{Math.round(((index + 1) / total) * 100)}%</span>
       </div>
@@ -190,33 +297,41 @@ export function QuestionnaireFlow({
       </AnimatePresence>
 
       <div className="flex gap-2 mt-6">
-        <Button variant="outline" disabled={index === 0} onClick={() => setIndex((i) => Math.max(0, i - 1))} className="flex-1">
+        <Button variant="outline" disabled={index === 0 || saving} onClick={goPrev} className="flex-1">
           Previous
         </Button>
         {index < total - 1 ? (
-          <Button disabled={!canContinue()} onClick={() => setIndex((i) => i + 1)} className="flex-1">
+          <Button disabled={!canContinue() || saving} onClick={goNext} className="flex-1">
             Next
           </Button>
         ) : (
           <Button
-            disabled={!canContinue()}
-            onClick={() => {
-              setDone(true);
-              onComplete(answers);
-            }}
+            disabled={!canContinue() || saving}
+            onClick={() => void handleSubmit()}
             className="flex-1"
           >
-            Submit
+            {saving ? "Saving…" : "Submit"}
           </Button>
         )}
       </div>
-      <button className="w-full text-center text-[0.82rem] text-ink-secondary hover:text-healthcare font-semibold mt-3">
-        Save progress
-      </button>
+      {onSaveDraft && (
+        <button
+          onClick={() => void handleSave()}
+          disabled={saving || answeredCount === 0}
+          className="w-full text-center text-[0.82rem] text-ink-secondary hover:text-healthcare font-semibold mt-3 disabled:opacity-50"
+        >
+          {saving ? "Saving…" : `Save progress (${answeredCount}/${total})`}
+        </button>
+      )}
+      {draftMsg && (
+        <p role="status" className="text-center text-[0.78rem] font-semibold text-success mt-1.5">
+          {draftMsg}
+        </p>
+      )}
     </div>
   );
 }
 
-export function verificationSteps(stage: Appointment["verificationStage"]): string {
+export function verificationSteps(stage: "created" | "verified" | "confirmed"): string {
   return stage;
 }

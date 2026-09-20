@@ -102,29 +102,8 @@ export function mapPatientAppointment(a: PatientAppointment): Appointment {
   };
 }
 
-const READ_KEY = "careflow_patient_read";
-
-function readIds(): Set<string> {
-  try {
-    return new Set(JSON.parse(localStorage.getItem(READ_KEY) ?? "[]") as string[]);
-  } catch {
-    return new Set();
-  }
-}
-
-export function persistRead(id: string) {
-  try {
-    const ids = readIds();
-    ids.add(id);
-    localStorage.setItem(READ_KEY, JSON.stringify([...ids]));
-  } catch {
-    /* private mode */
-  }
-}
-
-/** Backend notification -> inbox item. Read state is local (no read receipts API). */
-export function mapNotification(n: Notification, read?: Set<string>): NotificationItem {
-  const known = read ?? readIds();
+/** Backend notification -> inbox item. Read state is server-side (is_read). */
+export function mapNotification(n: Notification): NotificationItem {
   const type = (n.type ?? "").toLowerCase();
   let category: NotificationCategory = "hospital";
   if (["booking_confirmation", "cancellation", "reschedule", "reminder"].includes(type)) {
@@ -146,7 +125,7 @@ export function mapNotification(n: Notification, read?: Set<string>): Notificati
     title: n.subject ?? "CareFlow AI update",
     body: n.body ?? "",
     time,
-    unread: !known.has(n.id),
+    unread: !n.is_read,
   };
 }
 

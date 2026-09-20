@@ -431,6 +431,14 @@ export async function deleteSpecialty(hospitalId: string, id: string): Promise<v
   await api.delete(`/hospitals/${hospitalId}/specialties/${id}`);
 }
 
+export async function renameSpecialty(
+  hospitalId: string,
+  id: string,
+  name: string,
+): Promise<Specialty> {
+  return (await api.put(`/hospitals/${hospitalId}/specialties/${id}`, { name })).data;
+}
+
 export async function listAppointmentTypes(hospitalId: string): Promise<AppointmentType[]> {
   return (await api.get(`/hospitals/${hospitalId}/appointment-types`)).data;
 }
@@ -444,6 +452,14 @@ export async function createAppointmentType(
 
 export async function deleteAppointmentType(hospitalId: string, id: string): Promise<void> {
   await api.delete(`/hospitals/${hospitalId}/appointment-types/${id}`);
+}
+
+export async function updateAppointmentType(
+  hospitalId: string,
+  id: string,
+  body: { name: string; duration_minutes: number; compatible_specialty_ids?: string[] },
+): Promise<AppointmentType> {
+  return (await api.put(`/hospitals/${hospitalId}/appointment-types/${id}`, body)).data;
 }
 
 // -- doctors --------------------------------------------------------------------
@@ -506,6 +522,27 @@ export async function suspendDoctor(hospitalId: string, id: string): Promise<Doc
   return (await api.post(`/hospitals/${hospitalId}/doctors/${id}/suspend`)).data;
 }
 
+export async function updateDoctor(
+  hospitalId: string,
+  id: string,
+  patch: {
+    name?: string;
+    specialty_id?: string | null;
+    department_id?: string | null;
+    experience_years?: number;
+    languages?: string[];
+    consultation_types?: string[];
+    available_durations?: number[];
+    photo_url?: string | null;
+  },
+): Promise<DoctorDetail> {
+  return (await api.put(`/hospitals/${hospitalId}/doctors/${id}`, patch)).data;
+}
+
+export async function deleteDoctor(hospitalId: string, id: string): Promise<void> {
+  await api.delete(`/hospitals/${hospitalId}/doctors/${id}`);
+}
+
 // -- appointments ---------------------------------------------------------------
 
 export async function listAppointments(hospitalId: string): Promise<Appointment[]> {
@@ -514,6 +551,22 @@ export async function listAppointments(hospitalId: string): Promise<Appointment[
 
 export async function cancelAppointment(id: string, reason?: string): Promise<Appointment> {
   return (await api.post(`/appointments/${id}/cancel`, { reason: reason ?? null })).data;
+}
+
+export async function completeAppointment(id: string, reason?: string): Promise<Appointment> {
+  return (await api.post(`/appointments/${id}/complete`, { reason: reason ?? null })).data;
+}
+
+export async function markNoShow(id: string, reason?: string): Promise<Appointment> {
+  return (await api.post(`/appointments/${id}/no-show`, { reason: reason ?? null })).data;
+}
+
+export async function confirmAppointment(id: string, reason?: string): Promise<Appointment> {
+  return (await api.post(`/appointments/${id}/confirm`, { reason: reason ?? null })).data;
+}
+
+export async function getAppointmentDetail(id: string): Promise<AppointmentDetail> {
+  return (await api.get(`/appointments/${id}`)).data;
 }
 
 // -- questionnaires (authoring) --------------------------------------------------
@@ -582,6 +635,34 @@ export async function addQuestion(
   return (
     await api.post(`/hospitals/${hospitalId}/questionnaires/${questionnaireId}/questions`, body)
   ).data;
+}
+
+export async function updateQuestion(
+  hospitalId: string,
+  questionnaireId: string,
+  questionId: string,
+  patch: { prompt?: string; type?: string; options?: string[] | null; required?: boolean; order?: number },
+): Promise<QuestionnaireQuestion> {
+  return (
+    await api.put(
+      `/hospitals/${hospitalId}/questionnaires/${questionnaireId}/questions/${questionId}`,
+      patch,
+    )
+  ).data;
+}
+
+export async function deleteQuestion(
+  hospitalId: string,
+  questionnaireId: string,
+  questionId: string,
+): Promise<void> {
+  await api.delete(
+    `/hospitals/${hospitalId}/questionnaires/${questionnaireId}/questions/${questionId}`,
+  );
+}
+
+export async function deleteQuestionnaire(hospitalId: string, id: string): Promise<void> {
+  await api.delete(`/hospitals/${hospitalId}/questionnaires/${id}`);
 }
 
 // -- insights --------------------------------------------------------------------

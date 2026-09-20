@@ -172,6 +172,8 @@ export interface ChatMessage {
     working_hours: { start: string; end: string }[];
     busy: { start: string; end: string }[];
   } | null;
+  /** How-to-meet options (video/phone/in_person) for the chosen doctor. */
+  consultationModes?: string[];
   /** Where the patient is in the guided booking flow. */
   bookingStage?: string;
   /** Proposal awaiting the patient's explicit yes/no. */
@@ -182,6 +184,7 @@ export interface ChatMessage {
     slot_start: string | null;
     slot_end: string | null;
     appointment_id: string | null;
+    consultation_mode?: string | null;
   } | null;
 }
 

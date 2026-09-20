@@ -571,6 +571,7 @@ def test_doctor_notifications_inbox(client, stub_integration):
                 "recipient_user_id": login["id"],
                 "channel": "in_app",
                 "message": "New booking: 9 AM follow-up",
+                "dedupe_key": "test:docnot:follow-up-9am",
             },
         },
         headers=setup["hosp"]["owner"],
@@ -580,6 +581,57 @@ def test_doctor_notifications_inbox(client, stub_integration):
     inbox = client.get("/notifications", headers=login["headers"]).json()
     assert len(inbox) == 1
     assert inbox[0]["body"] == "New booking: 9 AM follow-up"
+
+
+def test_notifications_read_and_delete(client, stub_integration):
+    """C4: get / mark-read / read-all / delete are owner-scoped and persistent."""
+    setup = seed_setup(client, tag="notifc4")
+    login = register_doctor_login(client, setup["hid"], "notifc4")
+    link_doctor(client, setup, login["id"])
+    h = login["headers"]
+
+    for i in range(2):
+        sent = client.post(
+            "/mcp/call",
+            json={
+                "tool": "send_notification",
+                "input": {
+                    "recipient_user_id": login["id"],
+                    "channel": "in_app",
+                    "message": f"C4 note {i}",
+                    "dedupe_key": f"test:notifc4:note-{i}",
+                },
+            },
+            headers=setup["hosp"]["owner"],
+        )
+        assert sent.status_code == 200, sent.text
+
+    inbox = client.get("/notifications", headers=h).json()
+    assert len(inbox) == 2
+    assert all(n["is_read"] is False for n in inbox)
+
+    first = inbox[0]["id"]
+    got = client.get(f"/notifications/{first}", headers=h)
+    assert got.status_code == 200
+    assert got.json()["id"] == first
+
+    marked = client.post(f"/notifications/{first}/read", headers=h)
+    assert marked.status_code == 200
+    assert marked.json()["is_read"] is True
+
+    # Re-reading is idempotent.
+    again = client.post(f"/notifications/{first}/read", headers=h)
+    assert again.status_code == 200
+
+    all_read = client.post("/notifications/read-all", headers=h)
+    assert all_read.status_code == 200
+    assert all_read.json()["marked"] == 1
+    assert all(n["is_read"] is True for n in client.get("/notifications", headers=h).json())
+
+    deleted = client.delete(f"/notifications/{first}", headers=h)
+    assert deleted.status_code == 204
+    assert client.get(f"/notifications/{first}", headers=h).status_code == 404
+    assert len(client.get("/notifications", headers=h).json()) == 1
 
 
 def test_doctor_questionnaire_inbox_aggregated(client, stub_integration):

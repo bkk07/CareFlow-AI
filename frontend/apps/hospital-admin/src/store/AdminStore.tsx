@@ -3,11 +3,18 @@ import type { ReactNode } from "react";
 import {
   activateDoctor as apiActivateDoctor,
   addQuestion as apiAddQuestion,
+  deleteQuestion as apiDeleteQuestion,
+  updateQuestion as apiUpdateQuestion,
+  deleteQuestionnaire as apiDeleteQuestionnaire,
   createAppointmentType as apiCreateType,
+  updateAppointmentType as apiUpdateType,
   createDepartment as apiCreateDepartment,
   createDoctor as apiCreateDoctor,
+  updateDoctor as apiUpdateDoctor,
+  deleteDoctor as apiDeleteDoctor,
   createQuestionnaire as apiCreateQuestionnaire,
   createSpecialty as apiCreateSpecialty,
+  renameSpecialty as apiRenameSpecialty,
   deactivateDoctor as apiDeactivateDoctor,
   suspendDoctor as apiSuspendDoctor,
   deactivateStaff as apiDeactivateStaff,
@@ -40,6 +47,7 @@ import {
   removeDoctorLogin as apiRemoveDoctorLogin,
   resolveEscalation as apiResolveEscalation,
   resolveReconciliation as apiResolveRecord,
+  retryReconciliation as apiRetryRecord,
   restoreAccessToken,
   retryOperation as apiRetryOperation,
   setAccessToken,
@@ -48,6 +56,9 @@ import {
   updateQuestionnaire as apiUpdateQuestionnaire,
   verifyAppointment as apiVerify,
   cancelAppointment as apiCancelAppointment,
+  completeAppointment as apiCompleteAppointment,
+  markNoShow as apiNoShowAppointment,
+  confirmAppointment as apiConfirmAppointment,
   type AIActivityEntry,
   type CurrentUser,
   type Hospital as ApiHospital,
@@ -136,9 +147,11 @@ interface AdminStore {
   deleteDepartment: (id: string) => Promise<void>;
   toggleDepartment: (id: string) => Promise<void>;
   addSpecialty: (name: string) => Promise<void>;
+  renameSpecialty: (id: string, name: string) => Promise<void>;
   deleteSpecialty: (id: string) => Promise<void>;
   toggleSpecialty: (id: string) => void;
   addType: (t: Omit<AppointmentType, "id" | "status">) => Promise<void>;
+  updateType: (id: string, t: { name: string; duration: number; compatible_specialty_ids?: string[] }) => Promise<void>;
   deleteType: (id: string) => Promise<void>;
   toggleType: (id: string) => void;
   createDoctor: (input: {
@@ -150,10 +163,25 @@ interface AdminStore {
     consultation_types?: string[];
   }) => Promise<void>;
   setDoctorStatus: (id: string, status: Doctor["status"]) => Promise<void>;
+  updateDoctor: (id: string, patch: {
+    name?: string;
+    specialty_id?: string | null;
+    department_id?: string | null;
+    experience_years?: number;
+    languages?: string[];
+    consultation_types?: string[];
+  }) => Promise<void>;
+  deleteDoctor: (id: string) => Promise<void>;
   inviteDoctorLogin: (id: string, email: string, password: string) => Promise<void>;
   removeDoctorLogin: (id: string) => Promise<void>;
   cancelAppointment: (id: string) => Promise<void>;
+  completeAppointment: (id: string) => Promise<void>;
+  markNoShow: (id: string) => Promise<void>;
+  confirmAppointment: (id: string) => Promise<void>;
   createQuestionnaire: (name: string, scope?: string, scopeRefId?: string | null) => Promise<void>;
+  deleteQuestionnaire: (id: string) => Promise<void>;
+  updateQuestionnaireQuestion: (qid: string, questionId: string, patch: { prompt?: string; required?: boolean }) => Promise<void>;
+  deleteQuestionnaireQuestion: (qid: string, questionId: string) => Promise<void>;
   addQuestionnaireQuestion: (id: string, body: { order: number; type: string; prompt: string; options?: string[] | null; required?: boolean }) => Promise<void>;
   duplicateQuestionnaire: (id: string) => Promise<void>;
   toggleQuestionnaire: (id: string) => Promise<void>;
@@ -190,6 +218,7 @@ interface AdminStore {
     verifications_24h: Record<string, number>;
   } | null;
   retryOperation: (id: string) => Promise<void>;
+  retryReconciliation: (id: string) => Promise<void>;
   verifyOperation: (id: string) => Promise<string>;
   resolveReconciliation: (id: string, finalState: string, note: string) => Promise<void>;
   assignEscalation: (id: string, who: string) => void;
@@ -521,6 +550,14 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     await refreshAll();
   }, [live, hospitalId, refreshAll, fail]);
 
+  const renameSpecialty = useCallback(async (id: string, name: string) => {
+    if (!live || !hospitalId) throw fail("Sign in — managing specialties needs the backend.");
+    await apiRenameSpecialty(hospitalId, id, name).catch(() => {
+      throw fail("Could not rename specialty (name may exist).");
+    });
+    await refreshAll();
+  }, [live, hospitalId, refreshAll, fail]);
+
   const toggleSpecialty = useCallback((_id: string) => {
     // Live specialties have no status flag — use Delete.
     setBackendError("Status toggle is not supported by the backend — use Delete.");
@@ -537,6 +574,16 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const deleteType = useCallback(async (id: string) => {
     if (!live || !hospitalId) throw fail("Sign in — managing appointment types needs the backend.");
     await apiDeleteType(hospitalId, id).catch(() => { throw fail("Could not delete appointment type."); });
+    await refreshAll();
+  }, [live, hospitalId, refreshAll, fail]);
+
+  const updateType = useCallback(async (id: string, t: { name: string; duration: number; compatible_specialty_ids?: string[] }) => {
+    if (!live || !hospitalId) throw fail("Sign in — managing appointment types needs the backend.");
+    await apiUpdateType(hospitalId, id, {
+      name: t.name,
+      duration_minutes: t.duration,
+      compatible_specialty_ids: t.compatible_specialty_ids ?? [],
+    }).catch(() => { throw fail("Could not update appointment type (name may exist)."); });
     await refreshAll();
   }, [live, hospitalId, refreshAll, fail]);
 
@@ -582,8 +629,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     log("Doctor login removed", id);
   }, [live, hospitalId, refreshAll, fail]);
 
-  const setDoctorStatus = useCallback(async (id: string, status: Doctor["status"]) => {
-    if (!live || !hospitalId) throw fail("Sign in — managing doctors needs the backend.");
+  const setDoctorStatus = useCallback(async (id: string, status: Doctor["status"]) => {    if (!live || !hospitalId) throw fail("Sign in — managing doctors needs the backend.");
     try {
       if (status === "active") await apiActivateDoctor(hospitalId, id);
       else if (status === "inactive") await apiDeactivateDoctor(hospitalId, id);
@@ -597,6 +643,27 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     log(status === "active" ? "Doctor activated" : status === "suspended" ? "Doctor suspended" : "Doctor deactivated", id);
   }, [live, hospitalId, refreshAll, fail]);
 
+  const updateDoctor = useCallback(async (id: string, patch: {
+    name?: string;
+    specialty_id?: string | null;
+    department_id?: string | null;
+    experience_years?: number;
+    languages?: string[];
+    consultation_types?: string[];
+  }) => {
+    if (!live || !hospitalId) throw fail("Sign in — managing doctors needs the backend.");
+    await apiUpdateDoctor(hospitalId, id, patch).catch(() => { throw fail("Could not update doctor."); });
+    await refreshAll();
+    log("Doctor updated", id);
+  }, [live, hospitalId, refreshAll, fail]);
+
+  const deleteDoctor = useCallback(async (id: string) => {
+    if (!live || !hospitalId) throw fail("Sign in — managing doctors needs the backend.");
+    await apiDeleteDoctor(hospitalId, id).catch(() => { throw fail("Could not delete doctor (upcoming visits may reference them)."); });
+    await refreshAll();
+    log("Doctor deleted", id);
+  }, [live, hospitalId, refreshAll, fail]);
+
   // -- appointments ------------------------------------------------------------------
 
   const cancelAppointment = useCallback(async (id: string) => {
@@ -604,6 +671,27 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     await apiCancelAppointment(id).catch(() => { throw fail("Could not cancel appointment."); });
     await refreshAll();
     log("Appointment cancelled", id);
+  }, [live, refreshAll, fail]);
+
+  const completeAppointment = useCallback(async (id: string) => {
+    if (!live) throw fail("Sign in — managing appointments needs the backend.");
+    await apiCompleteAppointment(id).catch(() => { throw fail("Could not complete appointment (wrong state?)."); });
+    await refreshAll();
+    log("Appointment completed", id);
+  }, [live, refreshAll, fail]);
+
+  const markNoShow = useCallback(async (id: string) => {
+    if (!live) throw fail("Sign in — managing appointments needs the backend.");
+    await apiNoShowAppointment(id).catch(() => { throw fail("Could not mark no-show (wrong state?)."); });
+    await refreshAll();
+    log("Appointment marked no-show", id);
+  }, [live, refreshAll, fail]);
+
+  const confirmAppointment = useCallback(async (id: string) => {
+    if (!live) throw fail("Sign in — managing appointments needs the backend.");
+    await apiConfirmAppointment(id).catch(() => { throw fail("Could not confirm appointment (wrong state?)."); });
+    await refreshAll();
+    log("Appointment confirmed", id);
   }, [live, refreshAll, fail]);
 
   // -- questionnaires ------------------------------------------------------------------
@@ -655,6 +743,24 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     return apiQuestionDetail(hospitalId, id).catch(() => null);
   }, [live, hospitalId, fail]);
 
+  const deleteQuestionnaire = useCallback(async (id: string) => {
+    if (!live || !hospitalId) throw fail("Sign in — managing questionnaires needs the backend.");
+    await apiDeleteQuestionnaire(hospitalId, id).catch(() => { throw fail("Could not delete questionnaire."); });
+    await refreshAll();
+  }, [live, hospitalId, refreshAll, fail]);
+
+  const updateQuestionnaireQuestion = useCallback(async (qid: string, questionId: string, patch: { prompt?: string; required?: boolean }) => {
+    if (!live || !hospitalId) throw fail("Sign in — managing questionnaires needs the backend.");
+    await apiUpdateQuestion(hospitalId, qid, questionId, patch).catch(() => { throw fail("Could not update question."); });
+    await refreshAll();
+  }, [live, hospitalId, refreshAll, fail]);
+
+  const deleteQuestionnaireQuestion = useCallback(async (qid: string, questionId: string) => {
+    if (!live || !hospitalId) throw fail("Sign in — managing questionnaires needs the backend.");
+    await apiDeleteQuestion(hospitalId, qid, questionId).catch(() => { throw fail("Could not delete question."); });
+    await refreshAll();
+  }, [live, hospitalId, refreshAll, fail]);
+
   // -- staff ---------------------------------------------------------------------------
 
   const inviteStaff = useCallback(async (email: string, password: string) => {
@@ -678,6 +784,13 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     await apiRetryOperation(id).catch(() => { throw fail("Retry failed — operation may already be resolved."); });
     await refreshAll();
     log("Operation retried", id);
+  }, [live, refreshAll, fail]);
+
+  const retryReconciliation = useCallback(async (id: string) => {
+    if (!live) throw fail("Sign in — retrying cases needs the backend.");
+    await apiRetryRecord(id).catch(() => { throw fail("Retry failed — case may be resolved or escalated."); });
+    await refreshAll();
+    log("Reconciliation retried", id);
   }, [live, refreshAll, fail]);
 
   const verifyOperation = useCallback(async (id: string) => {
@@ -764,17 +877,27 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       deleteDepartment,
       toggleDepartment,
       addSpecialty: (name) => addSpecialty(name),
+      renameSpecialty,
       deleteSpecialty,
       toggleSpecialty,
       addType,
+      updateType,
       deleteType,
       toggleType,
       createDoctor,
+      updateDoctor,
+      deleteDoctor,
       setDoctorStatus,
       inviteDoctorLogin,
       removeDoctorLogin,
       cancelAppointment,
+      completeAppointment,
+      markNoShow,
+      confirmAppointment,
       createQuestionnaire,
+      deleteQuestionnaire,
+      updateQuestionnaireQuestion,
+      deleteQuestionnaireQuestion,
       duplicateQuestionnaire,
       toggleQuestionnaire,
       fetchQuestionnaireDetail,
@@ -798,6 +921,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       analytics,
       integration,
       retryOperation,
+      retryReconciliation,
       verifyOperation,
       resolveReconciliation,
       assignEscalation,
@@ -809,13 +933,15 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     }),
     [role, authed, login, logout, mode, live, loading, backendError, user, hospital,
       refreshAll, updateHospital, resubmitHospital, departments, specialties, types, doctors, appointments, questionnaires, staff,
-      addDepartment, renameDepartment, deleteDepartment, toggleDepartment, addSpecialty, deleteSpecialty,
-      toggleSpecialty, addType, deleteType, toggleType, createDoctor, setDoctorStatus, inviteDoctorLogin,
-      removeDoctorLogin, cancelAppointment,
-      createQuestionnaire, duplicateQuestionnaire, toggleQuestionnaire, fetchQuestionnaireDetail,
+      addDepartment, renameDepartment, deleteDepartment, toggleDepartment, addSpecialty, renameSpecialty, deleteSpecialty,
+      toggleSpecialty, addType, updateType, deleteType, toggleType, createDoctor, updateDoctor, deleteDoctor,
+      setDoctorStatus, inviteDoctorLogin,
+      removeDoctorLogin, cancelAppointment, completeAppointment, markNoShow, confirmAppointment,
+      createQuestionnaire, deleteQuestionnaire, updateQuestionnaireQuestion, deleteQuestionnaireQuestion,
+      duplicateQuestionnaire, toggleQuestionnaire, fetchQuestionnaireDetail,
       inviteStaff, deactivateStaff, hospitals, audit, operations, reconciliations, escalations,
       liveWorkflows, liveAI, liveIntegrationRows, overview, analytics, integration,
-      retryOperation, verifyOperation, resolveReconciliation, assignEscalation, resolveEscalation,
+      retryOperation, retryReconciliation, verifyOperation, resolveReconciliation, assignEscalation, resolveEscalation,
       notifications, markAllRead, pushNotification, log],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

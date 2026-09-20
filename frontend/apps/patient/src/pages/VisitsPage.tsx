@@ -6,15 +6,17 @@ import {
   checkAvailability as apiCheckAvailability,
   fetchAppointmentQuestionnaire,
   fetchMyAppointment,
+  fetchQuestionnaireResponses,
   submitQuestionnaireAnswers,
   type Questionnaire as ApiQuestionnaire,
   type Slot,
 } from "../api";
 import { formatSlotDate, formatSlotTime, mapSlot, coerceQuestionnaireAnswers } from "../lib/backend";
-import { nextSevenDays } from "../lib/helpers";
+import { formatDayKeyLong, sevenDaysFrom, toLocalKey } from "../lib/helpers";
 import { useAppState } from "../context/AppStateContext";
 import { AppointmentCard } from "../components/appointment/AppointmentCard";
 import { AppointmentDetailModal } from "../components/appointment/AppointmentDetailModal";
+import DayStripWithCalendar from "../components/appointment/DayStripWithCalendar";
 import { SlotPicker } from "../components/appointment/SlotPicker";
 import { QuestionnaireFlow } from "../components/questionnaire/QuestionnaireFlow";
 import { Button, EmptyState } from "../components/common/ui";
@@ -39,6 +41,39 @@ function mapApiQuestions(q: ApiQuestionnaire): QuestionnaireQuestion[] {
     }));
 }
 
+function hasValue(v: unknown): boolean {
+  if (v === undefined || v === null || v === "") return false;
+  if (Array.isArray(v)) return v.length > 0;
+  if (typeof v === "object")
+    return Object.values(v as Record<string, unknown>).some(
+      (x) => x !== undefined && x !== null && x !== "",
+    );
+  return true;
+}
+
+function countAnswered(
+  questions: QuestionnaireQuestion[],
+  answers: Record<string, unknown>,
+): number {
+  return questions.filter((q) => hasValue(answers[q.id])).length;
+}
+
+function resumeIndexFor(
+  questions: QuestionnaireQuestion[],
+  answers: Record<string, unknown>,
+): number {
+  const i = questions.findIndex((q) => q.required && !hasValue(answers[q.id]));
+  return i === -1 ? 0 : i;
+}
+
+interface QuStatus {
+  hasForm: boolean;
+  completed: boolean;
+  answered: number;
+  total: number;
+  loading: boolean;
+}
+
 export default function VisitsPage() {
   const location = useLocation();
   const { appointments, cancelAppointment, pushNotification, live } = useAppState();
@@ -50,6 +85,11 @@ export default function VisitsPage() {
   const [quForm, setQuForm] = useState<ApiQuestionnaire | null>(null);
   const [quLoading, setQuLoading] = useState(false);
   const [quError, setQuError] = useState<string | null>(null);
+  const [quAnswers, setQuAnswers] = useState<Record<string, unknown>>({});
+  const [quCompleted, setQuCompleted] = useState(false);
+  const [quResumeIndex, setQuResumeIndex] = useState(0);
+  const [quSaving, setQuSaving] = useState(false);
+  const [quStatus, setQuStatus] = useState<Record<string, QuStatus>>({});
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
 
@@ -61,20 +101,118 @@ export default function VisitsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Live: load the real pre-visit form when the modal opens.
+  // Live: load the real pre-visit form + any saved draft when the modal opens.
   useEffect(() => {
     if (!live || !questionnaireFor) return;
+    let cancelled = false;
     setQuForm(null);
     setQuError(null);
+    setQuAnswers({});
+    setQuCompleted(false);
+    setQuResumeIndex(0);
     setQuLoading(true);
-    fetchAppointmentQuestionnaire(questionnaireFor)
-      .then((form) => {
-        if (!form) setQuError("No questionnaire is assigned to this visit yet.");
-        else setQuForm(form);
-      })
-      .catch(() => setQuError("Could not load the questionnaire. Try again."))
-      .finally(() => setQuLoading(false));
+    (async () => {
+      try {
+        const form = await fetchAppointmentQuestionnaire(questionnaireFor);
+        if (cancelled) return;
+        if (!form) {
+          setQuError("No questionnaire is assigned to this visit yet.");
+          return;
+        }
+        setQuForm(form);
+        const mapped = mapApiQuestions(form);
+        try {
+          const responses = await fetchQuestionnaireResponses(questionnaireFor);
+          if (cancelled) return;
+          const latest = responses[responses.length - 1];
+          if (latest) {
+            const saved = (latest.answers ?? {}) as Record<string, unknown>;
+            setQuAnswers(saved);
+            setQuCompleted(!!latest.completed);
+            setQuResumeIndex(latest.completed ? 0 : resumeIndexFor(mapped, saved));
+            setQuStatus((prev) => ({
+              ...prev,
+              [questionnaireFor]: {
+                hasForm: true,
+                completed: !!latest.completed,
+                answered: countAnswered(mapped, saved),
+                total: mapped.length,
+                loading: false,
+              },
+            }));
+          }
+        } catch {
+          // No saved draft yet — start fresh.
+        }
+      } catch {
+        if (!cancelled) setQuError("Could not load the questionnaire. Try again.");
+      } finally {
+        if (!cancelled) setQuLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [live, questionnaireFor]);
+
+  // Live: preload Start / Continue x/y / Completed state for every upcoming visit,
+  // so a filled form never still shows "Start".
+  useEffect(() => {
+    if (!live) return;
+    const ids = appointments
+      .filter((a) => UPCOMING.includes(a.status))
+      .map((a) => a.id);
+    if (ids.length === 0) return;
+    let cancelled = false;
+    setQuStatus((prev) => {
+      const next = { ...prev };
+      for (const id of ids) {
+        if (!next[id]) next[id] = { hasForm: true, completed: false, answered: 0, total: 0, loading: true };
+        else next[id] = { ...next[id], loading: true };
+      }
+      return next;
+    });
+    void Promise.all(
+      ids.map(async (id) => {
+        try {
+          const form = await fetchAppointmentQuestionnaire(id);
+          if (!form) {
+            if (!cancelled)
+              setQuStatus((prev) => ({ ...prev, [id]: { hasForm: false, completed: false, answered: 0, total: 0, loading: false } }));
+            return;
+          }
+          const mapped = mapApiQuestions(form);
+          let saved: Record<string, unknown> = {};
+          let completed = false;
+          try {
+            const responses = await fetchQuestionnaireResponses(id);
+            const latest = responses[responses.length - 1];
+            if (latest) {
+              saved = (latest.answers ?? {}) as Record<string, unknown>;
+              completed = !!latest.completed;
+            }
+          } catch {
+            // Treat as fresh when responses are unreadable.
+          }
+          if (!cancelled)
+            setQuStatus((prev) => ({
+              ...prev,
+              [id]: { hasForm: true, completed, answered: countAnswered(mapped, saved), total: mapped.length, loading: false },
+            }));
+        } catch {
+          if (!cancelled)
+            setQuStatus((prev) => ({
+              ...prev,
+              [id]: { hasForm: true, completed: false, answered: 0, total: 0, loading: false },
+            }));
+        }
+      }),
+    );
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live, appointments.map((a) => a.id).join(",")]);
 
   const counts = useMemo(
     () => ({
@@ -114,6 +252,57 @@ export default function VisitsPage() {
       setCancelError("Could not cancel this visit. It may already have changed state — pull to refresh and try again.");
     } finally {
       setCancelling(false);
+    }
+  }
+
+  /** POST answers (draft or final) and refresh the Start/Continue/Completed badge. */
+  async function persistAnswers(
+    appointmentId: string,
+    form: ApiQuestionnaire,
+    answers: Record<string, unknown>,
+    opts: { final: boolean },
+  ) {
+    setQuSaving(true);
+    try {
+      const out = await submitQuestionnaireAnswers(
+        appointmentId,
+        coerceQuestionnaireAnswers(form, answers),
+      );
+      const mapped = mapApiQuestions(form);
+      const saved = (out.answers ?? {}) as Record<string, unknown>;
+      setQuStatus((prev) => ({
+        ...prev,
+        [appointmentId]: {
+          hasForm: true,
+          completed: out.completed,
+          answered: countAnswered(mapped, saved),
+          total: mapped.length,
+          loading: false,
+        },
+      }));
+      if (questionnaireFor === appointmentId) {
+        setQuAnswers(saved);
+        setQuCompleted(out.completed);
+        if (!out.completed) setQuResumeIndex(resumeIndexFor(mapped, saved));
+      }
+      if (out.completed) {
+        pushNotification({
+          category: "questionnaires",
+          title: "Questionnaire submitted",
+          body: `${form.name} was sent to the care team.`,
+          unread: true,
+        });
+      } else if (opts.final) {
+        pushNotification({
+          category: "questionnaires",
+          title: "Progress saved",
+          body: `Draft saved — ${countAnswered(mapped, saved)} of ${mapped.length} answered.`,
+          unread: true,
+        });
+      }
+      return out;
+    } finally {
+      setQuSaving(false);
     }
   }
 
@@ -164,7 +353,7 @@ export default function VisitsPage() {
         </motion.div>
       </AnimatePresence>
 
-      {/* Questionnaires */}
+      {/* Questionnaires — Start / Continue x/y / Completed reflects saved drafts */}
       <section className="card-base p-5">
         <h2 className="section-title">Questionnaires</h2>
         <p className="text-[0.83rem] text-ink-secondary mt-1">Administrative pre-visit forms — never a diagnosis.</p>
@@ -172,17 +361,55 @@ export default function VisitsPage() {
           <p className="text-[0.83rem] text-ink-secondary mt-3">Book a visit first — its pre-visit form will appear here.</p>
         ) : (
           <div className="mt-3 space-y-2.5">
-            {upcomingForForms.map((a) => (
-              <div key={a.id} className="border border-border rounded-control p-3.5 flex flex-col sm:flex-row sm:items-center gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-[0.9rem] text-ink">Pre-visit form</p>
-                  <p className="text-[0.78rem] text-ink-secondary">{a.doctorName} · {a.date} at {a.time}</p>
-                </div>
-                <Button variant="outline" size="sm" onClick={() => setQuestionnaireFor(a.id)}>
-                  Start
-                </Button>
-              </div>
-            ))}
+            {upcomingForForms
+              .filter((a) => !live || quStatus[a.id]?.hasForm !== false)
+              .map((a) => {
+                const st = quStatus[a.id];
+                const loading = live && (!st || st.loading);
+                const completed = !!st?.completed;
+                const answered = st?.answered ?? 0;
+                const total = st?.total ?? 0;
+                const isDraft = !completed && answered > 0 && total > 0;
+                return (
+                  <div key={a.id} className="border border-border rounded-control p-3.5 flex flex-col sm:flex-row sm:items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-[0.9rem] text-ink flex items-center gap-2">
+                        Pre-visit form
+                        {completed && (
+                          <span className="text-[0.72rem] font-bold text-success bg-success-soft rounded-full px-2 py-0.5">
+                            Completed ✓
+                          </span>
+                        )}
+                        {isDraft && (
+                          <span className="text-[0.72rem] font-bold text-warning bg-warning-soft rounded-full px-2 py-0.5">
+                            Draft · {answered}/{total}
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-[0.78rem] text-ink-secondary">
+                        {a.doctorName} · {a.date} at {a.time}
+                      </p>
+                      {completed ? (
+                        <p className="text-[0.76rem] font-semibold text-success mt-0.5">
+                          Submitted — the care team has your answers.
+                        </p>
+                      ) : isDraft ? (
+                        <p className="text-[0.76rem] font-semibold text-ink-secondary mt-0.5">
+                          Draft saved · {answered} of {total} answered — continue where you left off.
+                        </p>
+                      ) : null}
+                    </div>
+                    <Button
+                      variant={completed ? "outline" : isDraft ? "primary" : "outline"}
+                      size="sm"
+                      disabled={loading}
+                      onClick={() => setQuestionnaireFor(a.id)}
+                    >
+                      {loading ? "…" : completed ? "View" : isDraft ? `Continue ${answered}/${total}` : "Start"}
+                    </Button>
+                  </div>
+                );
+              })}
           </div>
         )}
       </section>
@@ -236,19 +463,19 @@ export default function VisitsPage() {
           </div>
         ) : (
           <QuestionnaireFlow
+            key={`${questionnaireFor ?? "none"}-${quForm.id}-${quCompleted ? "done" : "open"}`}
             questions={mapApiQuestions(quForm)}
+            initialAnswers={quAnswers}
+            initialIndex={quResumeIndex}
+            alreadyCompleted={quCompleted}
+            saving={quSaving}
+            onSaveDraft={(answers) => {
+              if (!questionnaireFor || !quForm) return;
+              return persistAnswers(questionnaireFor, quForm, answers, { final: false }).then(() => undefined);
+            }}
             onComplete={(answers) => {
-              if (!questionnaireFor) return;
-              void submitQuestionnaireAnswers(questionnaireFor, coerceQuestionnaireAnswers(quForm, answers))
-                .then(() => {
-                  pushNotification({
-                    category: "questionnaires",
-                    title: "Questionnaire submitted",
-                    body: `${quForm.name} was sent to the care team.`,
-                    unread: true,
-                  });
-                })
-                .catch(() => undefined);
+              if (!questionnaireFor || !quForm) return;
+              return persistAnswers(questionnaireFor, quForm, answers, { final: true }).then(() => undefined);
             }}
           />
         )}
@@ -267,9 +494,10 @@ function RescheduleModal({
   onClose: () => void;
 }) {
   const { live, rescheduleLive, pushNotification } = useAppState();
-  const days = nextSevenDays();
+  const [anchorDate, setAnchorDate] = useState(() => new Date());
+  const days = sevenDaysFrom(anchorDate);
   const [step, setStep] = useState(0);
-  const [dayKey, setDayKey] = useState(days[0].key);
+  const [dayKey, setDayKey] = useState(() => toLocalKey(new Date()));
   const [slots, setSlots] = useState<TimeSlot[]>([]);
   const [rawById, setRawById] = useState<Record<string, Slot>>({});
   const [loading, setLoading] = useState(false);
@@ -333,7 +561,7 @@ function RescheduleModal({
   }, [open, dayKey, live, refreshKey]);
 
   if (!appointment) return null;
-  const dayLabel = days.find((d) => d.key === dayKey);
+  const dayLabel = days.find((d) => d.key === dayKey) ?? { key: dayKey, label: formatDayKeyLong(dayKey), sub: "" };
 
   async function save() {
     if (!selected || !dayLabel || !appointment) return;
@@ -384,17 +612,14 @@ function RescheduleModal({
 
       {step === 1 && (
         <div>
-          <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1 mb-3">
-            {days.map((d) => (
-              <button
-                key={d.key}
-                onClick={() => setDayKey(d.key)}
-                className={`min-w-[80px] px-3 py-2 rounded-control border text-center shrink-0 ${dayKey === d.key ? "bg-healthcare text-white border-healthcare-dark" : "bg-white border-border"}`}
-              >
-                <span className="block text-[0.76rem] font-bold">{d.label}</span>
-                <span className="block text-[0.72rem] opacity-80">{d.sub}</span>
-              </button>
-            ))}
+          <div className="mb-3">
+            <DayStripWithCalendar
+              days={days}
+              dayKey={dayKey}
+              anchorDate={anchorDate}
+              onSelect={setDayKey}
+              onPickDate={(d) => { setAnchorDate(d); setDayKey(toLocalKey(d)); }}
+            />
           </div>
           {loadError ? (
             <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">{loadError}</p>

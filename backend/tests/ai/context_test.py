@@ -17,8 +17,10 @@ def test_follow_up_turn_sees_prior_booking(client, db, ehr_stub):
     prior.offered_doctors = [{"id": setup["doctor"]["id"], "name": "Dr. aictx"}]
     prior.offered_slots = [{"start": start, "end": end}]
     # The scripted flow jumps straight to confirmation: simulate the
-    # visit-type step having happened on an earlier turn.
+    # early steps (day comes from the "Monday morning" message itself).
     prior.visit_types_seen = True
+    prior.selected_appointment_type_id = setup["type"]["id"]
+    prior.selected_consultation_mode = "in_person"
     save_ai_context(prior)
     orchestrator.run_conversation(
         db=db,

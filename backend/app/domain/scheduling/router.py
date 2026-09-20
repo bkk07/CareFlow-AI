@@ -218,16 +218,20 @@ def create_block(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="end_datetime must be after start_datetime",
         )
-    block = BlockedSlot(
-        doctor_id=doctor.id,
-        start_datetime=start,
-        end_datetime=end,
-        reason=body.reason,
-    )
-    db.add(block)
-    db.commit()
-    db.refresh(block)
-    return block
+    # R3: route through the same guarded reservation path as bookings —
+    # lock + overlap re-check + UNIQUE backstop — so an admin/doctor block
+    # can never silently overlay a live appointment hold.
+    from app.domain.scheduling.models import BlockedReason as _Reason
+    from app.domain.scheduling.service import SlotConflictError
+
+    try:
+        return service.reserve_slot(
+            db, doctor.id, start, end, reason=body.reason or _Reason.ad_hoc
+        )
+    except SlotConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
 
 
 @router.delete(

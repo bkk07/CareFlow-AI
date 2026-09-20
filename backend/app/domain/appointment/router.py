@@ -10,6 +10,7 @@ inject a stub connector while production uses real HTTP.
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
@@ -283,6 +284,7 @@ def reschedule_appointment(
             actor_user_id=ctx.user_id,
             integration=integration,
             reason=body.reason,
+            idempotency_key=body.idempotency_key,
         )
     except InvalidTransition as exc:
         raise HTTPException(
@@ -307,11 +309,76 @@ def cancel_appointment(
             actor_user_id=ctx.user_id,
             integration=integration,
             reason=body.reason,
+            idempotency_key=body.idempotency_key,
         )
     except InvalidTransition as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
+
+
+# -- C1: close-out transitions (doctor + operators) ------------------------------
+
+_close_reader = require_role(
+    Role.doctor, Role.hospital_admin, Role.platform_admin
+)
+
+
+class _CloseIn(BaseModel):
+    reason: str | None = None
+
+
+def _close_endpoint(
+    db: Session,
+    ctx: RequestContext,
+    appointment_id: uuid.UUID,
+    body: _CloseIn,
+    op: str,
+) -> Appointment:
+    appointment = service.get_appointment_or_404(db, appointment_id)
+    _check_appointment_access(ctx, appointment, db)
+    try:
+        if op == "complete":
+            return service.complete_appointment(
+                db, appointment.id, ctx.user_id, body.reason
+            )
+        if op == "no-show":
+            return service.mark_no_show(db, appointment.id, ctx.user_id, body.reason)
+        return service.confirm_appointment(db, appointment.id, ctx.user_id, body.reason)
+    except InvalidTransition as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+
+@router.post("/appointments/{appointment_id}/complete", response_model=AppointmentOut)
+def complete_appointment(
+    appointment_id: uuid.UUID,
+    body: _CloseIn,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_close_reader),
+) -> Appointment:
+    return _close_endpoint(db, ctx, appointment_id, body, "complete")
+
+
+@router.post("/appointments/{appointment_id}/no-show", response_model=AppointmentOut)
+def no_show_appointment(
+    appointment_id: uuid.UUID,
+    body: _CloseIn,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_close_reader),
+) -> Appointment:
+    return _close_endpoint(db, ctx, appointment_id, body, "no-show")
+
+
+@router.post("/appointments/{appointment_id}/confirm", response_model=AppointmentOut)
+def confirm_appointment(
+    appointment_id: uuid.UUID,
+    body: _CloseIn,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(_close_reader),
+) -> Appointment:
+    return _close_endpoint(db, ctx, appointment_id, body, "confirm")
 
 
 __all__ = ["get_integration_service", "router"]

@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { useAdmin } from "../../store/AdminStore";
+import { getAppointmentDetail } from "../../api";
 import { Button, EmptyState, StatusBadge } from "../../components/common/ui";
 import { ConfirmDialog, Drawer, ResponsiveTable } from "../../components/common/Modal";
 import type { Appointment } from "../../types";
@@ -15,12 +16,36 @@ const TIMELINES: Record<string, string[]> = {
 };
 
 export default function AppointmentsPage() {
-  const { appointments, cancelAppointment, live, loading, backendError, refreshAll } = useAdmin();
+  const { appointments, cancelAppointment, completeAppointment, markNoShow, confirmAppointment, live, loading, backendError, refreshAll } = useAdmin();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [selected, setSelected] = useState<Appointment | null>(null);
   const [cancelId, setCancelId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [history, setHistory] = useState<{ from_state: string; to_state: string; reason: string | null; created_at: string }[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  useEffect(() => {
+    if (!selected) {
+      setHistory([]);
+      return;
+    }
+    let cancelled = false;
+    setHistoryLoading(true);
+    getAppointmentDetail(selected.id)
+      .then((d) => {
+        if (!cancelled) setHistory(d.history ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setHistory([]);
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
 
   const shortId = (id: string) => (id.includes("-") ? id.slice(0, 8).toUpperCase() : id);
 
@@ -90,6 +115,9 @@ export default function AppointmentsPage() {
                   {(a.status === "confirmed" || a.status === "rescheduled") && (
                     <button onClick={() => setCancelId(a.id)} className="text-[0.78rem] font-bold text-ink-secondary hover:text-danger">Cancel</button>
                   )}
+                  {(a.status === "pending" || a.status === "sync_pending") && (
+                    <button onClick={() => { setError(null); confirmAppointment(a.id).catch((e: unknown) => setError(e instanceof Error ? e.message : "Could not confirm appointment.")); }} className="text-[0.78rem] font-bold text-success hover:underline">Confirm</button>
+                  )}
                 </div>
               </td>
             </tr>
@@ -110,16 +138,35 @@ export default function AppointmentsPage() {
             </dl>
             <div>
               <h4 className="font-bold">Timeline</h4>
-              <ol className="mt-2 space-y-0">
-                {(TIMELINES[selected.status] ?? ["Created"]).map((s, i, arr) => (
-                  <li key={s} className="flex gap-2.5 pb-3 last:pb-0 relative">
-                    {i < arr.length - 1 && <span className="absolute left-[7px] top-5 bottom-0 w-px bg-border" aria-hidden />}
-                    <span className="w-[15px] h-[15px] rounded-full bg-success border-2 border-white shadow shrink-0 mt-0.5" aria-hidden />
-                    <span className="font-semibold text-[0.84rem]">{s}</span>
-                  </li>
-                ))}
-              </ol>
+              {historyLoading ? (
+                <p className="text-[0.83rem] text-ink-secondary mt-2">Loading history…</p>
+              ) : history.length > 0 ? (
+                <ol className="mt-2 space-y-0">
+                  {history.map((h) => (
+                    <li key={`${h.created_at}-${h.to_state}`} className="flex gap-2.5 pb-3 last:pb-0 relative">
+                      <span className="w-[15px] h-[15px] rounded-full bg-success border-2 border-white shadow shrink-0 mt-0.5" aria-hidden />
+                      <span className="font-semibold text-[0.84rem]">{h.from_state} → {h.to_state}{h.reason ? <span className="block text-[0.75rem] font-medium text-ink-secondary">{h.reason}</span> : null}</span>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <ol className="mt-2 space-y-0">
+                  {(TIMELINES[selected.status] ?? ["Created"]).map((s, i, arr) => (
+                    <li key={s} className="flex gap-2.5 pb-3 last:pb-0 relative">
+                      {i < arr.length - 1 && <span className="absolute left-[7px] top-5 bottom-0 w-px bg-border" aria-hidden />}
+                      <span className="w-[15px] h-[15px] rounded-full bg-success border-2 border-white shadow shrink-0 mt-0.5" aria-hidden />
+                      <span className="font-semibold text-[0.84rem]">{s}</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
             </div>
+            {(selected.status === "confirmed" || selected.status === "rescheduled") && (
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1" onClick={() => { setError(null); completeAppointment(selected.id).then(() => setSelected(null)).catch((e: unknown) => setError(e instanceof Error ? e.message : "Could not complete appointment.")); }}>Complete</Button>
+                <Button variant="outline" className="flex-1" onClick={() => { setError(null); markNoShow(selected.id).then(() => setSelected(null)).catch((e: unknown) => setError(e instanceof Error ? e.message : "Could not mark no-show.")); }}>No-show</Button>
+              </div>
+            )}
             {(selected.status === "confirmed" || selected.status === "rescheduled") && (
               <Button variant="danger" className="w-full" onClick={() => { setCancelId(selected.id); }}>Cancel appointment</Button>
             )}

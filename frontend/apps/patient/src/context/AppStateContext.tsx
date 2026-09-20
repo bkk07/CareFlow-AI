@@ -2,11 +2,14 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from "react";
 import {
   cancelAppointment as apiCancel,
+  deleteNotification as apiDeleteNotification,
   fetchMyAppointments,
   fetchNotifications,
+  markAllNotificationsRead as apiMarkAllRead,
+  markNotificationRead as apiMarkRead,
   rescheduleAppointment as apiReschedule,
 } from "../api";
-import { mapNotification, mapPatientAppointment, persistRead } from "../lib/backend";
+import { mapNotification, mapPatientAppointment } from "../lib/backend";
 import { useAuth } from "./AuthContext";
 import type { Appointment, NotificationItem } from "../types";
 
@@ -23,8 +26,9 @@ interface AppState {
   updateAppointment: (id: string, patch: Partial<Appointment>) => void;
   rescheduleLive: (id: string, slotStart: string, slotEnd: string) => Promise<void>;
   cancelAppointment: (id: string) => Promise<void>;
-  markAllRead: () => void;
-  markRead: (id: string) => void;
+  markAllRead: () => Promise<void>;
+  markRead: (id: string) => Promise<void>;
+  deleteNotification: (id: string) => Promise<void>;
   pushNotification: (n: Omit<NotificationItem, "id" | "time">) => void;
 }
 
@@ -88,17 +92,48 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     [refresh],
   );
 
-  const markAllRead = useCallback(() => {
-    setNotifications((prev) => {
-      prev.forEach((n) => persistRead(n.id));
-      return prev.map((n) => ({ ...n, unread: false }));
-    });
-  }, []);
+  const markAllRead = useCallback(async () => {
+    if (!live) {
+      setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })));
+      return;
+    }
+    try {
+      await apiMarkAllRead();
+    } catch {
+      // Server unreachable: fall through to refresh which keeps last-known data.
+    }
+    await refresh();
+  }, [live, refresh]);
 
-  const markRead = useCallback((id: string) => {
-    persistRead(id);
-    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, unread: false } : n)));
-  }, []);
+  const markRead = useCallback(
+    async (id: string) => {
+      // Optimistic: flip immediately, then confirm server-side.
+      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, unread: false } : n)));
+      if (!live) return;
+      try {
+        const updated = await apiMarkRead(id);
+        setNotifications((prev) =>
+          prev.map((n) => (n.id === id ? mapNotification(updated) : n)),
+        );
+      } catch {
+        await refresh();
+      }
+    },
+    [live, refresh],
+  );
+
+  const deleteNotification = useCallback(
+    async (id: string) => {
+      setNotifications((prev) => prev.filter((n) => n.id !== id));
+      if (!live) return;
+      try {
+        await apiDeleteNotification(id);
+      } catch {
+        await refresh();
+      }
+    },
+    [live, refresh],
+  );
 
   const pushNotification = useCallback((n: Omit<NotificationItem, "id" | "time">) => {
     setNotifications((prev) => [
@@ -123,9 +158,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       cancelAppointment,
       markAllRead,
       markRead,
+      deleteNotification,
       pushNotification,
     }),
-    [appointments, notifications, unreadCount, loading, live, refresh, addAppointment, updateAppointment, rescheduleLive, cancelAppointment, markAllRead, markRead, pushNotification],
+    [appointments, notifications, unreadCount, loading, live, refresh, addAppointment, updateAppointment, rescheduleLive, cancelAppointment, markAllRead, markRead, deleteNotification, pushNotification],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

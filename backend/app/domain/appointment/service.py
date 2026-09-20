@@ -14,7 +14,7 @@ slotless by a failed move. Cancel releases the slot with the booking.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
@@ -33,7 +33,7 @@ from app.domain.hospital.models import Hospital
 from app.domain.hospital.service import assert_hospital_approved
 from app.domain.hospital_config.models import AppointmentType
 from app.domain.scheduling import service as scheduling_service
-from app.domain.scheduling.availability import Window, as_utc
+from app.domain.scheduling.availability import as_utc, overlaps
 from app.domain.scheduling.models import BlockedReason
 from app.domain.scheduling.service import SlotConflictError
 from app.integration.connector_interface import EHRConnectorError
@@ -92,13 +92,17 @@ def assert_slot_available(
     end: datetime,
     exclude_appointment_id: uuid.UUID | None = None,
 ) -> None:
-    """Pre-check the exact discrete slot is bookable right now.
+    """Pre-check an arbitrary [start, end) range is bookable right now.
 
-    The slot must sit entirely inside the doctor's computed availability
-    for the day (weekly/one-off rules minus blocked slots minus live
-    appointments). The reserve-time overlap re-check plus the UNIQUE
-    constraint remain the concurrency backstop — this check is the
-    early, legible rejection.
+    The patient timeline UI lets the patient pick ANY start time — the
+    range only needs to:
+    1. last exactly the appointment type's duration,
+    2. sit entirely inside one working window (weekly/one-off rules),
+    3. overlap no blocked slot or live appointment (touching boundaries
+       do not count as overlap).
+    The reserve-time overlap re-check plus the UNIQUE constraint remain
+    the concurrency backstop — this check is the early, legible
+    rejection.
     """
     if end <= start:
         raise _unprocessable("slot_end must be after slot_start")
@@ -107,18 +111,63 @@ def assert_slot_available(
         raise _unprocessable(
             f"Doctor does not offer {appointment_type.duration_minutes}-minute visits"
         )
-    windows = scheduling_service.get_available_slots(
-        doctor.id,
-        appointment_type.id,
-        as_utc(start).date(),
-        as_utc(end).date(),
-        session,
-        booked=live_intervals_for_doctor(
-            session, doctor.id, exclude_appointment_id=exclude_appointment_id
-        ),
+    start_u, end_u = as_utc(start), as_utc(end)
+    want = timedelta(minutes=appointment_type.duration_minutes)
+    if end_u - start_u != want:
+        raise _unprocessable(
+            "Visit must be exactly "
+            f"{appointment_type.duration_minutes} minutes for this event"
+        )
+    from app.domain.scheduling import availability as availability_math
+    from app.domain.scheduling.models import AvailabilityRule, BlockedSlot
+
+    rules = (
+        session.query(AvailabilityRule)
+        .filter(AvailabilityRule.doctor_id == doctor.id)
+        .all()
     )
-    if Window(as_utc(start), as_utc(end)) not in windows:
+    contained = False
+    day = start_u.date()
+    while day <= end_u.date():
+        for window in availability_math.expand_rules_to_windows(rules, day):
+            if window.start <= start_u and end_u <= window.end:
+                contained = True
+                break
+        if contained:
+            break
+        day += timedelta(days=1)
+    if not contained:
         raise _conflict("Slot is not available")
+    # A reschedule's own old hold must not count against the new range.
+    old_hold: tuple[datetime, datetime] | None = None
+    if exclude_appointment_id is not None:
+        own = session.get(Appointment, exclude_appointment_id)
+        if own is not None:
+            old_hold = (as_utc(own.slot_start), as_utc(own.slot_end))
+    blocks = (
+        session.query(BlockedSlot)
+        .filter(
+            BlockedSlot.doctor_id == doctor.id,
+            BlockedSlot.start_datetime < end_u,
+            BlockedSlot.end_datetime > start_u,
+        )
+        .all()
+    )
+    for block in blocks:
+        block_start = as_utc(block.start_datetime)
+        block_end = as_utc(block.end_datetime)
+        if (
+            old_hold is not None
+            and block_start == old_hold[0]
+            and block_end == old_hold[1]
+        ):
+            continue
+        raise _conflict("Slot is not available")
+    for busy_start, busy_end in live_intervals_for_doctor(
+        session, doctor.id, exclude_appointment_id=exclude_appointment_id
+    ):
+        if overlaps(start_u, end_u, busy_start, busy_end):
+            raise _conflict("Slot is not available")
 
 
 def _normalize_consultation_mode(
@@ -142,6 +191,57 @@ def _release_block(
     session: Session, doctor_id: uuid.UUID, start: datetime, end: datetime
 ) -> None:
     scheduling_service.release_appointment_hold(session, doctor_id, start, end)
+
+
+def _lock_appointment_row(session: Session, appointment_id: uuid.UUID) -> Appointment:
+    """R2: serialize concurrent moves on one booking.
+
+    PostgreSQL takes a real row lock; SQLite (tests/dev) is a no-op — the
+    per-doctor reserve lock plus idempotency replay below still prevent a
+    second new-slot hold from stranding.
+    """
+    bind = session.get_bind()
+    if bind is not None and getattr(bind.dialect, "name", None) != "sqlite":
+        locked = (
+            session.query(Appointment)
+            .filter(Appointment.id == appointment_id)
+            .with_for_update()
+            .first()
+        )
+        if locked is not None:
+            return locked
+    return get_appointment_or_404(session, appointment_id)
+
+
+def _find_idempotent_replay(
+    session: Session,
+    appointment_id: uuid.UUID,
+    operation_type: str,
+    idempotency_key: str | None,
+) -> bool:
+    """R2: True when this exact key already drove this appointment's move.
+
+    The key is stamped into IntegrationOperation.request_payload by the
+    reschedule/cancel flows below, so a client timeout-retry replays to the
+    current booking instead of reserving/cancelling twice.
+    """
+    if not idempotency_key:
+        return False
+    from app.reliability.models import IntegrationOperation
+
+    ops = (
+        session.query(IntegrationOperation)
+        .filter(
+            IntegrationOperation.appointment_id == appointment_id,
+            IntegrationOperation.operation_type == operation_type,  # type: ignore[arg-type]
+        )
+        .all()
+    )
+    for op in ops:
+        payload = op.request_payload or {}
+        if isinstance(payload, dict) and payload.get("idempotency_key") == idempotency_key:
+            return True
+    return False
 
 
 def get_scoped_type(
@@ -353,12 +453,22 @@ def reschedule_appointment(
     actor_user_id: uuid.UUID,
     integration: IntegrationService,
     reason: str | None = None,
+    idempotency_key: str | None = None,
 ) -> Appointment:
     """Move a live appointment to a new slot.
 
     The new slot is reserved and vendor-confirmed BEFORE the old slot is
     released; any failure leaves the original booking untouched.
+    R2: the appointment row is locked first and a repeated
+    idempotency_key replays to the current booking.
     """
+    # Serialize concurrent moves on this row before reading state.
+    appointment = _lock_appointment_row(session, appointment.id)
+    if idempotency_key and _find_idempotent_replay(
+        session, appointment.id, "update", idempotency_key
+    ):
+        session.refresh(appointment)
+        return appointment
     ensure_allowed(appointment.state, AppointmentState.rescheduled)
     assert_hospital_approved(hospital)
     start, end = _to_utc(new_start), _to_utc(new_end)
@@ -378,7 +488,13 @@ def reschedule_appointment(
     )
     try:
         scheduling_service.reserve_slot(
-            session, doctor.id, start, end, reason=BlockedReason.appointment
+            session,
+            doctor.id,
+            start,
+            end,
+            reason=BlockedReason.appointment,
+            # R1: shifting by minutes overlaps our own old hold — exclude it.
+            exclude=(appointment.slot_start, appointment.slot_end),
         )
     except SlotConflictError as exc:
         raise _conflict("New slot was taken concurrently") from exc
@@ -408,33 +524,64 @@ def reschedule_appointment(
     old_start, old_end = appointment.slot_start, appointment.slot_end
     appointment.slot_start = start
     appointment.slot_end = end
-    _release_block(session, doctor.id, old_start, old_end)
-    transition(
-        session,
-        appointment,
-        AppointmentState.rescheduled,
-        actor_user_id=actor_user_id,
-        reason=reason,
-        correlation_id=appointment.correlation_id,
-    )
-    # The vendor said yes — corroborate before trusting it. On divergence
-    # the booking parks (new slot still held) with an open record.
+    # R2: stamp the move so a retried key replays instead of moving again.
+    if idempotency_key:
+        from app.reliability import operations as _ops
+        from app.reliability.models import OperationStatus as _OpStatus
+        from app.reliability.models import OperationType as _OpType
+
+        _ops.record_operation(
+            session,
+            appointment_id=appointment.id,
+            operation_type=_OpType.update,
+            attempt_number=_ops.next_attempt_number(
+                session, appointment.id, _OpType.update
+            ),
+            status=_OpStatus.succeeded,
+            request_payload={
+                "idempotency_key": idempotency_key,
+                "new_slot_start": as_utc(start).isoformat(),
+                "new_slot_end": as_utc(end).isoformat(),
+            },
+            correlation_id=appointment.correlation_id,
+        )
+    # R5: verify BEFORE releasing the old hold. Both slots stay held while
+    # the vendor move is corroborated; the old hold is released only on a
+    # matched verification. On divergence both holds are kept (never risk a
+    # double-book) and the booking parks with an open record.
     from app.reliability import operations as reliability_ops
     from app.reliability.verification import service as verify_service
 
     result = verify_service.verify_external_appointment(
         session, appointment, integration
     )
-    if result.outcome != verify_service.VerifyOutcome.matched:
-        if appointment.state == AppointmentState.rescheduled:
-            transition(
-                session,
-                appointment,
-                AppointmentState.reconciliation_required,
-                actor_user_id=actor_user_id,
-                reason=f"Vendor move not corroborated: {result.mismatches or ['unreadable vendor record']}",
-                correlation_id=appointment.correlation_id,
-            )
+    if result.outcome == verify_service.VerifyOutcome.matched:
+        _release_block(session, doctor.id, old_start, old_end)
+        transition(
+            session,
+            appointment,
+            AppointmentState.rescheduled,
+            actor_user_id=actor_user_id,
+            reason=reason,
+            correlation_id=appointment.correlation_id,
+        )
+    else:
+        transition(
+            session,
+            appointment,
+            AppointmentState.rescheduled,
+            actor_user_id=actor_user_id,
+            reason=reason,
+            correlation_id=appointment.correlation_id,
+        )
+        transition(
+            session,
+            appointment,
+            AppointmentState.reconciliation_required,
+            actor_user_id=actor_user_id,
+            reason=f"Vendor move not corroborated: {result.mismatches or ['unreadable vendor record']}",
+            correlation_id=appointment.correlation_id,
+        )
         reliability_ops.open_record(
             session,
             appointment=appointment,
@@ -454,7 +601,11 @@ def reschedule_appointment(
         event_bus.publish_event(
             session,
             "appointment.rescheduled",
-            {"appointment_id": str(appointment.id)},
+            {
+                "appointment_id": str(appointment.id),
+                "slot_start": appointment.slot_start.isoformat(),
+                "slot_end": appointment.slot_end.isoformat(),
+            },
             correlation_id=appointment.correlation_id,
         )
     return appointment
@@ -467,13 +618,21 @@ def cancel_appointment(
     actor_user_id: uuid.UUID,
     integration: IntegrationService,
     reason: str | None = None,
+    idempotency_key: str | None = None,
 ) -> Appointment:
     """Cancel a live appointment and release its slot.
 
     Cancellation is allowed even when the hospital is no longer live —
     tearing a booking down must never be gated. The vendor is told
     first; a vendor failure leaves local state untouched for a retry.
+    R2: row-locked and idempotent — a retried key replays.
     """
+    appointment = _lock_appointment_row(session, appointment.id)
+    if idempotency_key and _find_idempotent_replay(
+        session, appointment.id, "cancel", idempotency_key
+    ):
+        session.refresh(appointment)
+        return appointment
     ensure_allowed(appointment.state, AppointmentState.cancelled)
     if appointment.external_id is not None:
         try:
@@ -505,6 +664,21 @@ def cancel_appointment(
     from app.reliability import operations as reliability_ops
     from app.reliability.verification import service as verify_service
 
+    if idempotency_key:
+        reliability_ops.record_operation(
+            session,
+            appointment_id=appointment.id,
+            operation_type=reliability_ops.OperationType.cancel,
+            attempt_number=reliability_ops.next_attempt_number(
+                session,
+                appointment.id,
+                reliability_ops.OperationType.cancel,
+            ),
+            status=reliability_ops.OperationStatus.succeeded,
+            request_payload={"idempotency_key": idempotency_key},
+            correlation_id=appointment.correlation_id,
+        )
+
     try:
         current = (
             integration.get_appointment(appointment.external_id)
@@ -521,6 +695,19 @@ def cancel_appointment(
             verify_error
             or f"vendor status={current.status if current else 'missing'}"
         )
+        # R5: the slot was already released above but the vendor may still
+        # hold it — quarantine the slot (re-hold) so it cannot be rebooked
+        # into a vendor-side double-booking while the operator resolves.
+        try:
+            scheduling_service.reserve_slot(
+                session,
+                appointment.doctor_id,
+                appointment.slot_start,
+                appointment.slot_end,
+                reason=BlockedReason.appointment,
+            )
+        except SlotConflictError:
+            pass
         op = reliability_ops.record_operation(
             session,
             appointment_id=appointment.id,
@@ -560,6 +747,65 @@ def cancel_appointment(
     return appointment
 
 
+def _close_appointment(
+    session: Session,
+    appointment_id: uuid.UUID,
+    to_state: AppointmentState,
+    actor_user_id: uuid.UUID,
+    reason: str | None = None,
+) -> Appointment:
+    """C1: lock + move a live booking to a terminal/confirm state.
+
+    Used by the complete / no-show / confirm endpoints so doctors and
+    operators can close the loop without going through reconciliation.
+    """
+    appointment = _lock_appointment_row(session, appointment_id)
+    transition(
+        session,
+        appointment,
+        to_state,
+        actor_user_id=actor_user_id,
+        reason=reason,
+        correlation_id=appointment.correlation_id,
+    )
+    session.commit()
+    session.refresh(appointment)
+    return appointment
+
+
+def complete_appointment(
+    session: Session,
+    appointment_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    reason: str | None = None,
+) -> Appointment:
+    return _close_appointment(
+        session, appointment_id, AppointmentState.completed, actor_user_id, reason
+    )
+
+
+def mark_no_show(
+    session: Session,
+    appointment_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    reason: str | None = None,
+) -> Appointment:
+    return _close_appointment(
+        session, appointment_id, AppointmentState.no_show, actor_user_id, reason
+    )
+
+
+def confirm_appointment(
+    session: Session,
+    appointment_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    reason: str | None = None,
+) -> Appointment:
+    return _close_appointment(
+        session, appointment_id, AppointmentState.confirmed, actor_user_id, reason
+    )
+
+
 def list_appointments(
     session: Session,
     *,
@@ -585,11 +831,14 @@ __all__ = [
     "InvalidTransition",
     "assert_slot_available",
     "cancel_appointment",
+    "complete_appointment",
+    "confirm_appointment",
     "create_appointment",
     "get_appointment_or_404",
     "get_scoped_patient",
     "get_scoped_type",
     "list_appointments",
     "live_intervals_for_doctor",
+    "mark_no_show",
     "reschedule_appointment",
 ]

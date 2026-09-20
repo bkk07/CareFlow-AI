@@ -353,6 +353,11 @@ def handle_update_failure(
     try:
         current = integration.get_appointment(appointment.external_id)
     except EHRConnectorError as lookup_exc:
+        # R5: the new-slot hold (reserved by the caller) is intentionally
+        # kept — releasing either hold could double-book against a vendor
+        # state we cannot see. The open record is the operator signal; if
+        # the booking already moved to rescheduled (retry path), park it so
+        # the row itself shows it needs attention.
         operations.open_record(
             session,
             appointment=appointment,
@@ -361,6 +366,15 @@ def handle_update_failure(
             attempts=attempt,
             external_id=appointment.external_id,
         )
+        if appointment.state == AppointmentState.rescheduled:
+            transition(
+                session,
+                appointment,
+                AppointmentState.reconciliation_required,
+                actor_user_id=actor_user_id,
+                reason="Reschedule outcome unknown; vendor re-read failed",
+                correlation_id=appointment.correlation_id,
+            )
         session.commit()
         return appointment
     if as_utc(current.start) == as_utc(new_start) and as_utc(current.end) == as_utc(

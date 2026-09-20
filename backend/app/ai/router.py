@@ -47,6 +47,7 @@ class PendingBookingOut(BaseModel):
     slot_start: str | None = None
     slot_end: str | None = None
     appointment_id: str | None = None
+    consultation_mode: str | None = None
 
 
 class AppointmentTypeOut(BaseModel):
@@ -74,6 +75,7 @@ class ChatOut(BaseModel):
     slots: list[SlotOut] = []
     appointment_types: list[AppointmentTypeOut] = []
     day_schedule: DayScheduleOut | None = None
+    consultation_modes: list[str] = []
     booking_stage: str = "browse"
     pending_booking: PendingBookingOut | None = None
 

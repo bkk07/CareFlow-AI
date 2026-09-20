@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { CalendarCheck, User } from "lucide-react";
+import { Building2, CalendarCheck, Phone, User, Video } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
@@ -31,11 +31,13 @@ function AssistantMarkdown({ text }: { text: string }) {
   );
 }
 
-export function ChatBubble({ message, onSend, onPickType, daySlotMinutes }: {
+export function ChatBubble({ message, onSend, onPickType, onPickMode, daySlotMinutes }: {
   message: ChatMessage;
   onSend?: (text: string) => void;
   /** Visit-type tap: records minutes for slot coloring, then sends the name. */
   onPickType?: (name: string, minutes: number) => void;
+  /** How-to-meet tap: sends the mode label for the assistant to record. */
+  onPickMode?: (mode: string, label: string) => void;
   /** Chosen visit length — day slots that can't fit it render taken. */
   daySlotMinutes?: number | null;
 }) {
@@ -84,6 +86,9 @@ export function ChatBubble({ message, onSend, onPickType, daySlotMinutes }: {
         )}
         {message.appointmentTypes && message.appointmentTypes.length > 0 && (
           <TypeSelect types={message.appointmentTypes} onPick={onPickType} onSend={onSend} />
+        )}
+        {message.consultationModes && message.consultationModes.length > 0 && (
+          <ModeChips modes={message.consultationModes} onPick={onPickMode} onSend={onSend} />
         )}
         {message.daySchedule && (
           <DaySlots
@@ -225,11 +230,22 @@ export function ConfirmPanel({
       : pending.kind === "cancel"
         ? { title: "Shall I cancel this for you?", confirm: "Yes, cancel it", confirmLabel: "Yes, cancel", cancelLabel: "Keep it" }
         : { title: "Shall I lock this in for you?", confirm: `Yes, book ${slot ?? "it"}`, confirmLabel: "Yes, book it", cancelLabel: "Not now" };
+  const modeLabel =
+    pending.consultation_mode === "video"
+      ? "Video visit"
+      : pending.consultation_mode === "phone"
+        ? "Phone visit"
+        : pending.consultation_mode === "in_person"
+          ? "In-person visit"
+          : null;
   return (
     <div className="mt-2.5 text-left bg-healthcare-faint border border-healthcare/25 rounded-control p-3" aria-label="Confirm or decline">
       <p className="text-[0.83rem] font-bold text-navy">{copy.title}</p>
       {slot && pending.kind !== "cancel" && (
         <p className="text-[0.78rem] text-ink-secondary mt-0.5">{slot}</p>
+      )}
+      {modeLabel && pending.kind !== "cancel" && (
+        <p className="text-[0.78rem] font-semibold text-teal-dark mt-0.5">· {modeLabel}</p>
       )}
       <div className="flex gap-2 mt-2">
         <Button size="sm" onClick={() => onSend(copy.confirm)}>
@@ -302,6 +318,45 @@ export function TypeSelect({
           </option>
         ))}
       </select>
+    </div>
+  );
+}
+
+/** How-to-meet chips (video / phone call / in-person), like normal booking. */
+export function ModeChips({
+  modes,
+  onPick,
+  onSend,
+}: {
+  modes: string[];
+  onPick?: (mode: string, label: string) => void;
+  onSend?: (text: string) => void;
+}) {
+  if ((!onPick && !onSend) || modes.length === 0) return null;
+  const OPTIONS = [
+    { mode: "video", label: "Video visit", Icon: Video },
+    { mode: "phone", label: "Phone visit", Icon: Phone },
+    { mode: "in_person", label: "In-person visit", Icon: Building2 },
+  ].filter((o) => modes.includes(o.mode));
+  if (OPTIONS.length === 0) return null;
+  return (
+    <div className="mt-2.5 text-left" aria-label="Consultation modes">
+      <p className="text-[0.75rem] font-bold text-ink-secondary mb-1.5">
+        Video, phone, or in-person?
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {OPTIONS.map(({ mode, label, Icon }) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => (onPick ? onPick(mode, label) : onSend?.(label))}
+            className="inline-flex items-center gap-1.5 text-[0.8rem] font-bold bg-white border border-healthcare/40 rounded-full px-3 py-1.5 text-navy hover:bg-healthcare-soft hover:border-healthcare transition"
+          >
+            <Icon size={14} className="text-healthcare" />
+            {label.replace(" visit", "")}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

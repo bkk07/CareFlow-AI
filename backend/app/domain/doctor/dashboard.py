@@ -19,7 +19,11 @@ from app.domain.hospital_config.models import AppointmentType
 from app.domain.patient.models import PatientProfile
 from app.domain.scheduling import service as scheduling_service
 from app.domain.scheduling.availability import as_utc
-from app.domain.scheduling.models import AvailabilityRule, BlockedSlot
+from app.domain.scheduling.models import (
+    AvailabilityRule,
+    BlockedReason,
+    BlockedSlot,
+)
 
 
 def _not_found(message: str) -> HTTPException:
@@ -74,7 +78,14 @@ def appointments_for(
 
 
 def calendar_for(session: Session, doctor: Doctor) -> dict:
-    """Rules + blocks + live bookings for the next 30 days."""
+    """Rules + blocks + live bookings for the next 30 days.
+
+    Appointment slot-holds (BlockedSlot reason=appointment) are excluded
+    from `blocks` — they duplicate the Appointment rows themselves and
+    would otherwise render twice in the doctor calendar (once as an
+    appointment, once as a mislabeled "Administrative work" block).
+    Availability math still subtracts them via get_available_slots.
+    """
     # Stored datetimes are UTC; sqlite drops tzinfo while postgres keeps
     # it, so query bounds go in naive UTC and Python compares via as_utc.
     now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -89,6 +100,7 @@ def calendar_for(session: Session, doctor: Doctor) -> dict:
         .filter(
             BlockedSlot.doctor_id == doctor.id,
             BlockedSlot.end_datetime >= now,
+            BlockedSlot.reason != BlockedReason.appointment,
         )
         .order_by(BlockedSlot.start_datetime)
         .all()

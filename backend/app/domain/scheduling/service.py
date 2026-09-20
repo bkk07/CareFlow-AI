@@ -9,8 +9,9 @@ constraint on (doctor_id, start, end) is the backstop that collapses any
 remaining concurrent racers to exactly one winner.
 """
 
+import threading
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
@@ -30,6 +31,24 @@ from app.domain.scheduling.models import (
 )
 
 MAX_RANGE_DAYS = 62
+
+# R1: per-doctor in-process serialization for SQLite (tests / single-worker
+# dev). PostgreSQL serializes via the Calendar FOR UPDATE row lock below;
+# SQLite rejects FOR UPDATE, so without this two threads can interleave the
+# overlap-check + insert and double-book partial overlaps
+# (e.g. 09:00-09:30 vs 09:15-09:45) that the exact-match UNIQUE never fires on.
+_RESERVE_LOCKS: dict[str, threading.Lock] = {}
+_RESERVE_LOCKS_GUARD = threading.Lock()
+
+
+def _reserve_lock_for(doctor_id: uuid.UUID) -> threading.Lock:
+    key = str(doctor_id)
+    with _RESERVE_LOCKS_GUARD:
+        lock = _RESERVE_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _RESERVE_LOCKS[key] = lock
+        return lock
 
 
 class SlotConflictError(Exception):
@@ -158,18 +177,101 @@ def get_available_slots(
     return sorted(slots)
 
 
-def _overlapping_block(
-    session: Session, doctor_id: uuid.UUID, start: datetime, end: datetime
-) -> BlockedSlot | None:
-    return (
+def get_day_schedule(
+    session: Session,
+    doctor_id: uuid.UUID,
+    day: date,
+    booked: list[tuple[datetime, datetime]] | None = None,
+) -> tuple[list[Window], list[Window]]:
+    """Working windows + busy intervals for one IST calendar date.
+
+    `windows` are the merged rule windows (UTC). `busy` merges admin
+    blocks and already-booked intervals, clipped to the IST day, so a
+    patient timeline can render the working day with taken periods as
+    anonymous blocks. Returns ([], []) when the doctor is inactive or
+    the calendar is paused.
+    """
+    doctor = session.get(Doctor, doctor_id)
+    if doctor is None:
+        raise _not_found("Doctor not found")
+    if doctor.status != DoctorStatus.active:
+        return [], []
+    calendar = get_or_create_calendar(session, doctor_id)
+    if not calendar.is_active:
+        return [], []
+
+    rules = (
+        session.query(AvailabilityRule)
+        .filter(AvailabilityRule.doctor_id == doctor_id)
+        .all()
+    )
+    windows = availability.expand_rules_to_windows(rules, day)
+
+    day_start = datetime.combine(day, time.min).replace(
+        tzinfo=availability.IST
+    ).astimezone(timezone.utc)
+    day_end = (datetime.combine(day, time.min) + timedelta(days=1)).replace(
+        tzinfo=availability.IST
+    ).astimezone(timezone.utc)
+    blocks = (
         session.query(BlockedSlot)
         .filter(
             BlockedSlot.doctor_id == doctor_id,
-            BlockedSlot.start_datetime < end,
-            BlockedSlot.end_datetime > start,
+            BlockedSlot.start_datetime < day_end,
+            BlockedSlot.end_datetime > day_start,
         )
-        .first()
+        .all()
     )
+    spans: list[Window] = [
+        Window(
+            max(availability.as_utc(b.start_datetime), day_start),
+            min(availability.as_utc(b.end_datetime), day_end),
+        )
+        for b in blocks
+    ]
+    for s, e in booked or []:
+        s_u, e_u = availability.as_utc(s), availability.as_utc(e)
+        if e_u > day_start and s_u < day_end:
+            spans.append(Window(max(s_u, day_start), min(e_u, day_end)))
+    spans.sort()
+    busy: list[Window] = []
+    for span in spans:
+        if span.end <= span.start:
+            continue
+        if busy and span.start <= busy[-1].end:
+            busy[-1] = Window(busy[-1].start, max(busy[-1].end, span.end))
+        else:
+            busy.append(span)
+    return windows, busy
+
+
+def _overlapping_block(
+    session: Session,
+    doctor_id: uuid.UUID,
+    start: datetime,
+    end: datetime,
+    *,
+    exclude: tuple[datetime, datetime] | None = None,
+) -> BlockedSlot | None:
+    """First block overlapping [start, end). `exclude` skips the mover's own
+    old hold so a reschedule that shifts by minutes is not a false conflict."""
+    query = session.query(BlockedSlot).filter(
+        BlockedSlot.doctor_id == doctor_id,
+        BlockedSlot.start_datetime < end,
+        BlockedSlot.end_datetime > start,
+    )
+    row = query.first()
+    if row is not None and exclude is not None:
+        from app.domain.scheduling.availability import as_utc as _as_utc
+
+        if _as_utc(row.start_datetime) == _as_utc(
+            exclude[0]
+        ) and _as_utc(row.end_datetime) == _as_utc(exclude[1]):
+            # Own hold — look for any *other* overlapping block.
+            return (
+                query.filter(BlockedSlot.id != row.id).first()
+            )
+    return row
 
 
 def _lock_doctor_calendar(session: Session, doctor_id: uuid.UUID) -> None:
@@ -195,12 +297,17 @@ def reserve_slot(
     start: datetime,
     end: datetime,
     reason: BlockedReason = BlockedReason.appointment,
+    *,
+    exclude: tuple[datetime, datetime] | None = None,
 ) -> BlockedSlot:
     """Hold a slot: lock the calendar row, re-check overlap, then insert.
 
     Safe under concurrency — the row lock serializes per-doctor
-    reservations, and two racers for the same discrete slot collapse to
-    one winner via the UNIQUE(doctor_id, start, end) constraint.
+    reservations on PostgreSQL (plus a per-doctor in-process lock for
+    SQLite, which rejects FOR UPDATE), and two racers for the same
+    discrete slot collapse to one winner via the
+    UNIQUE(doctor_id, start, end) constraint. Partial overlaps are caught
+    by the overlap re-check while holding the lock.
     Raises SlotConflictError when the slot is taken.
     """
     if end <= start:
@@ -214,8 +321,29 @@ def reserve_slot(
     )
     if calendar is not None and not calendar.is_active:
         raise SlotConflictError("Doctor is not accepting appointments")
+    bind = session.get_bind()
+    if bind is not None and bind.dialect.name == "sqlite":
+        # SQLite: serialize check+insert in-process (see _reserve_lock_for).
+        with _reserve_lock_for(doctor_id):
+            return _reserve_slot_inner(
+                session, doctor_id, start, end, reason, exclude=exclude
+            )
     _lock_doctor_calendar(session, doctor_id)
-    if _overlapping_block(session, doctor_id, start, end) is not None:
+    return _reserve_slot_inner(
+        session, doctor_id, start, end, reason, exclude=exclude
+    )
+
+
+def _reserve_slot_inner(
+    session: Session,
+    doctor_id: uuid.UUID,
+    start: datetime,
+    end: datetime,
+    reason: BlockedReason,
+    *,
+    exclude: tuple[datetime, datetime] | None = None,
+) -> BlockedSlot:
+    if _overlapping_block(session, doctor_id, start, end, exclude=exclude) is not None:
         raise SlotConflictError("Slot overlaps an existing block")
     block = BlockedSlot(
         doctor_id=doctor_id,

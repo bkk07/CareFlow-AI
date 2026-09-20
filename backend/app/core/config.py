@@ -43,6 +43,13 @@ class Settings(BaseSettings):
     llm_base_url: str = Field(
         default="https://api.groq.com/openai/v1", alias="LLM_BASE_URL"
     )
+    # Chat assistant model: Inception Mercury (OpenAI-compatible).
+    # Voice STT/TTS stay on Groq and keep using LLM_API_KEY/GROQ_API_KEY.
+    inception_api_key: str = Field(default="", alias="INCEPTION_API_KEY")
+    inception_model: str = Field(default="mercury-2.5", alias="INCEPTION_MODEL")
+    inception_base_url: str = Field(
+        default="https://api.inceptionlabs.ai/v1", alias="INCEPTION_BASE_URL"
+    )
     # AIContext (Phase 9) Redis TTL, e.g. 2h of conversation memory.
     ai_context_ttl_s: int = Field(default=7200, alias="AI_CONTEXT_TTL_S")
     # Phase 10 workflow/notifications.

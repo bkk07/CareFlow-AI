@@ -10,7 +10,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, String, Uuid, func
+from sqlalchemy import Boolean, DateTime, Enum, String, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -56,6 +56,13 @@ class Notification(Base):
     body: Mapped[str | None] = mapped_column(String(4000), nullable=True)
     error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # C4: server-side read state replaces the frontend localStorage stubs.
+    is_read: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    read_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(

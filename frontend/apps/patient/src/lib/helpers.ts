@@ -6,6 +6,47 @@ export function consultationModeLabel(mode: string): string {
   return "In person";
 }
 
+export function toLocalKey(d: Date): string {
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+export function parseDayKey(key: string): Date {
+  const [y, m, d] = key.split("-").map((n) => parseInt(n, 10));
+  return new Date(y, (m || 1) - 1, d || 1);
+}
+
+/** 7 consecutive days starting from `anchor` (inclusive). Powers the
+ *  "strip starts from the picked day" behaviour for the calendar popup. */
+export function sevenDaysFrom(anchor: Date): { key: string; label: string; sub: string }[] {
+  const days: { key: string; label: string; sub: string }[] = [];
+  const todayKey = toLocalKey(new Date());
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(anchor);
+    d.setDate(anchor.getDate() + i);
+    const key = toLocalKey(d);
+    const tomorrow = new Date();
+    tomorrow.setDate(new Date().getDate() + 1);
+    const label =
+      key === todayKey
+        ? "Today"
+        : key === toLocalKey(tomorrow)
+          ? "Tomorrow"
+          : d.toLocaleDateString("en-US", { weekday: "short" });
+    const sub = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    days.push({ key, label, sub });
+  }
+  return days;
+}
+
+/** "2026-09-19" -> "Sat, Sep 19". Used when the picked day is outside the strip. */
+export function formatDayKeyLong(key: string): string {
+  const d = parseDayKey(key);
+  if (Number.isNaN(d.getTime())) return key;
+  return `${d.toLocaleDateString("en-US", { weekday: "short" })}, ${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+}
+
 export function nextSevenDays(): { key: string; label: string; sub: string }[] {
   const days: { key: string; label: string; sub: string }[] = [];
   const now = new Date();

@@ -201,8 +201,11 @@ def test_full_booking_flow_by_voice(client, db, voice_env):
                     "end": create_args["slot_end"],
                 }
             ]
-            # The scripted confirmation jumps past the visit-type step.
+            # The scripted confirmation jumps past the early steps (day
+            # comes from the "Monday morning" transcript itself).
             prior.visit_types_seen = True
+            prior.selected_appointment_type_id = setup["type"]["id"]
+            prior.selected_consultation_mode = "in_person"
             save_ai_context(prior)
             voice_env["stt"].text = "Yes, book Monday morning"
             ws.send_text(audio_msg(make_tone(0.4) + make_silence(0.8)))

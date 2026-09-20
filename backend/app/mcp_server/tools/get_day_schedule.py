@@ -1,4 +1,11 @@
-"""check_availability — real open slots for a doctor + appointment type."""
+"""get_day_schedule — a doctor's working day for the patient timeline UI.
+
+Returns merged working windows plus anonymized busy intervals (admin
+blocks + live bookings, start/end only — never patient details) for one
+calendar date, so the patient app can render the day as a single timeline
+with taken periods as colored blocks and let the patient pick any free
+start time. The booking API still re-validates the exact range server-side.
+"""
 
 import uuid
 from datetime import date
@@ -17,14 +24,12 @@ from app.mcp_server.errors import CapabilityValidationError
 from app.mcp_server.tools import _time as time_fmt
 from app.mcp_server.tools._base import mcp_tool
 
-TOOL_NAME = "check_availability"
+TOOL_NAME = "get_day_schedule"
 
 
-class CheckAvailabilityIn(BaseModel):
+class GetDayScheduleIn(BaseModel):
     doctor_id: uuid.UUID
-    appointment_type_id: uuid.UUID
-    date_from: date
-    date_to: date
+    date: date
 
 
 @mcp_tool(
@@ -34,17 +39,17 @@ class CheckAvailabilityIn(BaseModel):
     allowed_roles=[Role.patient, Role.hospital_admin, Role.platform_admin],
 )
 def run(
-    input: CheckAvailabilityIn,
+    input: GetDayScheduleIn,
     *,
     ctx: RequestContext,
     db: Session,
     integration: IntegrationService,
 ) -> dict:
-    """Compute bookable slots (rules minus blocks minus live bookings).
+    """Working hours + anonymous busy blocks for one doctor-day.
 
-    Every slot carries ready-made IST display strings (start_ist/end_ist/
-    day_ist): speak THOSE to the patient, never the raw UTC ISO — reading
-    "03:30+00:00" aloud as "3:30 AM" books the wrong time.
+    Windows carry ready-made IST display strings: reason about AND speak
+    those, never the raw UTC ISO ("03:30+00:00" is 9:00 AM IST, not
+    3:30 AM).
     """
     del ctx, integration
     doctor = db.get(Doctor, input.doctor_id)
@@ -54,37 +59,31 @@ def run(
         raise CapabilityValidationError("Doctor is not currently seeing patients")
     hospital = get_hospital_or_404(db, doctor.hospital_id)
     assert_hospital_approved(hospital)
-    appt_type = appointment_service.get_scoped_type(
-        db, hospital, input.appointment_type_id
-    )
-    offered = list(doctor.available_durations or [])
-    if offered and appt_type.duration_minutes not in offered:
-        raise CapabilityValidationError(
-            f"Doctor does not offer {appt_type.duration_minutes}-minute visits"
-        )
-    calendar = scheduling_service.get_or_create_calendar(db, doctor.id)
-    if not calendar.is_active:
-        raise CapabilityValidationError(
-            "Doctor is not currently accepting appointments (calendar paused)"
-        )
-    windows = scheduling_service.get_available_slots(
-        doctor.id,
-        appt_type.id,
-        input.date_from,
-        input.date_to,
+    windows, busy = scheduling_service.get_day_schedule(
         db,
+        doctor.id,
+        input.date,
         booked=appointment_service.live_intervals_for_doctor(db, doctor.id),
     )
     return {
         "doctor_id": str(doctor.id),
-        "slots": [
+        "date": input.date.isoformat(),
+        "working_hours": [
             {
                 "start": w.start.isoformat(),
                 "end": w.end.isoformat(),
                 "start_ist": time_fmt.ist_time_label(w.start.isoformat()),
                 "end_ist": time_fmt.ist_time_label(w.end.isoformat()),
-                "day_ist": time_fmt.ist_day_label(w.start.isoformat()),
             }
             for w in windows
+        ],
+        "busy": [
+            {
+                "start": b.start.isoformat(),
+                "end": b.end.isoformat(),
+                "start_ist": time_fmt.ist_time_label(b.start.isoformat()),
+                "end_ist": time_fmt.ist_time_label(b.end.isoformat()),
+            }
+            for b in busy
         ],
     }

@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from email.message import EmailMessage
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -70,7 +71,17 @@ def create_in_app(
         correlation_id=correlation_id or get_correlation_id(),
     )
     session.add(row)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        # R4: concurrent redeliveries both missed the check — winner wins.
+        session.rollback()
+        winner = (
+            session.query(Notification)
+            .filter(Notification.dedupe_key == dedupe_key)
+            .one()
+        )
+        return winner, False
     session.refresh(row)
     return row, True
 
@@ -105,7 +116,17 @@ def deliver_email(
         correlation_id=correlation_id or get_correlation_id(),
     )
     session.add(row)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        # R4: same duplicate-insert collapse as in_app.
+        session.rollback()
+        winner = (
+            session.query(Notification)
+            .filter(Notification.dedupe_key == dedupe_key)
+            .one()
+        )
+        return winner, False
     try:
         send_email(recipient_address, subject, body)
     except Exception as exc:

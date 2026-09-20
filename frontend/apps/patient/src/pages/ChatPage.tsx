@@ -106,6 +106,7 @@ export default function ChatPage() {
         hasMoreDoctors: reply.has_more_doctors ?? false,
         slots: reply.slots ?? [],
         appointmentTypes: reply.appointment_types ?? [],
+        consultationModes: reply.consultation_modes ?? [],
         daySchedule: reply.day_schedule ?? null,
         bookingStage: reply.booking_stage ?? "browse",
         pendingBooking: reply.pending_booking ?? null,
@@ -125,6 +126,10 @@ export default function ChatPage() {
   function pickType(name: string, minutes: number) {
     setChosenType({ name, minutes });
     void sendPrompt(name);
+  }
+
+  function pickMode(label: string) {
+    void sendPrompt(label);
   }
 
   return (
@@ -202,6 +207,7 @@ export default function ChatPage() {
               message={m}
               onSend={(text) => void sendPrompt(text)}
               onPickType={(name, minutes) => pickType(name, minutes)}
+              onPickMode={(_mode, label) => pickMode(label)}
               daySlotMinutes={chosenType?.minutes ?? null}
             />
           ))}

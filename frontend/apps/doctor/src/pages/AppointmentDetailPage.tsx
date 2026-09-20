@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
-import { appointmentDetail, fetchAppointmentQuestionnaire, type AppointmentDetail as ApiDetail } from "../api";
+import { appointmentDetail, completeAppointment, fetchAppointmentQuestionnaire, markAppointmentNoShow, type AppointmentDetail as ApiDetail } from "../api";
 import { formatCompletedAt, formatDateLabel, formatTime, mapAppointmentState } from "../lib/backend";
 import { useSchedule } from "../context/ScheduleContext";
 import { AppointmentDetailBody } from "../components/appointments/AppointmentDetail";
@@ -73,11 +73,30 @@ function toUI(
 
 export default function AppointmentDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { appointments } = useSchedule();
+  const { appointments, refresh } = useSchedule();
   const [detail, setDetail] = useState<ApiDetail | null>(null);
   const [prompts, setPrompts] = useState<Map<string, string>>(new Map());
   const [detailLoading, setDetailLoading] = useState(true);
   const [detailError, setDetailError] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [acting, setActing] = useState(false);
+
+  async function closeOut(kind: "complete" | "no-show") {
+    if (!id || acting) return;
+    setActing(true);
+    setActionError(null);
+    try {
+      if (kind === "complete") await completeAppointment(id);
+      else await markAppointmentNoShow(id);
+      const d = await appointmentDetail(id);
+      setDetail(d);
+      await refresh().catch(() => undefined);
+    } catch {
+      setActionError(kind === "complete" ? "Could not complete visit." : "Could not mark no-show.");
+    } finally {
+      setActing(false);
+    }
+  }
 
   useEffect(() => {
     if (!id) {
@@ -147,6 +166,13 @@ export default function AppointmentDetailPage() {
   return (
     <div className="max-w-2xl mx-auto">
       <Link to="/today" className="inline-flex items-center gap-1.5 text-[0.85rem] font-bold text-ink-secondary hover:text-healthcare mb-3"><ArrowLeft size={16} /> Back to schedule</Link>
+      {actionError && <p role="alert" className="text-[0.83rem] font-semibold text-danger mb-3">{actionError}</p>}
+      {(detail.state === "confirmed" || detail.state === "rescheduled") && (
+        <div className="flex gap-2 mb-3">
+          <button disabled={acting} onClick={() => void closeOut("complete")} className="flex-1 text-[0.83rem] font-bold bg-success text-white rounded-control py-2 disabled:opacity-50">Complete visit</button>
+          <button disabled={acting} onClick={() => void closeOut("no-show")} className="flex-1 text-[0.83rem] font-bold bg-white border border-border rounded-control py-2 disabled:opacity-50">Mark no-show</button>
+        </div>
+      )}
       <div className="card-base p-5 sm:p-6">
         <AppointmentDetailBody appointment={appointment} questionnaire={questionnaire} />
       </div>

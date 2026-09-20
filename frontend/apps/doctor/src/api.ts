@@ -279,6 +279,8 @@ export interface BackendNotification {
   error: string | null;
   sent_at: string | null;
   created_at: string;
+  is_read?: boolean;
+  read_at?: string | null;
 }
 
 export interface Slot {
@@ -433,4 +435,28 @@ export async function fetchAppointmentQuestionnaire(
 
 export async function fetchNotifications(): Promise<BackendNotification[]> {
   return (await api.get("/notifications")).data;
+}
+
+export async function fetchNotification(id: string): Promise<BackendNotification> {
+  return (await api.get(`/notifications/${id}`)).data;
+}
+
+export async function markNotificationRead(id: string): Promise<BackendNotification> {
+  return (await api.post(`/notifications/${id}/read`)).data;
+}
+
+export async function markAllNotificationsRead(): Promise<{ marked: number }> {
+  return (await api.post("/notifications/read-all")).data;
+}
+
+export async function deleteNotification(id: string): Promise<void> {
+  await api.delete(`/notifications/${id}`);
+}
+
+export async function completeAppointment(id: string): Promise<void> {
+  await api.post(`/appointments/${id}/complete`, { reason: null });
+}
+
+export async function markAppointmentNoShow(id: string): Promise<void> {
+  await api.post(`/appointments/${id}/no-show`, { reason: null });
 }

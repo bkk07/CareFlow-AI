@@ -39,6 +39,16 @@ class QuestionCreateIn(BaseModel):
     required: bool = True
 
 
+class QuestionUpdateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    order: int | None = Field(default=None, ge=0)
+    type: QuestionType | None = None
+    prompt: str | None = Field(default=None, min_length=1, max_length=1000)
+    options: list[str] | None = None
+    required: bool | None = None
+
+
 class QuestionOut(BaseModel):
     id: uuid.UUID
     questionnaire_id: uuid.UUID

@@ -193,8 +193,11 @@ export function mapRules(rules: ApiRule[]): AvailabilityRule[] {
   });
 }
 
-function blockReasonLabel(reason: string): BlockedSlot["reason"] {
+function blockReasonLabel(reason: string): BlockedSlot["reason"] | null {
   if (reason === "leave") return "Leave";
+  // Appointment slot-holds duplicate the Appointment rows themselves —
+  // never render them as "Administrative work" blocks.
+  if (reason === "appointment") return null;
   return "Administrative work";
 }
 
@@ -202,51 +205,39 @@ export function blockReasonToApi(reason: BlockedSlot["reason"]): string {
   return reason === "Leave" ? "leave" : "ad_hoc";
 }
 
-/** Backend blocks -> portal BlockedSlot display model. */
+/** Backend blocks -> portal BlockedSlot display model.
+ * Appointment holds (reason=appointment) are filtered out — the matching
+ * Appointment card already shows that time, so keeping them would render
+ * every booking twice (once as visit, once as "Administrative work").
+ */
 export function mapBlocks(blocks: ApiBlock[]): BlockedSlot[] {
-  return blocks.map((b) => {
-    const s = new Date(b.start_datetime);
-    const e = new Date(b.end_datetime);
-    const date = Number.isNaN(s.getTime())
-      ? b.start_datetime
-      : s.toLocaleDateString("en-US", {
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-        });
-    return {
-      id: b.id,
-      date,
-      start: Number.isNaN(s.getTime()) ? b.start_datetime : formatTime(b.start_datetime),
-      end: Number.isNaN(e.getTime()) ? b.end_datetime : formatTime(b.end_datetime),
-      reason: blockReasonLabel(b.reason),
-    };
-  });
+  return blocks
+    .filter((b) => b.reason !== "appointment")
+    .map((b) => {
+      const s = new Date(b.start_datetime);
+      const e = new Date(b.end_datetime);
+      const date = Number.isNaN(s.getTime())
+        ? b.start_datetime
+        : s.toLocaleDateString("en-US", {
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+          });
+      const reason = blockReasonLabel(b.reason) ?? "Administrative work";
+      return {
+        id: b.id,
+        date,
+        start: Number.isNaN(s.getTime()) ? b.start_datetime : formatTime(b.start_datetime),
+        end: Number.isNaN(e.getTime()) ? b.end_datetime : formatTime(b.end_datetime),
+        reason,
+        startIso: b.start_datetime,
+        endIso: b.end_datetime,
+      };
+    });
 }
 
-const READ_KEY = "careflow_doctor_read";
-
-function readIds(): Set<string> {
-  try {
-    return new Set(JSON.parse(localStorage.getItem(READ_KEY) ?? "[]") as string[]);
-  } catch {
-    return new Set();
-  }
-}
-
-export function persistRead(id: string) {
-  try {
-    const ids = readIds();
-    ids.add(id);
-    localStorage.setItem(READ_KEY, JSON.stringify([...ids]));
-  } catch {
-    /* private mode */
-  }
-}
-
-/** Backend notification -> portal inbox item. Read state stays local. */
+/** Backend notification -> portal inbox item. Read state is server-side (is_read). */
 export function mapNotification(n: BackendNotification): NotificationItem {
-  const known = readIds();
   const type = (n.type ?? "").toLowerCase();
   let category: NotificationCategory = "system";
   if (
@@ -271,7 +262,7 @@ export function mapNotification(n: BackendNotification): NotificationItem {
     title: n.subject ?? "CareFlow AI update",
     body: n.body ?? "",
     time,
-    unread: !known.has(n.id),
+    unread: !n.is_read,
   };
 }
 

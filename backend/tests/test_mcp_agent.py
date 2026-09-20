@@ -694,6 +694,330 @@ def test_chat_doctor_pick_moves_stage_to_date(client, db, tool_factory):
     assert get_ai_context(cid).selected_doctor_id == setup["doctor"]["id"]
 
 
+def test_detect_doctor_selection_handles_typos():
+    """Misspelled names still resolve ("Badaru Kiran" ~ "Bandaru Kiran")."""
+    from app.ai.agent.orchestrator import detect_doctor_selection
+    from app.ai.context.ai_context import AIContext
+
+    def _ctx(names):
+        return AIContext(
+            conversation_id="x",
+            offered_doctors=[{"id": f"id-{i}", "name": n} for i, n in enumerate(names)],
+            offered_doctor_page=[f"id-{i}" for i in range(len(names))],
+        )
+
+    ctx = _ctx(["Bandaru Kiran", "Dr. Vikram Menon", "Dr. E2E"])
+    assert detect_doctor_selection(ctx, "Badaru Kiran") == "id-0"
+    assert detect_doctor_selection(ctx, "Kiran") == "id-0"
+    assert detect_doctor_selection(ctx, "Vikram Menon") == "id-1"
+    assert detect_doctor_selection(ctx, "the second one") == "id-1"
+    assert detect_doctor_selection(ctx, "I need a cardiologist") is None
+    assert detect_doctor_selection(ctx, "Hi") is None
+    # Shared token across two doctors -> ambiguous -> None.
+    dup = _ctx(["Rao Menon", "Rao Iyer"])
+    assert detect_doctor_selection(dup, "Rao") is None
+    assert detect_doctor_selection(dup, "Rao Menon") == "id-0"
+
+
+def test_typo_pick_shows_matching_profile_card(client, db, tool_factory):
+    """The card under a typo'd pick is the picked doctor, not a stale one."""
+    setup = seed_setup(client, tag="typo")
+    ctx = patient_ctx(setup)
+    cid = "conv-typo"
+    clear_ai_context(cid)
+    prior = get_ai_context(cid)
+    prior.offered_doctors = [{"id": setup["doctor"]["id"], "name": "Bandaru Typo"}]
+    prior.offered_doctor_page = [setup["doctor"]["id"]]
+    prior.selected_doctor_id = "00000000-0000-0000-0000-000000000000"
+    save_ai_context(prior)
+    result = orchestrator.run_conversation(
+        db=db, ctx=ctx, conversation_id=cid,
+        user_message="Badaru Typo",
+        complete=scripted({"content": "Great choice — which day suits you?", "tool_calls": []}),
+    )
+    assert [d["id"] for d in result["doctors"]] == [setup["doctor"]["id"]]
+    assert get_ai_context(cid).selected_doctor_id == setup["doctor"]["id"]
+
+
+def test_fresh_search_resets_stale_selection(client, db, tool_factory):
+    """A new search clears a previously picked doctor (new choice, new flow)."""
+    setup = seed_setup(client, tag="reset")
+    ctx = patient_ctx(setup)
+    cid = "conv-reset"
+    clear_ai_context(cid)
+    prior = get_ai_context(cid)
+    prior.selected_doctor_id = setup["doctor"]["id"]
+    prior.selected_appointment_type_id = setup["type"]["id"]
+    prior.visit_types_seen = True
+    prior.visit_type_name = "Consult"
+    prior.selected_consultation_mode = "video"
+    save_ai_context(prior)
+    result = orchestrator.run_conversation(
+        db=db, ctx=ctx, conversation_id=cid,
+        user_message="Actually find me a dermatologist",
+        complete=scripted(
+            {
+                "content": None,
+                "tool_calls": [
+                    {"id": "c1", "name": "search_doctors", "arguments": {"specialty": "Dermatology", "limit": 5, "offset": 0}}
+                ],
+            },
+            {"content": "Here are dermatologists.", "tool_calls": []},
+        ),
+    )
+    kept = get_ai_context(cid)
+    assert kept.selected_doctor_id is None
+    # Type/mode/day records survive a search (same-turn checks need them)
+    # and reset when a booking completes instead — the next flow re-picks.
+    assert kept.selected_appointment_type_id == setup["type"]["id"]
+    assert kept.visit_type_name == "Consult"
+    assert kept.visit_types_seen is True
+    assert kept.selected_consultation_mode == "video"
+    assert result["booking_stage"] == "browse"
+
+
+def test_completed_booking_resets_picks_for_next_flow(client, db, tool_factory):
+    """After a successful booking, type/mode/day must be picked again."""
+    setup = seed_setup(client, tag="flowreset")
+    start, end = slot_iso(hour=3, minutes=30)
+    ctx = patient_ctx(setup)
+    cid = "conv-flowreset"
+    clear_ai_context(cid)
+    prior = get_ai_context(cid)
+    prior.offered_doctors = [{"id": setup["doctor"]["id"], "name": "Dr. flowreset"}]
+    prior.offered_slots = [{"start": start, "end": end}]
+    prior.visit_types_seen = True
+    prior.selected_appointment_type_id = setup["type"]["id"]
+    prior.visit_type_name = "Consult"
+    prior.selected_consultation_mode = "video"
+    prior.selected_date = MONDAY
+    save_ai_context(prior)
+    result = orchestrator.run_conversation(
+        db=db, ctx=ctx, conversation_id=cid,
+        user_message="Yes, book it for Monday over video",
+        complete=scripted(
+            {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "name": "create_appointment",
+                        "arguments": {
+                            "doctor_id": setup["doctor"]["id"],
+                            "appointment_type_id": setup["type"]["id"],
+                            "slot_start": start,
+                            "slot_end": end,
+                            "idempotency_key": "flowreset-1",
+                        },
+                    }
+                ],
+            },
+            {"content": "Booked.", "tool_calls": []},
+        ),
+    )
+    assert result["reply"] == "Booked."
+    fresh = get_ai_context(cid)
+    assert fresh.last_appointment_id
+    assert fresh.flow_open is False
+    assert fresh.visit_types_seen is False
+    assert fresh.visit_type_name is None
+    assert fresh.selected_appointment_type_id is None
+    assert fresh.selected_consultation_mode is None
+    assert fresh.selected_date is None
+
+
+def test_guided_walkthrough_shows_only_next_step(client, db, tool_factory):
+    """End-to-end §24 flow: each turn renders ONLY its step's widgets.
+
+    search -> cards only; pick -> single card once; date -> schedule only;
+    types -> select+modes only; mode+type pick -> nothing new; time check
+    -> slots only; yes -> booked with mode. A later unrelated turn shows
+    no doctor cards at all.
+    """
+    setup = seed_setup(client, tag="walk")
+    start, end = slot_iso(hour=3, minutes=30)
+    ctx = patient_ctx(setup)
+    cid = "conv-walk"
+    clear_ai_context(cid)
+    doctor_name = "Dr. walk"
+    type_name = "Consult walk"
+
+    t1 = orchestrator.run_conversation(
+        db=db, ctx=ctx, conversation_id=cid,
+        user_message="I need a cardiologist",
+        complete=scripted(
+            {
+                "content": None,
+                "tool_calls": [
+                    {"id": "c1", "name": "search_doctors", "arguments": {"specialty": "Cardiology walk", "limit": 5, "offset": 0}}
+                ],
+            },
+            {"content": "Here are a few good options near you.", "tool_calls": []},
+        ),
+    )
+    assert [d["id"] for d in t1["doctors"]] == [setup["doctor"]["id"]]
+    assert t1["slots"] == [] and t1["appointment_types"] == []
+    assert t1["day_schedule"] is None and t1["booking_stage"] == "browse"
+
+    t2 = orchestrator.run_conversation(
+        db=db, ctx=ctx, conversation_id=cid,
+        user_message=doctor_name,
+        complete=scripted({"content": "Great choice — which day suits you?", "tool_calls": []}),
+    )
+    assert [d["id"] for d in t2["doctors"]] == [setup["doctor"]["id"]]
+    assert t2["booking_stage"] == "pick_date"
+    assert t2["slots"] == [] and t2["appointment_types"] == []
+
+    t3 = orchestrator.run_conversation(
+        db=db, ctx=ctx, conversation_id=cid,
+        user_message="Monday",
+        complete=scripted(
+            {
+                "content": None,
+                "tool_calls": [
+                    {"id": "c2", "name": "get_day_schedule", "arguments": {"doctor_id": setup["doctor"]["id"], "date": MONDAY}}
+                ],
+            },
+            {"content": "Monday looks open — what type of visit?", "tool_calls": []},
+        ),
+    )
+    assert t3["doctors"] == []  # chosen card NOT repeated
+    assert t3["day_schedule"]["date"] == MONDAY
+    assert t3["booking_stage"] == "pick_time"
+
+    t4 = orchestrator.run_conversation(
+        db=db, ctx=ctx, conversation_id=cid,
+        user_message="Show me the visit types",
+        complete=scripted(
+            {
+                "content": None,
+                "tool_calls": [
+                    {"id": "c3", "name": "list_appointment_types", "arguments": {"hospital_id": setup["hid"]}}
+                ],
+            },
+            {"content": "Pick a type — video, phone, or in-person?", "tool_calls": []},
+        ),
+    )
+    assert t4["doctors"] == []
+    assert len(t4["appointment_types"]) == 1
+    assert set(t4["consultation_modes"]) == {"video", "phone", "in_person"}
+    assert t4["booking_stage"] == "pick_type"
+
+    t5 = orchestrator.run_conversation(
+        db=db, ctx=ctx, conversation_id=cid,
+        user_message=f"{type_name} over video please",
+        complete=scripted({"content": "Got it — what start time?", "tool_calls": []}),
+    )
+    # Nothing new to show: no re-blast of cards, types, modes, or schedule.
+    assert t5["doctors"] == [] and t5["slots"] == []
+    assert t5["appointment_types"] == [] and t5["consultation_modes"] == []
+    assert t5["day_schedule"] is None
+    kept = get_ai_context(cid)
+    assert kept.selected_appointment_type_id == setup["type"]["id"]
+    assert kept.selected_consultation_mode == "video"
+
+    t6 = orchestrator.run_conversation(
+        db=db, ctx=ctx, conversation_id=cid,
+        user_message="Monday at 9:00 AM",
+        complete=scripted(
+            {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "c4",
+                        "name": "check_availability",
+                        "arguments": {
+                            "doctor_id": setup["doctor"]["id"],
+                            "appointment_type_id": setup["type"]["id"],
+                            "date_from": MONDAY,
+                            "date_to": MONDAY,
+                        },
+                    }
+                ],
+            },
+            {"content": "9:00–9:30 AM is available. Shall I book it?", "tool_calls": []},
+        ),
+    )
+    assert len(t6["slots"]) == 10  # response caps the 16 real slots at 10
+    assert t6["slots"][0]["start"] == start
+    assert t6["doctors"] == [] and t6["appointment_types"] == []
+
+    t7 = orchestrator.run_conversation(
+        db=db, ctx=ctx, conversation_id=cid,
+        user_message="Yes, book it",
+        complete=scripted(
+            {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "c5",
+                        "name": "create_appointment",
+                        "arguments": {
+                            "doctor_id": setup["doctor"]["id"],
+                            "appointment_type_id": setup["type"]["id"],
+                            "slot_start": start,
+                            "slot_end": end,
+                            "idempotency_key": "walk-1",
+                        },
+                    }
+                ],
+            },
+            {"content": "Your appointment is confirmed.", "tool_calls": []},
+        ),
+    )
+    assert t7["pending_booking"] is None
+    appt = db.query(Appointment).filter(Appointment.idempotency_key == "walk-1").one()
+    assert appt.consultation_mode == "video"
+    assert t7["doctors"] == []  # booked turn shows no cards either
+
+    # A later unrelated question re-renders nothing from the flow: the
+    # completed booking closed it, so the stage is back to browse.
+    t8 = orchestrator.run_conversation(
+        db=db, ctx=ctx, conversation_id=cid,
+        user_message="What are the hospital visiting hours?",
+        complete=scripted({"content": "9 AM to 6 PM daily.", "tool_calls": []}),
+    )
+    assert t8["booking_stage"] == "browse"
+    assert t8["doctors"] == [] and t8["slots"] == []
+    assert t8["appointment_types"] == [] and t8["consultation_modes"] == []
+    assert t8["day_schedule"] is None and t8["pending_booking"] is None
+
+
+def test_doctor_change_drops_old_availability(client, db, tool_factory):
+    """Naming a different doctor clears the previous doctor's slots."""
+    setup = seed_setup(client, tag="switch")
+    _seed_many_doctors(client, setup["hosp"], "switch", 1)
+    ctx = patient_ctx(setup)
+    cid = "conv-switch"
+    clear_ai_context(cid)
+    prior = get_ai_context(cid)
+    prior.offered_doctors = [
+        {"id": setup["doctor"]["id"], "name": "Dr. switch"},
+    ]
+    prior.offered_slots = [{"start": "2026-10-05T03:30:00+00:00", "end": "2026-10-05T04:00:00+00:00"}]
+    prior.selected_doctor_id = setup["doctor"]["id"]
+    save_ai_context(prior)
+    others = [d for d in get_ai_context(cid).offered_doctors]
+    assert len(others) == 1
+    # Simulate a second offered doctor, then switch to them by ordinal.
+    from tests.test_mcp_agent import seed_setup as _s  # noqa: F401  (self-module, no-op guard)
+
+    prior2 = get_ai_context(cid)
+    second_id = "11111111-2222-3333-4444-555555555555"
+    prior2.offered_doctors.append({"id": second_id, "name": "Dr. Second Switch"})
+    prior2.offered_doctor_page = [setup["doctor"]["id"], second_id]
+    save_ai_context(prior2)
+    result = orchestrator.run_conversation(
+        db=db, ctx=ctx, conversation_id=cid,
+        user_message="Actually the second one",
+        complete=scripted({"content": "Switched — which day?", "tool_calls": []}),
+    )
+    kept = get_ai_context(cid)
+    assert kept.selected_doctor_id == second_id
+    assert kept.offered_slots == []
+    assert result["booking_stage"] == "pick_date"
+
+
 def test_chat_type_and_schedule_payloads_and_stage(client, db, tool_factory):
     """list_appointment_types / get_day_schedule ride the turn payload."""
     setup = seed_setup(client, tag="stage")
@@ -797,7 +1121,7 @@ def test_chat_create_refused_until_visit_type_picked(client, db, tool_factory):
 
     booked = orchestrator.run_conversation(
         db=db, ctx=ctx, conversation_id=cid,
-        user_message="Yes, book it",
+        user_message="Yes, book it for Monday over video",
         complete=scripted(
             {
                 "content": None,
@@ -820,6 +1144,87 @@ def test_chat_create_refused_until_visit_type_picked(client, db, tool_factory):
     )
     assert booked["reply"] == "Booked."
     assert db.query(Appointment).filter(Appointment.idempotency_key == "typegate-1").count() == 1
+
+
+def test_detect_consultation_mode_picks_earliest():
+    from app.ai.agent.orchestrator import detect_consultation_mode
+
+    assert detect_consultation_mode("Video visit please") == "video"
+    assert detect_consultation_mode("a phone call is fine") == "phone"
+    assert detect_consultation_mode("normal in-person visit") == "in_person"
+    assert detect_consultation_mode("meet at the clinic") == "in_person"
+    assert detect_consultation_mode("video or phone") == "video"
+    assert detect_consultation_mode("I want something nearby") is None
+    assert detect_consultation_mode("") is None
+
+
+def test_chat_consultation_mode_flows_to_booking(client, db, tool_factory):
+    """Mode chips ride the types turn; the pick lands on the booking."""
+    setup = seed_setup(client, tag="consmode")
+    start, end = slot_iso(hour=3, minutes=30)
+    ctx = patient_ctx(setup)
+    cid = "conv-consmode"
+    clear_ai_context(cid)
+    prior = get_ai_context(cid)
+    prior.offered_doctors = [{"id": setup["doctor"]["id"], "name": "Dr. consmode"}]
+    prior.offered_doctor_page = [setup["doctor"]["id"]]
+    prior.selected_doctor_id = setup["doctor"]["id"]
+    save_ai_context(prior)
+
+    listed = orchestrator.run_conversation(
+        db=db, ctx=ctx, conversation_id=cid,
+        user_message="Show me the visit types",
+        complete=scripted(
+            {
+                "content": None,
+                "tool_calls": [
+                    {"id": "c1", "name": "list_appointment_types", "arguments": {"hospital_id": setup["hid"]}}
+                ],
+            },
+            {"content": "Pick a type — and video, phone, or in-person?", "tool_calls": []},
+        ),
+    )
+    assert set(listed["consultation_modes"]) == {"video", "phone", "in_person"}
+    from app.ai.router import ChatOut
+
+    ChatOut(**listed)
+
+    # Standalone type + mode message is recorded deterministically.
+    orchestrator.run_conversation(
+        db=db, ctx=ctx, conversation_id=cid,
+        user_message="Consult over video please",
+        complete=scripted({"content": "Video it is.", "tool_calls": []}),
+    )
+    assert get_ai_context(cid).selected_consultation_mode == "video"
+
+    # An unconfirmed booking attempt carries the mode into the proposal.
+    attempt = orchestrator.run_conversation(
+        db=db, ctx=ctx, conversation_id=cid,
+        user_message="Book Monday morning",
+        complete=scripted(
+            {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "c2",
+                        "name": "create_appointment",
+                        "arguments": {
+                            "doctor_id": setup["doctor"]["id"],
+                            "appointment_type_id": setup["type"]["id"],
+                            "slot_start": start,
+                            "slot_end": end,
+                            "idempotency_key": "consmode-1",
+                            "consultation_mode": "video",
+                        },
+                    }
+                ],
+            },
+            {"content": "Shall I book Monday 9 AM over video?", "tool_calls": []},
+        ),
+    )
+    pending = get_ai_context(cid).pending_booking or {}
+    assert pending.get("consultation_mode") == "video"
+    assert (attempt["pending_booking"] or {}).get("consultation_mode") == "video"
 
 
 def test_detect_date_iso_covers_common_phrasings():
@@ -849,7 +1254,11 @@ def test_detect_date_iso_covers_common_phrasings():
 
 
 def test_chat_known_date_skips_reask_and_keeps_profile(client, db, tool_factory):
-    """'Book a meeting tomorrow' uses tomorrow directly — no date re-ask."""
+    """'Book a meeting tomorrow' uses tomorrow directly — no date re-ask.
+
+    The chosen doctor was picked on an earlier turn, so no profile card
+    is re-blasted here — only the fresh day schedule renders.
+    """
     from datetime import datetime as _dt
     from datetime import timezone as _tz
 
@@ -885,8 +1294,9 @@ def test_chat_known_date_skips_reask_and_keeps_profile(client, db, tool_factory)
     assert get_ai_context(cid).selected_date == tomorrow
     assert result["day_schedule"]["date"] == tomorrow
     assert result["booking_stage"] == "pick_time"
-    # The chosen doctor's profile stays on screen through the flow.
-    assert [d["id"] for d in result["doctors"]] == [setup["doctor"]["id"]]
+    # Nothing newly picked this turn, so no card re-blast — only the
+    # fresh day schedule renders.
+    assert result["doctors"] == []
 
 
 def test_check_availability_returns_real_slots(client, tool_factory):
@@ -911,6 +1321,20 @@ def test_check_availability_returns_real_slots(client, tool_factory):
     assert len(slots) == 16  # 8h / 30min
     # Rules are IST wall time: 09:00 IST == 03:30 UTC.
     assert slots[0]["start"] == day + "T03:30:00+00:00"
+    # IST display strings so the model never reads UTC aloud as local.
+    assert slots[0]["start_ist"] == "9:00 AM"
+    assert slots[0]["end_ist"] == "9:30 AM"
+    assert slots[0]["day_ist"] == "Mon, Oct 5"
+
+
+def test_ist_labels_cover_midnight_crossover():
+    from app.mcp_server.tools import _time as time_fmt
+
+    assert time_fmt.ist_time_label("2026-09-24T03:30:00+00:00") == "9:00 AM"
+    assert time_fmt.ist_time_label("2026-09-24T18:00:00+00:00") == "11:30 PM"
+    assert time_fmt.ist_day_label("2026-09-24T03:30:00+00:00") == "Thu, Sep 24"
+    assert time_fmt.ist_time_label("not-a-date") is None
+    assert time_fmt.ist_day_label(None) is None
 
 
 def test_lookup_patient_self_only(client, tool_factory):
@@ -1081,10 +1505,14 @@ def test_chat_books_cardiologist_end_to_end(client, db, tool_factory):
     # confirm gate recognises it (only the first 10 slots are remembered).
     start, end = slot_iso(hour=3, minutes=30)
     ctx = patient_ctx(setup)
-    # Scripted flow jumps past the visit-type step: simulate it as done on
-    # an earlier turn so the availability check is allowed through.
+    # Scripted flow jumps past the early steps: simulate them as done on
+    # an earlier turn (type + mode picked, day known) so the availability
+    # check is allowed through.
     _book_seen = get_ai_context("conv-chatbook")
     _book_seen.visit_types_seen = True
+    _book_seen.selected_appointment_type_id = setup["type"]["id"]
+    _book_seen.selected_consultation_mode = "in_person"
+    _book_seen.selected_date = MONDAY
     save_ai_context(_book_seen)
     turn1 = scripted(
         {
@@ -1200,10 +1628,13 @@ def test_chat_scheduling_intent_with_symptom_proposes_confirmation(client, db, t
     setup = seed_setup(client, tag="mixedmsg")
     start, end = slot_iso()
     ctx = patient_ctx(setup)
-    # Scripted flow jumps past the visit-type step: simulate it as done so
-    # the confirm gate (not the type gate) engages on the booking attempt.
+    # Scripted flow jumps past the early steps: simulate them as done so
+    # the confirm gate (not the completeness gates) engages on the attempt.
     _mixed_seen = get_ai_context("conv-mixed")
     _mixed_seen.visit_types_seen = True
+    _mixed_seen.selected_appointment_type_id = setup["type"]["id"]
+    _mixed_seen.selected_consultation_mode = "in_person"
+    _mixed_seen.selected_date = MONDAY
     save_ai_context(_mixed_seen)
     complete = scripted(
         {
@@ -1253,10 +1684,12 @@ def test_chat_one_shot_booking_is_refused_without_confirmation(client, db, tool_
     setup = seed_setup(client, tag="oneshot")
     start, end = slot_iso()
     ctx = patient_ctx(setup)
-    # Scripted flow jumps past the visit-type step: simulate it as done so
-    # the confirm gate (not the type gate) engages on the booking attempt.
+    # Scripted flow jumps past the early steps: simulate them as done so
+    # the confirm gate (not the completeness gates) engages on the attempt.
     _one_seen = get_ai_context("conv-oneshot")
     _one_seen.visit_types_seen = True
+    _one_seen.selected_appointment_type_id = setup["type"]["id"]
+    _one_seen.selected_consultation_mode = "in_person"
     save_ai_context(_one_seen)
     complete = scripted(
         {
@@ -1317,8 +1750,11 @@ def test_chat_missing_idempotency_key_is_minted_by_server(client, db, tool_facto
     context = get_ai_context("conv-mintkey")
     context.offered_doctors = [{"id": setup["doctor"]["id"], "name": "Dr. mintkey"}]
     context.offered_slots = [{"start": start, "end": end}]
-    # The scripted confirmation jumps past the visit-type step: simulate it.
+    # The scripted confirmation jumps past the early steps: simulate them.
     context.visit_types_seen = True
+    context.selected_appointment_type_id = setup["type"]["id"]
+    context.selected_consultation_mode = "in_person"
+    context.selected_date = start[:10]
     save_ai_context(context)
     complete = scripted(
         {
@@ -1538,8 +1974,11 @@ def test_chat_booking_persists_consultation_mode(client, db, tool_factory):
     context = get_ai_context("conv-chatmode")
     context.offered_doctors = [{"id": did, "name": "Dr. chatmode"}]
     context.offered_slots = [{"start": start, "end": end}]
-    # The scripted confirmation jumps past the visit-type step: simulate it.
+    # The scripted confirmation jumps past the early steps: simulate them
+    # (mode comes from the "video visit" message itself).
     context.visit_types_seen = True
+    context.selected_appointment_type_id = setup["type"]["id"]
+    context.selected_date = start[:10]
     save_ai_context(context)
     complete = scripted(
         {
@@ -1794,8 +2233,11 @@ def test_chat_vendor_fault_parks_via_reconciliation(client, db, tool_factory, fa
     context = get_ai_context("conv-chatfault")
     context.offered_doctors = [{"id": setup["doctor"]["id"], "name": "Dr. chatfault"}]
     context.offered_slots = [{"start": start, "end": end}]
-    # The scripted confirmation jumps past the visit-type step: simulate it.
+    # The scripted confirmation jumps past the early steps: simulate them
+    # (day comes from the "Monday morning" message itself).
     context.visit_types_seen = True
+    context.selected_appointment_type_id = setup["type"]["id"]
+    context.selected_consultation_mode = "in_person"
     save_ai_context(context)
     complete = scripted(
         {
@@ -1851,8 +2293,10 @@ def test_chat_that_one_resolves_from_context(client, db, tool_factory):
     context.offered_slots = [{"start": start, "end": end}]
     context.selected_doctor_id = setup["doctor"]["id"]
     context.selected_appointment_type_id = setup["type"]["id"]
-    # The scripted confirmation jumps past the visit-type step: simulate it.
+    # The scripted confirmation jumps past the early steps: simulate them.
     context.visit_types_seen = True
+    context.selected_consultation_mode = "in_person"
+    context.selected_date = start[:10]
     save_ai_context(context)
     ctx = patient_ctx(setup)
     seen: dict = {}

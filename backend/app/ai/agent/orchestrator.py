@@ -49,11 +49,33 @@ How you work:
 - If a tool reports a booking as "parked", tell the user warmly it is held and being confirmed, and offer to check back or connect them with someone.
 - If a tool reports "failed" or is unavailable, say so plainly and kindly, and offer to connect them with a human via transfer_to_human.
 - Location: when the patient profile below lists home or live coordinates and they ask for nearby care ("near me", "close by", "nearest"), pass latitude+longitude to search_hospitals/search_doctors so results come back nearest-first with distances. Prefer the live message location over the saved one when both are present. When only a city is known, pass city instead. Never ask the user to type coordinates.
+- TIMEZONE (critical): every timestamp tools return is a UTC ISO string, but the patient lives on IST (UTC+5:30) and the app shows IST. Slots and day windows carry ready-made start_ist/end_ist/day_ist strings — ALWAYS speak those ("9:00 AM", "Thu, Sep 24"). NEVER read a raw ISO aloud: "03:30+00:00" is 9:00 AM IST, not 3:30 AM. When the patient taps "9:00 AM", map it back to the matching slot's UTC start — never book 09:00 UTC for a 9:00 AM tap.
 
 Greetings and small talk (hi, hello, hey, thanks, bye, ok):
 - Reply with a brief warm greeting and nothing else — no tools, no doctor/hospital/slot mentions.
 - NEVER mention appointments, questionnaires, doctors, hospitals, or slots unless the patient asked about them AND a tool result returned them in THIS turn.
 - NEVER invent appointments, doctors, or questionnaires. The patient's own name is not a doctor's name. Only discuss bookings, doctors, or questionnaires that appear in a tool result from THIS turn — never from memory of earlier context alone.
+
+Stateful conversation (one message = one incremental update):
+- Each patient message updates ONLY what it provides: a doctor name sets
+  only the doctor, a day sets only the day, a type sets only the type, a
+  mode sets only the mode, a time sets only the start time. Never reset,
+  re-ask, or restate steps already answered — the context JSON carries
+  selected_doctor_id / selected_date / selected_appointment_type_id (and
+  visit_type_name) / selected_consultation_mode forward for you.
+- Every reply advances exactly ONE step: answer the current message, then
+  ask/show ONLY the next missing fact (doctor → day → type → mode →
+  time → confirm). The UI renders each step's widget itself at the right
+  moment — never paste the whole flow or restate the full summary
+  (doctor+day+type+mode+time) except inside the final confirm proposal.
+- A correction ("actually Wednesday", "Dr. Smith instead") replaces ONLY
+  that value; everything else stands. Availability shown for a previous
+  doctor no longer applies after a doctor change — re-check from the
+  date step.
+- A bare start time ("9 AM") computes end = start + the PICKED type's
+  duration (never ask for end time); verify against the fetched day
+  schedule and either propose it as available or name the clash plus the
+  nearest free starts. A new time replaces only the time.
 
 Multi-step booking (mandatory — never book in one shot):
 1. Find options first: search_doctors, list_appointment_types, check_availability.
@@ -72,19 +94,34 @@ Multi-step booking (mandatory — never book in one shot):
    and wait for yes. If the patient says no (or "cancel that", "never
    mind"), drop the proposal and offer alternatives instead.
 
+Booking completeness (deterministic — enforced in code, not just here):
+NO availability check or booking runs unless ALL six are patient-given:
+doctor, slot (start + end), visit day, visit type, consultation mode
+(video/phone/in-person). Time and date ride inside the slot; the day
+itself must additionally be on record (context selected_date). The picked
+mode is auto-filled into a booking that omits it — anything else missing
+or mismatched comes back as date_required / type_required /
+type_mismatch / mode_required / mode_mismatch: follow that instruction
+instead of retrying the call.
+
 Guided booking flow (follow this order every time):
-1. DOCTORS: call search_doctors with limit=5, offset=0. Present up to five
-   cards briefly ("Here are a few good options near you…") and add one
-   line: "Not quite right? Say 'show me more' and I'll keep looking."
+1. DOCTORS: on a FIRST booking request ("book a cardiologist", "need a
+   dermatologist"), ALWAYS call search_doctors first with limit=5,
+   offset=0 — never propose a doctor, date, or time in the same turn as
+   the request. Present up to five cards briefly ("Here are a few good
+   options near you…") and add one line: "Not quite right? Say 'show me
+   more' and I'll keep looking."
    If they ask to explore more ("more", "show more", "other doctors",
    "next"), repeat the SAME filters with offset raised by 5 — the context
    JSON carries last_search {filters, offset, total} so you never lose the
    thread. Only page while offset+shown < total; when nothing is left, say
    warmly that's everything and offer to change specialty, city, or day.
 2. DOCTOR: when they name one of the offered doctors ("Dr. Rao", "the
-   second one"), the choice is recorded automatically — acknowledge it
+   second one" — misspellings like "Badaru" for "Bandaru" are matched
+   automatically), the choice is recorded automatically — acknowledge it
    warmly ("Great choice — Dr. Rao at Riverside.") and ask which day suits
-   them. A day strip appears in the app for them to tap.
+   them. A day strip appears in the app for them to tap. A FRESH search
+   always resets the chosen doctor/type/mode (new choice, new flow).
 3. DATE: if the context already carries selected_date (the patient gave
    the day in their message — "tomorrow", "Monday", "Sep 21"), use it
    directly for get_day_schedule/check_availability and NEVER ask for the
@@ -95,27 +132,34 @@ Guided booking flow (follow this order every time):
    "tomorrow", "Oct 6" against today's date above; pass YYYY-MM-DD). The
    app shows the day's timeline with tappable start times. Ask: "What time
    suits you? Tap a time or just tell me."
-4. TYPE: every visit type has its own duration — never assume 30 minutes.
+4. TYPE + MODE: every visit type has its own duration — never assume 30 minutes.
    Call list_appointment_types with the chosen doctor's hospital_id (it is
    in the earlier search_doctors result on that doctor) and ask in plain
    words ("Is this a routine check-up or something specific?") — the app
-   shows every type with its minutes in a select bar. Match their words to
-   the closest type name yourself; never expose ids. A deterministic guard
-   refuses check_availability/create_appointment until this step is done —
-   if you see visit_type_required, follow it instead of retrying.
+   shows every type with its minutes in a select bar, plus how-to-meet
+   chips (video / phone call / in-person — only what the chosen doctor
+   offers). Ask both together: "...and would you like video, a phone call,
+   or an in-person visit?" Match their words to the closest type name
+   yourself; never expose ids. A deterministic guard refuses
+   check_availability/create_appointment until the type step is done — if
+   you see visit_type_required, follow it instead of retrying.
 5. TIME: once the patient has PICKED the type (context visit_type_name)
    plus doctor + day + start time, compute end = start + that type's
-   duration_minutes — never a guessed number. Sanity-check it against the
-   day schedule you already fetched (inside working hours? overlapping a
-   busy block?). Then PROPOSE exactly one option with the full range ("Dr.
-   Rao, Monday Oct 6, 9:30–10:00 AM — shall I book it? Reply yes to
-   confirm."). If the type is still unknown, go back to step 4 first —
+   duration_minutes — never a guessed number. The start the patient taps
+   is an IST label: book the slot whose start_ist matches it (its UTC
+   start), and propose using the IST labels ("Dr. Rao, Monday Oct 6,
+   9:30–10:00 AM over video — shall I book it? Reply yes to confirm.").
+   Name the mode in every proposal. Sanity-check it against the day
+   schedule you already fetched (inside working hours? overlapping a busy
+   block?). If the type is still unknown, go back to step 4 first —
    never propose a range.
-6. CONFIRM & BOOK: only after explicit yes, call create_appointment. If it
-   reports a conflict / taken slot, say so warmly ("Ah — that time was
-   just taken"), and immediately offer the nearest free starts from the
-   same day schedule, then propose one and wait for yes again. Never
-   report "confirmed" unless the tool outcome is confirmed.
+6. CONFIRM & BOOK: only after explicit yes, call create_appointment with
+   consultation_mode set to the picked mode (video/phone/in_person — omit
+   it only if they truly said "anything"). If it reports a conflict /
+   taken slot, say so warmly ("Ah — that time was just taken"), and
+   immediately offer the nearest free starts from the same day schedule,
+   then propose one and wait for yes again. Never report "confirmed"
+   unless the tool outcome is confirmed.
 
 How you present results (the chat UI renders cards itself):
 - When you recommend doctors, name up to five briefly with hospital + city
@@ -431,6 +475,10 @@ def _booking_confirmation_gate(context, user_text: str, name: str, args: dict) -
             "slot_start": str(args.get("slot_start", "")),
             "slot_end": str(args.get("slot_end", "")),
         }
+        if str(args.get("consultation_mode", "") or "").strip():
+            context.pending_booking["consultation_mode"] = str(
+                args.get("consultation_mode", "")
+            ).strip()
         context.awaiting_confirmation = True
         context.pending_clarification = "booking_confirmation"
         return {"ok": False, "error": CONFIRM_REQUIRED}
@@ -659,6 +707,14 @@ def _apply_result_to_context(context, name: str, args: dict, result: dict) -> No
                 )
                 seen.add(d["id"])
         context.offered_doctor_page = [d["id"] for d in page]
+        # A fresh search starts a fresh choice: drop the previously picked
+        # doctor so a stale selection cannot leak into the new flow's
+        # stage, cards, or availability. Type/mode/day records survive a
+        # search (same-turn checks need them) and are instead reset when a
+        # booking completes. Offers still accumulate for "that one"
+        # resolution.
+        context.selected_doctor_id = None
+        context.flow_open = True
         filters = {}
         if isinstance(args, dict):
             for key in (
@@ -690,11 +746,18 @@ def _apply_result_to_context(context, name: str, args: dict, result: dict) -> No
         context.last_appointment_id = payload["appointment_id"]
         context.offered_slots = []
         # Booking done: the proposal is fulfilled, not pending. A future
-        # booking is a new flow, so the visit type must be picked again.
+        # booking is a new flow, so everything it picked (type, mode, day)
+        # resets and must be picked again — never carried over silently.
+        # The flow itself closes: later unrelated questions render zero
+        # step widgets until a new flow opens.
         context.pending_booking = None
         context.awaiting_confirmation = False
+        context.flow_open = False
         context.visit_types_seen = False
         context.visit_type_name = None
+        context.selected_appointment_type_id = None
+        context.selected_consultation_mode = None
+        context.selected_date = None
         if context.pending_clarification == "booking_confirmation":
             context.pending_clarification = None
     elif name == "reschedule_appointment" and payload.get("appointment_id"):
@@ -744,11 +807,13 @@ def _norm_name(value: str) -> str:
 def detect_doctor_selection(context, text: str) -> str | None:
     """Deterministic doctor pick from a message naming an offered doctor.
 
-    Matches a full/partial offered name ("Dr. Rao" / "Rao") or an ordinal
-    ("first", "second one", "3rd") against the CURRENT page first, then
-    the accumulated offers. Returns the doctor id or None. The model still
-    confirms the choice out loud; this only records it so the UI can move
-    to the date step without another tool round-trip.
+    Matches a full/partial offered name ("Dr. Rao" / "Rao"), an ordinal
+    ("first", "second one", "3rd") against the CURRENT page, then fuzzy
+    fallbacks for misspellings ("Badaru Kiran" ~ "Bandaru Kiran"): a
+    distinctive token owned by exactly one offered doctor, else close
+    edit-distance. Returns the doctor id or None. The model still confirms
+    the choice out loud; this only records it so the UI can move to the
+    date step without another tool round-trip.
     """
     offered = [d for d in (context.offered_doctors or []) if isinstance(d, dict) and d.get("id")]
     if not offered:
@@ -774,6 +839,37 @@ def detect_doctor_selection(context, text: str) -> str | None:
         name = _norm_name(str(d.get("name", "")))
         if len(name) >= 3 and name in lowered:
             return str(d.get("id"))
+    # Fuzzy fallbacks for misspellings ("Badaru Kiran" ~ "Bandaru Kiran"):
+    # a distinctive token owned by exactly ONE offered doctor ("kiran"),
+    # else close edit-distance on the full name. Ambiguous -> None.
+    token_owners: dict[str, str] = {}
+    ambiguous: set[str] = set()
+    for d in offered:
+        for token in _norm_name(str(d.get("name", ""))).split():
+            if len(token) < 4:
+                continue
+            if token in token_owners:
+                ambiguous.add(token)
+            token_owners[token] = str(d.get("id"))
+    words = set(re.findall(r"[a-z]{4,}", lowered))
+    uniquely = {
+        token_owners[w] for w in words if w in token_owners and w not in ambiguous
+    }
+    if len(uniquely) == 1:
+        return next(iter(uniquely))
+    import difflib as _difflib
+
+    message_name = re.sub(r"[^a-z ]", "", lowered).strip()
+    best: tuple[float, str] | None = None
+    for d in offered:
+        name = _norm_name(str(d.get("name", "")))
+        if len(name) < 3:
+            continue
+        score = _difflib.SequenceMatcher(None, message_name, name).ratio()
+        if best is None or score > best[0]:
+            best = (score, str(d.get("id")))
+    if best is not None and best[0] >= 0.6:
+        return best[1]
     return None
 
 
@@ -832,6 +928,73 @@ def visit_type_gate(context, name: str) -> dict | None:
     if name == "check_availability":
         return {"ok": False, "error": VISIT_TYPE_REQUIRED_CHECK}
     return {"ok": False, "error": VISIT_TYPE_REQUIRED_BOOK}
+
+
+COMPLETENESS_DATE_REQUIRED = (
+    "date_required: no visit day is on record yet — availability and "
+    "booking both need a concrete day the PATIENT gave (tomorrow, Monday, "
+    "Sep 21…). Ask which day suits them (the day strip appears in the app "
+    "for them to tap) or use the day they already gave. Never invent one."
+)
+
+COMPLETENESS_TYPE_REQUIRED = (
+    "type_required: the patient has not picked a visit type yet in this "
+    "conversation, so the visit length is unknown. Present the types from "
+    "list_appointment_types in plain words and let them choose — never "
+    "book or check availability on a guessed type."
+)
+
+COMPLETENESS_TYPE_MISMATCH = (
+    "type_mismatch: the call uses a different visit type than the one the "
+    "patient picked (see context selected_appointment_type_id). Use the "
+    "picked type's id, or ask again if they want to change it."
+)
+
+COMPLETENESS_MODE_REQUIRED = (
+    "mode_required: the patient has not said how they want to meet yet "
+    "(video, phone call, or in-person). Ask — the mode chips appear in "
+    "the app — and only book after they pick. Never assume a mode."
+)
+
+COMPLETENESS_MODE_MISMATCH = (
+    "mode_mismatch: the call uses a different consultation mode than the "
+    "one the patient picked (see context selected_consultation_mode). "
+    "Use the picked mode, or ask again if they want to change it."
+)
+
+
+def booking_completeness(context, name: str, args: dict) -> dict | None:
+    """All six booking facts patient-given before anything runs.
+
+    doctor + slot(date/start/end) are proven by the confirm gate's
+    known-offer match; this gate proves the rest: a patient-given DAY on
+    record, the PICKED visit type (and the call using its id), and the
+    PICKED consultation mode (auto-filled into create when the call omits
+    it — faithful, never invented). Reschedule/cancel keep the original
+    booking's facts, so only fresh checks and bookings are gated.
+    """
+    if name not in ("check_availability", "create_appointment"):
+        return None
+    if not isinstance(args, dict):
+        args = {}
+    if not getattr(context, "selected_date", None):
+        return {"ok": False, "error": COMPLETENESS_DATE_REQUIRED}
+    picked_type = str(getattr(context, "selected_appointment_type_id", None) or "").strip()
+    if not picked_type:
+        return {"ok": False, "error": COMPLETENESS_TYPE_REQUIRED}
+    arg_type = str(args.get("appointment_type_id", "") or "").strip()
+    if not arg_type or arg_type != picked_type:
+        return {"ok": False, "error": COMPLETENESS_TYPE_MISMATCH if arg_type else COMPLETENESS_TYPE_REQUIRED}
+    if name == "create_appointment":
+        picked_mode = str(getattr(context, "selected_consultation_mode", None) or "").strip().lower()
+        if not picked_mode:
+            return {"ok": False, "error": COMPLETENESS_MODE_REQUIRED}
+        arg_mode = str(args.get("consultation_mode", "") or "").strip().lower()
+        if arg_mode and arg_mode != picked_mode:
+            return {"ok": False, "error": COMPLETENESS_MODE_MISMATCH}
+        if not arg_mode:
+            args["consultation_mode"] = picked_mode
+    return None
 
 
 _WEEKDAYS = {
@@ -923,13 +1086,39 @@ def detect_date_iso(text: str, today=None) -> str | None:
     return None
 
 
+_CONSULTATION_MODES = (
+    ("video", re.compile(r"\bvideo\b|\bvirtual\b|\bvideo\s?call\b")),
+    ("phone", re.compile(r"\bphone\b|\bcall\b|\btelephone\b|\bvoice\s?call\b")),
+    ("in_person", re.compile(r"\bin[\s-]?person\b|\bnormal\b|\bclinic\b|\bface\s?to\s?face\b|\bphysical\b")),
+)
+
+
+def detect_consultation_mode(text: str) -> str | None:
+    """Deterministic how-to-meet pick ("video", "a call", "normal/in-person").
+
+    Earliest mention wins ("video or phone" -> video). Returns
+    video | phone | in_person or None. Only records the pick; the model
+    still confirms out loud and passes consultation_mode on booking.
+    """
+    lowered = f" {(text or '').strip().lower()} "
+    first: tuple[int, str] | None = None
+    for mode, pattern in _CONSULTATION_MODES:
+        hit = pattern.search(lowered)
+        if hit and (first is None or hit.start() < first[0]):
+            first = (hit.start(), mode)
+    return first[1] if first else None
+
+
 def booking_stage(context, fresh_tools):
     """Where the patient is in the guided booking flow (drives chat UI).
 
-    confirm → an explicit yes/no panel is showing; pick_time → a day
-    schedule or slot list just arrived; pick_type → visit types just
-    arrived; pick_date → a doctor is chosen and the day strip shows;
-    browse → anything else.
+    Stateful and missing-aware: each turn reports the FIRST still-missing
+    fact (browse → pick_date → pick_type → pick_mode → pick_time), so the
+    UI shows ONLY the widget for the step that is actually required next —
+    never the whole flow again. Fresh tool results outrank memory: a just
+    fetched schedule/types panel is what the patient must react to now.
+    A closed flow (never opened, or booking completed) always reports
+    browse: unrelated later questions render zero step widgets.
     """
     if context.awaiting_confirmation:
         return "confirm"
@@ -937,9 +1126,19 @@ def booking_stage(context, fresh_tools):
         return "pick_time"
     if "list_appointment_types" in fresh_tools:
         return "pick_type"
-    if getattr(context, "selected_doctor_id", None):
+    if "search_doctors" in fresh_tools:
+        return "browse"
+    if not getattr(context, "flow_open", False):
+        return "browse"
+    if not getattr(context, "selected_doctor_id", None):
+        return "browse"
+    if not getattr(context, "selected_date", None):
         return "pick_date"
-    return "browse"
+    if not getattr(context, "selected_appointment_type_id", None):
+        return "pick_type"
+    if not getattr(context, "selected_consultation_mode", None):
+        return "pick_mode"
+    return "pick_time"
 
 
 def _remember_booking_selection(context, name: str, args: dict, outcome: dict) -> None:
@@ -951,6 +1150,9 @@ def _remember_booking_selection(context, name: str, args: dict, outcome: dict) -
         return
     if not isinstance(outcome, dict) or not outcome.get("ok"):
         return
+    if name in ("check_availability", "create_appointment", "get_day_schedule",
+                "list_appointment_types"):
+        context.flow_open = True
     if name in ("check_availability", "create_appointment"):
         doctor = str(args.get("doctor_id", "")).strip()
         if doctor:
@@ -981,6 +1183,10 @@ def _remember_booking_selection(context, name: str, args: dict, outcome: dict) -
         end = str(args.get("slot_end", "")).strip()
         if start or end:
             context.selected_slot = {"start": start, "end": end}
+    if name == "create_appointment":
+        mode = str(args.get("consultation_mode", "") or "").strip().lower()
+        if mode in ("video", "phone", "in_person"):
+            context.selected_consultation_mode = mode
 
 
 def _doctor_cards_by_ids(
@@ -1169,6 +1375,9 @@ def run_conversation(
     context = get_ai_context(cid)
     context.user_id = str(ctx.user_id)
     context.remember_turn("user", text)
+    # Snapshot for change detection: widgets must reflect what THIS turn
+    # did (picked/changed), never re-blast earlier turns' UI.
+    selected_doctor_before = str(getattr(context, "selected_doctor_id", None) or "")
     # A turn-opening decline ("no", "never mind", "cancel that") drops a
     # stale proposal so a later "yes" cannot accidentally confirm it.
     if (
@@ -1189,14 +1398,26 @@ def run_conversation(
     if not context.awaiting_confirmation:
         picked = detect_doctor_selection(context, text)
         if picked:
+            prev_selected = str(getattr(context, "selected_doctor_id", None) or "")
             context.selected_doctor_id = picked
+            context.flow_open = True
+            if prev_selected and prev_selected != str(picked):
+                # New doctor replaces the old choice: previously loaded
+                # availability no longer applies, so drop it. The model
+                # re-checks from the date step for the new doctor.
+                context.offered_slots = []
         picked_type = detect_type_selection(context, text)
         if picked_type:
             context.selected_appointment_type_id = picked_type
+            context.flow_open = True
             for t in context.visit_types or []:
                 if isinstance(t, dict) and str(t.get("id")) == picked_type:
                     context.visit_type_name = str(t.get("name", ""))
                     break
+        picked_mode = detect_consultation_mode(text)
+        if picked_mode:
+            context.selected_consultation_mode = picked_mode
+            context.flow_open = True
     day = detect_date_iso(text)
     if day:
         context.selected_date = day
@@ -1306,24 +1527,21 @@ def run_conversation(
                 outcome = gated
             else:
                 args = call.get("arguments") or {}
-                type_gate = visit_type_gate(context, call.get("name", ""))
-                if type_gate is not None:
-                    outcome = type_gate
-                    _apply_result_to_context(
-                        context, call.get("name", ""), args, outcome
+                outcome = visit_type_gate(context, call.get("name", ""))
+                if outcome is None:
+                    outcome = booking_completeness(
+                        context, call.get("name", ""), args
                     )
-                else:
-                    confirm_gate = _booking_confirmation_gate(
+                if outcome is None:
+                    outcome = _booking_confirmation_gate(
                         context, text, call.get("name", ""), args
                     )
-                    if confirm_gate is not None:
-                        outcome = confirm_gate
-                    else:
-                        outcome = client.call(call.get("name", ""), args)
-                        _remember_booking_selection(
-                            context, call.get("name", ""), args, outcome
-                        )
-                        _refresh_verification(context, call.get("name", ""), outcome)
+                if outcome is None:
+                    outcome = client.call(call.get("name", ""), args)
+                    _remember_booking_selection(
+                        context, call.get("name", ""), args, outcome
+                    )
+                    _refresh_verification(context, call.get("name", ""), outcome)
             if call.get("name") == "transfer_to_human" and outcome.get("ok"):
                 escalated = True
             if outcome.get("ok"):
@@ -1359,6 +1577,25 @@ def run_conversation(
     if reply is None:
         reply = STOPPED if stopped else LOOP_EXHAUSTED
         messages.append({"role": "assistant", "content": reply})
+    # How-to-meet options persist for later pick_mode turns (re-shown only
+    # then — never blasted every turn).
+    fresh_modes: list[str] = []
+    if "list_appointment_types" in fresh_tools:
+        chosen_doc = getattr(context, "selected_doctor_id", None)
+        if chosen_doc:
+            try:
+                doc_row = db.get(Doctor, uuid.UUID(str(chosen_doc)))
+            except (ValueError, AttributeError, TypeError):
+                doc_row = None
+            offered_modes = (
+                list(getattr(doc_row, "consultation_types", None) or [])
+                if doc_row is not None
+                else []
+            )
+            fresh_modes = [m for m in offered_modes if m in ("video", "phone", "in_person")]
+            if not fresh_modes:
+                fresh_modes = ["video", "phone", "in_person"]
+            context.consultation_modes = list(fresh_modes)
     context.remember_turn("assistant", reply)
     save_ai_context(context)
     pending = context.pending_booking if context.awaiting_confirmation else None
@@ -1379,14 +1616,15 @@ def run_conversation(
         else []
     )
     if not doctors_cards:
-        # No fresh search this turn but the booking flow has a chosen
-        # doctor: keep their profile card visible so the patient always
-        # sees WHO the date/time/type steps are about.
+        # No fresh search this turn: show the chosen doctor's card ONLY
+        # when this turn picked or changed them — never re-blast earlier
+        # turns' cards under unrelated replies.
         chosen = getattr(context, "selected_doctor_id", None)
-        if chosen:
+        chosen_now = str(chosen or "")
+        if chosen_now and chosen_now != selected_doctor_before:
             doctors_cards = _doctor_cards_by_ids(
                 db,
-                [str(chosen)],
+                [chosen_now],
                 patient_latitude=effective_lat,
                 patient_longitude=effective_lng,
             )
@@ -1395,6 +1633,33 @@ def run_conversation(
         and search_total > 0
         and search_offset + len(doctors_cards) < search_total
     )
+    # Fresh panels outrank memory; stored panels re-appear ONLY when
+    # their step is genuinely pending again (state-dependent UI, never
+    # re-blasted). Stored types/modes come from context.visit_types /
+    # context.consultation_modes recorded on their original turns.
+    stage = booking_stage(context, fresh_tools)
+    fresh_types = [
+        {
+            "id": str(t.get("id", "")),
+            "name": t.get("name", ""),
+            "duration_minutes": t.get("duration_minutes", 0),
+        }
+        for t in (turn_results.get("list_appointment_types", {}).get("appointment_types") or [])
+        if isinstance(t, dict) and t.get("id")
+    ]
+    stored_types = [
+        {
+            "id": str(t.get("id", "")),
+            "name": t.get("name", ""),
+            "duration_minutes": t.get("duration_minutes", 0),
+        }
+        for t in (getattr(context, "visit_types", None) or [])
+        if isinstance(t, dict) and t.get("id")
+    ]
+    stored_modes = [
+        m for m in (getattr(context, "consultation_modes", None) or [])
+        if m in ("video", "phone", "in_person")
+    ]
     return {
         "conversation_id": cid,
         "reply": reply,
@@ -1413,17 +1678,10 @@ def run_conversation(
             if "slots" in fresh_offers
             else []
         ),
-        "appointment_types": [
-            {
-                "id": str(t.get("id", "")),
-                "name": t.get("name", ""),
-                "duration_minutes": t.get("duration_minutes", 0),
-            }
-            for t in (turn_results.get("list_appointment_types", {}).get("appointment_types") or [])
-            if isinstance(t, dict) and t.get("id")
-        ],
+        "appointment_types": fresh_types or (stored_types if stage == "pick_type" else []),
         "day_schedule": turn_results.get("get_day_schedule"),
-        "booking_stage": booking_stage(context, fresh_tools),
+        "consultation_modes": fresh_modes or (stored_modes if stage == "pick_mode" else []),
+        "booking_stage": stage,
         "pending_booking": pending,
     }
 
@@ -1443,6 +1701,7 @@ __all__ = [
     "TELEPHONY_GUARD_PROMPT",
     "TELEPHONY_OPEN_TOOLS",
     "booking_stage",
+    "detect_consultation_mode",
     "detect_date_iso",
     "detect_doctor_selection",
     "greeting_kind",

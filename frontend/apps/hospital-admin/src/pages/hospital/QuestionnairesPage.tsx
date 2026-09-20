@@ -7,7 +7,7 @@ import type { Questionnaire } from "../../types";
 import type { QuestionnaireDetail } from "../../api";
 
 export default function QuestionnairesPage() {
-  const { questionnaires, duplicateQuestionnaire, toggleQuestionnaire, createQuestionnaire, fetchQuestionnaireDetail, addQuestionnaireQuestion, specialties, doctors, types, live, loading, backendError, refreshAll } = useAdmin();
+  const { questionnaires, duplicateQuestionnaire, toggleQuestionnaire, deleteQuestionnaire, updateQuestionnaireQuestion, deleteQuestionnaireQuestion, createQuestionnaire, fetchQuestionnaireDetail, addQuestionnaireQuestion, specialties, doctors, types, live, loading, backendError, refreshAll } = useAdmin();
   const [preview, setPreview] = useState<Questionnaire | null>(null);
   const [previewDetail, setPreviewDetail] = useState<QuestionnaireDetail | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -19,6 +19,8 @@ export default function QuestionnairesPage() {
   const [qPrompt, setQPrompt] = useState("");
   const [qOptions, setQOptions] = useState("");
   const [qRequired, setQRequired] = useState(true);
+  const [confirmDelete, setConfirmDelete] = useState<Questionnaire | null>(null);
+  const [editingQ, setEditingQ] = useState<{ id: string; prompt: string; required: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function run(fn: () => Promise<void>) {
@@ -86,6 +88,7 @@ export default function QuestionnairesPage() {
   const needsOptions = qType === "choice" || qType === "multi_choice";
 
   const previewFields = (previewDetail?.questions ?? []).map((f) => ({
+    id: f.id,
     question: f.prompt,
     type: f.type,
     required: f.required,
@@ -135,6 +138,7 @@ export default function QuestionnairesPage() {
                   <button onClick={() => void openPreview(q)} className="text-[0.78rem] font-bold text-healthcare hover:underline inline-flex items-center gap-1"><Eye size={12} /> Preview</button>
                   <button onClick={() => void run(() => duplicateQuestionnaire(q.id))} className="text-[0.78rem] font-bold text-ink-secondary hover:text-healthcare inline-flex items-center gap-1"><Copy size={12} /> Duplicate</button>
                   <button onClick={() => void run(() => toggleQuestionnaire(q.id))} className="text-[0.78rem] font-bold text-ink-secondary hover:text-danger">{q.status === "active" ? "Deactivate" : "Activate"}</button>
+                  <button onClick={() => setConfirmDelete(q)} className="text-[0.78rem] font-bold text-ink-secondary hover:text-danger">Delete</button>
                 </div>
               </td>
             </tr>
@@ -153,12 +157,16 @@ export default function QuestionnairesPage() {
             ) : (
               <div className="mt-2 space-y-3">
                 {previewFields.map((f, i) => (
-                  <div key={i} className="bg-white border border-border rounded-control p-3.5">
+                  <div key={f.id ?? i} className="bg-white border border-border rounded-control p-3.5">
                     <p className="font-bold text-[0.88rem]">{i + 1}. {f.question} {f.required && <span className="text-danger text-[0.72rem]">Required</span>}</p>
                     <p className="text-[0.75rem] text-ink-secondary mt-0.5">{f.type}</p>
                     {f.type === "Yes/No" && <div className="grid grid-cols-2 gap-1.5 mt-2">{["Yes", "No"].map((o) => <span key={o} className="border border-border rounded-lg py-2 text-center text-sm font-semibold">{o}</span>)}</div>}
                     {(f.type === "Single choice" || f.type === "Multiple choice") && <div className="space-y-1.5 mt-2">{(f.options ?? ["Option A", "Option B"]).map((o) => <span key={o} className="block border border-border rounded-lg px-3 py-2 text-sm">{o}</span>)}</div>}
                     {(f.type === "Short text" || f.type === "Long text" || f.type === "Numeric" || f.type === "Date") && <div className="border border-border rounded-lg px-3 py-2.5 text-sm text-ink-faint mt-2">Patient answer field</div>}
+                    <div className="flex gap-2 mt-2">
+                      <button onClick={() => f.id && setEditingQ({ id: f.id, prompt: f.question, required: f.required })} className="text-[0.75rem] font-bold text-healthcare hover:underline">Edit</button>
+                      <button onClick={() => preview && f.id && void run(async () => { await deleteQuestionnaireQuestion(preview.id, f.id); const detail = await fetchQuestionnaireDetail(preview.id); setPreviewDetail(detail); })} className="text-[0.75rem] font-bold text-ink-secondary hover:text-danger">Delete</button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -209,6 +217,20 @@ export default function QuestionnairesPage() {
           </label>
         )}
         <Button className="w-full mt-4" disabled={!newName.trim()} onClick={() => void create()}>Create form</Button>
+      </Modal>
+
+      <Modal open={!!confirmDelete} onClose={() => setConfirmDelete(null)} title="Delete questionnaire">
+        <p className="text-[0.85rem] text-ink-secondary">Delete “{confirmDelete?.name}” and all its questions? Past responses are kept.</p>
+        <Button variant="outline" className="w-full mt-4 !text-danger !border-danger/30" onClick={() => confirmDelete && void run(async () => { await deleteQuestionnaire(confirmDelete.id); setConfirmDelete(null); })}>Delete form</Button>
+      </Modal>
+
+      <Modal open={!!editingQ} onClose={() => setEditingQ(null)} title="Edit question">
+        <label className="block text-[0.83rem] font-bold">Question<input value={editingQ?.prompt ?? ""} onChange={(e) => setEditingQ((p) => (p ? { ...p, prompt: e.target.value } : p))} className="input-base mt-1" /></label>
+        <label className="flex items-center gap-2 text-[0.8rem] font-bold mt-3 cursor-pointer">
+          <input type="checkbox" checked={editingQ?.required ?? true} onChange={(e) => setEditingQ((p) => (p ? { ...p, required: e.target.checked } : p))} className="w-4 h-4 accent-[#1769AA]" />
+          Required
+        </label>
+        <Button className="w-full mt-4" onClick={() => preview && editingQ && void run(async () => { await updateQuestionnaireQuestion(preview.id, editingQ.id, { prompt: editingQ.prompt.trim(), required: editingQ.required }); setEditingQ(null); const detail = await fetchQuestionnaireDetail(preview.id); setPreviewDetail(detail); })}>Save</Button>
       </Modal>
     </div>
   );

@@ -4,8 +4,11 @@ import {
   createBlock as apiCreateBlock,
   createRule as apiCreateRule,
   deleteBlock as apiDeleteBlock,
+  deleteNotification as apiDeleteNotification,
   deleteRule as apiDeleteRule,
   fetchNotifications as apiNotifications,
+  markAllNotificationsRead as apiMarkAllRead,
+  markNotificationRead as apiMarkRead,
   myAppointments as apiMyAppointments,
   myCalendar as apiMyCalendar,
   questionnaireInbox as apiInbox,
@@ -20,7 +23,6 @@ import {
   mapNotification,
   mapQuestionnaireItem,
   mapRules,
-  persistRead,
 } from "../lib/backend";
 import { useAuth } from "./AuthContext";
 import type {
@@ -50,8 +52,9 @@ interface ScheduleState {
   updateRule: (id: string, patch: Partial<AvailabilityRule>) => Promise<void>;
   addLiveBlock: (date: string, start: string, end: string, reason: BlockedSlot["reason"]) => Promise<void>;
   deleteBlock: (id: string) => Promise<void>;
-  markRead: (id: string) => void;
-  markAllRead: () => void;
+  markRead: (id: string) => Promise<void>;
+  markAllRead: () => Promise<void>;
+  deleteNotification: (id: string) => Promise<void>;
 }
 
 const Ctx = createContext<ScheduleState | null>(null);
@@ -255,17 +258,48 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     [live, hospitalId, doctorId, refresh],
   );
 
-  const markRead = useCallback((id: string) => {
-    persistRead(id);
-    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, unread: false } : n)));
-  }, []);
+  const markRead = useCallback(
+    async (id: string) => {
+      // Optimistic flip, then confirm server-side.
+      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, unread: false } : n)));
+      if (!live) return;
+      try {
+        const updated = await apiMarkRead(id);
+        setNotifications((prev) =>
+          prev.map((n) => (n.id === id ? mapNotification(updated) : n)),
+        );
+      } catch {
+        await refresh();
+      }
+    },
+    [live, refresh],
+  );
 
-  const markAllRead = useCallback(() => {
-    setNotifications((prev) => {
-      prev.forEach((n) => persistRead(n.id));
-      return prev.map((n) => ({ ...n, unread: false }));
-    });
-  }, []);
+  const markAllRead = useCallback(async () => {
+    if (!live) {
+      setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })));
+      return;
+    }
+    try {
+      await apiMarkAllRead();
+    } catch {
+      // fall through to refresh
+    }
+    await refresh();
+  }, [live, refresh]);
+
+  const deleteNotification = useCallback(
+    async (id: string) => {
+      setNotifications((prev) => prev.filter((n) => n.id !== id));
+      if (!live) return;
+      try {
+        await apiDeleteNotification(id);
+      } catch {
+        await refresh();
+      }
+    },
+    [live, refresh],
+  );
 
   const unreadCount = useMemo(() => notifications.filter((n) => n.unread).length, [notifications]);
 
@@ -289,6 +323,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
       deleteBlock,
       markRead,
       markAllRead,
+      deleteNotification,
     }),
     [
       live,
@@ -309,6 +344,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
       deleteBlock,
       markRead,
       markAllRead,
+      deleteNotification,
     ],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -22,10 +22,15 @@ class RescheduleIn(BaseModel):
     slot_start: datetime
     slot_end: datetime
     reason: str | None = Field(default=None, max_length=500)
+    # R2: client-supplied idempotency key. Retried moves with the same key
+    # replay to the current booking instead of reserving a second new slot.
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class CancelIn(BaseModel):
     reason: str | None = Field(default=None, max_length=500)
+    # R2: same replay guarantee for cancellation retries.
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class AppointmentHistoryOut(BaseModel):

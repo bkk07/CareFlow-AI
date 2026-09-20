@@ -10,6 +10,7 @@ import {
   probeBackend,
   resolveEscalation as apiResolveEscalation,
   resolveReconciliation as apiResolveRecord,
+  retryReconciliation as apiRetryRecord,
   restoreAccessToken,
   retryOperation as apiRetryOperation,
   setAccessToken,
@@ -44,6 +45,7 @@ interface OpsStore {
   reconciliations: Reconciliation[];
   escalations: Escalation[];
   retryOperation: (id: string) => Promise<void>;
+  retryReconciliation: (id: string) => Promise<void>;
   verifyOperation: (id: string) => Promise<string>;
   resolveReconciliation: (id: string, finalState: string, note: string) => Promise<void>;
   assignEscalation: (id: string, who: string) => void;
@@ -187,6 +189,11 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     await refreshAll();
   }, [refreshAll, fail]);
 
+  const retryReconciliation = useCallback(async (id: string) => {
+    await apiRetryRecord(id).catch(() => { throw fail("Retry failed — case may be resolved or escalated."); });
+    await refreshAll();
+  }, [refreshAll, fail]);
+
   const verifyOperation = useCallback(async (id: string) => {
     const op = liveOperations.find((o) => o.id === id);
     if (!op) throw fail("Operation not found.");
@@ -242,6 +249,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       reconciliations,
       escalations,
       retryOperation,
+      retryReconciliation,
       verifyOperation,
       resolveReconciliation,
       assignEscalation,
@@ -253,7 +261,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     }),
     [authed, login, logout, mode, live, loading, backendError, user,
       metrics, refreshAll, operations, reconciliations, escalations,
-      retryOperation, verifyOperation, resolveReconciliation, assignEscalation, resolveEscalation,
+      retryOperation, retryReconciliation, verifyOperation, resolveReconciliation, assignEscalation, resolveEscalation,
       notifications, markAllRead, pushNotification],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -257,7 +257,7 @@ export function UnknownOutcomesPage() {
 }
 
 export function ReconciliationPage() {
-  const { reconciliations, resolveReconciliation, loading, backendError } = useAdmin();
+  const { reconciliations, resolveReconciliation, retryReconciliation, loading, backendError } = useAdmin();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [finalState, setFinalState] = useState("Confirmed");
@@ -288,7 +288,14 @@ export function ReconciliationPage() {
               <td className="td-cell">{r.externalStatus}</td>
               <td className="td-cell">{r.internalState}</td>
               <td className="td-cell"><StatusBadge status={r.resolution} /></td>
-              <td className="td-cell"><button onClick={() => { setSelectedId(r.id); setNote(""); }} className="text-[0.78rem] font-bold text-healthcare hover:underline">Resolve</button></td>
+              <td className="td-cell">
+                <div className="flex gap-2">
+                  {r.resolution !== "resolved" && r.resolution !== "escalated" && (
+                    <button onClick={() => void run(() => retryReconciliation(r.id))} className="text-[0.78rem] font-bold text-ink-secondary hover:text-healthcare">Retry</button>
+                  )}
+                  <button onClick={() => { setSelectedId(r.id); setNote(""); }} className="text-[0.78rem] font-bold text-healthcare hover:underline">Resolve</button>
+                </div>
+              </td>
             </tr>
           ))}
         </ResponsiveTable>

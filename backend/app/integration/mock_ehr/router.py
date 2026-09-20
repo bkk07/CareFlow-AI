@@ -82,7 +82,12 @@ def lookup_patient(body: PatientLookupIn, db: Session = Depends(get_db)):
             mrn=body.mrn, full_name=body.full_name, dob=body.dob, phone=body.phone
         )
         db.add(patient)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # R4: concurrent syncs race the same vendor record.
+            db.rollback()
+            return db.query(MockPatient).filter(MockPatient.mrn == body.mrn).one()
         db.refresh(patient)
     return patient
 
@@ -101,7 +106,16 @@ def lookup_provider(body: ProviderLookupIn, db: Session = Depends(get_db)):
             specialty=body.specialty,
         )
         db.add(provider)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # R4: concurrent syncs race the same vendor record.
+            db.rollback()
+            return (
+                db.query(MockProvider)
+                .filter(MockProvider.provider_code == body.provider_code)
+                .one()
+            )
         db.refresh(provider)
     return provider
 
@@ -114,7 +128,12 @@ def lookup_facility(body: FacilityLookupIn, db: Session = Depends(get_db)):
     if facility is None:
         facility = MockFacility(code=body.code, name=body.name)
         db.add(facility)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # R4: concurrent syncs race the same vendor record.
+            db.rollback()
+            return db.query(MockFacility).filter(MockFacility.code == body.code).one()
         db.refresh(facility)
     return facility
 

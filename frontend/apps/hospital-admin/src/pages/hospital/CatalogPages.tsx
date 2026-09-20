@@ -79,9 +79,10 @@ export function DepartmentsPage() {
 }
 
 export function SpecialtiesPage() {
-  const { specialties, addSpecialty, deleteSpecialty, live, loading, backendError, refreshAll } = useAdmin();
+  const { specialties, addSpecialty, renameSpecialty, deleteSpecialty, live, loading, backendError, refreshAll } = useAdmin();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
+  const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function run(fn: () => Promise<void> | void) {
@@ -125,7 +126,10 @@ export function SpecialtiesPage() {
               <td className="td-cell">{s.doctors}</td>
               <td className="td-cell"><StatusBadge status={s.status} /></td>
               <td className="td-cell">
-                <button onClick={() => void run(() => deleteSpecialty(s.id))} className="text-[0.78rem] font-bold text-ink-secondary hover:text-danger">Delete</button>
+                <div className="flex gap-1.5">
+                  <button onClick={() => setEditing({ id: s.id, name: s.name })} className="text-[0.78rem] font-bold text-healthcare hover:underline inline-flex items-center gap-1"><Pencil size={12} /> Rename</button>
+                  <button onClick={() => void run(() => deleteSpecialty(s.id))} className="text-[0.78rem] font-bold text-ink-secondary hover:text-danger">Delete</button>
+                </div>
               </td>
             </tr>
           ))}
@@ -137,15 +141,20 @@ export function SpecialtiesPage() {
           <Button className="w-full" disabled={!name.trim()} onClick={() => void run(async () => { await addSpecialty(name.trim()); setName(""); setOpen(false); })}>Add specialty</Button>
         </div>
       </Modal>
+      <Modal open={!!editing} onClose={() => setEditing(null)} title="Rename specialty">
+        <label className="block text-[0.83rem] font-bold">Name<input value={editing?.name ?? ""} onChange={(e) => setEditing((p) => (p ? { ...p, name: e.target.value } : p))} className="input-base mt-1" /></label>
+        <Button className="w-full mt-4" onClick={() => { if (editing) void run(async () => { await renameSpecialty(editing.id, editing.name); setEditing(null); }); }}>Save</Button>
+      </Modal>
     </div>
   );
 }
 
 export function AppointmentTypesPage() {
-  const { types, addType, deleteType, live, loading, backendError, refreshAll } = useAdmin();
+  const { types, addType, updateType, deleteType, live, loading, backendError, refreshAll } = useAdmin();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [duration, setDuration] = useState("30");
+  const [editing, setEditing] = useState<{ id: string; name: string; duration: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function run(fn: () => Promise<void> | void) {
@@ -190,7 +199,10 @@ export function AppointmentTypesPage() {
               <td className="td-cell">{t.mode}</td>
               <td className="td-cell"><StatusBadge status={t.status} /></td>
               <td className="td-cell">
-                <button onClick={() => void run(() => deleteType(t.id))} className="text-[0.78rem] font-bold text-ink-secondary hover:text-danger">Delete</button>
+                <div className="flex gap-1.5">
+                  <button onClick={() => setEditing({ id: t.id, name: t.name, duration: String(t.duration) })} className="text-[0.78rem] font-bold text-healthcare hover:underline inline-flex items-center gap-1"><Pencil size={12} /> Edit</button>
+                  <button onClick={() => void run(() => deleteType(t.id))} className="text-[0.78rem] font-bold text-ink-secondary hover:text-danger">Delete</button>
+                </div>
               </td>
             </tr>
           ))}
@@ -207,6 +219,17 @@ export function AppointmentTypesPage() {
             </label>
           </div>
           <Button className="w-full" disabled={!name.trim()} onClick={() => void run(async () => { await addType({ name: name.trim(), description: "Custom visit type", duration: parseInt(duration, 10), mode: "In person" }); setName(""); setOpen(false); })}>Add type</Button>
+        </div>
+      </Modal>
+      <Modal open={!!editing} onClose={() => setEditing(null)} title="Edit appointment type">
+        <div className="space-y-3">
+          <label className="block text-[0.83rem] font-bold">Name<input value={editing?.name ?? ""} onChange={(e) => setEditing((p) => (p ? { ...p, name: e.target.value } : p))} className="input-base mt-1" /></label>
+          <label className="block text-[0.83rem] font-bold">Duration (min)
+            <select value={editing?.duration ?? "30"} onChange={(e) => setEditing((p) => (p ? { ...p, duration: e.target.value } : p))} className="input-base mt-1">
+              {["15", "30", "45", "60"].map((d) => <option key={d}>{d}</option>)}
+            </select>
+          </label>
+          <Button className="w-full" onClick={() => { if (editing) void run(async () => { await updateType(editing.id, { name: editing.name.trim(), duration: parseInt(editing.duration, 10) }); setEditing(null); }); }}>Save</Button>
         </div>
       </Modal>
     </div>

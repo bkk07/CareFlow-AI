@@ -15,6 +15,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     String,
     UniqueConstraint,
     Uuid,
@@ -44,6 +45,12 @@ class Appointment(Base):
         # Idempotency backstop: two rows can never share a key, so a
         # retried create collapses to the existing appointment.
         UniqueConstraint("idempotency_key"),
+        # R1: fast per-doctor overlap scans used by the booking guard.
+        # Partial overlaps cannot be a UNIQUE (they are ranges, not discrete
+        # slots) — the check+insert atomicity in reserve_slot plus this
+        # index is the guard; PostgreSQL deployments can additionally add
+        # an EXCLUDE USING gist constraint out-of-band.
+        Index("ix_appointments_doctor_slot", "doctor_id", "slot_start", "slot_end"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
