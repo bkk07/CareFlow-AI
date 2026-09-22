@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import { AppStateProvider } from "./context/AppStateContext";
 import { PatientShell } from "./components/layout/PatientShell";
 import LoginPage from "./pages/LoginPage";
+import LandingPage from "./pages/LandingPage";
 import HomePage from "./pages/HomePage";
 import BookPage from "./pages/BookPage";
 import VisitsPage from "./pages/VisitsPage";
@@ -34,9 +35,10 @@ function ProtectedLayout() {
 function AppRoutes() {
   return (
     <Routes>
+      <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route element={<ProtectedLayout />}>
-        <Route path="/" element={<HomePage />} />
+        <Route path="/home" element={<HomePage />} />
         <Route path="/book" element={<BookPage />} />
         <Route path="/visits" element={<VisitsPage />} />
         <Route path="/inbox" element={<InboxPage />} />

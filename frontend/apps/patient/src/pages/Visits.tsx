@@ -200,7 +200,7 @@ export default function Visits() {
       <div className="card">
         <div className="section-head" style={{ marginTop: 0 }}>
           <h2>Upcoming visits ({loading ? "…" : upcoming.length})</h2>
-          <Link className="btn btn-sm btn-primary" to="/">
+          <Link className="btn btn-sm btn-primary" to="/book">
             + Book a visit
           </Link>
         </div>
@@ -228,7 +228,7 @@ export default function Visits() {
             </motion.div>
             <h3>Nothing scheduled</h3>
             <p>Book your next visit in under a minute.</p>
-            <Link className="btn btn-primary" to="/">
+            <Link className="btn btn-primary" to="/book">
               Find care
             </Link>
           </div>

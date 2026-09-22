@@ -732,7 +732,7 @@ export default function BookPage() {
       {step === "success" && (
         <div className="max-w-2xl mx-auto card-base p-6">
           <BookingSuccessPanel onDone={() => navigate("/visits")} />
-          <button onClick={() => navigate("/")} className="w-full text-center text-sm font-bold text-healthcare hover:underline mt-2">
+          <button onClick={() => navigate("/home")} className="w-full text-center text-sm font-bold text-healthcare hover:underline mt-2">
             Back to home
           </button>
         </div>

@@ -18,7 +18,7 @@ import { useAppState } from "../../context/AppStateContext";
 import { SafeImage } from "../common/ui";
 
 const NAV = [
-  { to: "/", label: "Home", icon: Home, end: true },
+  { to: "/home", label: "Home", icon: Home, end: true },
   { to: "/book", label: "Find Care", icon: Search, end: false },
   { to: "/visits", label: "Appointments", icon: CalendarDays, end: false },
   { to: "/inbox", label: "Inbox", icon: Inbox, end: false },
@@ -28,16 +28,16 @@ const NAV = [
 ];
 
 const MOBILE_NAV = [
-  { to: "/", label: "Home", icon: Home, end: true },
+  { to: "/home", label: "Home", icon: Home, end: true },
   { to: "/book", label: "Find Care", icon: Search, end: false },
   { to: "/visits", label: "Visits", icon: CalendarDays, end: false },
   { to: "/inbox", label: "Inbox", icon: Inbox, end: false },
   { to: "/chat", label: "Assistant", icon: Sparkles, end: false },
 ];
 
-export function Logo({ light }: { light?: boolean }) {
+export function Logo({ light, to = "/" }: { light?: boolean; to?: string }) {
   return (
-    <Link to="/" className="flex items-center gap-2.5 shrink-0" aria-label="CareFlow AI home">
+    <Link to={to} className="flex items-center gap-2.5 shrink-0" aria-label="CareFlow AI home">
       <span className="w-9 h-9 rounded-[10px] bg-gradient-to-br from-healthcare to-navy text-white flex items-center justify-center shadow-subtle">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <path d="M12 5v14M5 12h14" />
@@ -68,7 +68,7 @@ export function PatientShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-background">
       {/* Desktop sidebar */}
       <aside className="hidden md:flex fixed inset-y-0 left-0 w-[248px] flex-col bg-white border-r border-border px-4 py-5 z-30" aria-label="Primary">
-        <Logo />
+        <Logo to="/home" />
         <p className="text-[0.78rem] text-ink-secondary mt-1 px-1">Patient portal</p>
         <nav className="mt-5 space-y-1 flex-1">
           {NAV.map((n) => (
@@ -110,7 +110,7 @@ export function PatientShell({ children }: { children: React.ReactNode }) {
       <header className="md:pl-[248px] sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-border">
         <div className="max-w-shell mx-auto px-4 sm:px-6 h-[64px] flex items-center gap-3">
           <div className="md:hidden">
-            <Logo />
+            <Logo to="/home" />
           </div>
           <div className="hidden md:block min-w-0">
             <p className="text-[0.8rem] text-ink-secondary leading-none">Good day,</p>

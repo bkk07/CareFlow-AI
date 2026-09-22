@@ -107,7 +107,7 @@ export default function Book({ patientId }: { patientId: string }) {
             <p>Search live availability, then choose a time that suits you.</p>
             <motion.button
               className="btn btn-primary"
-              onClick={() => navigate("/")}
+              onClick={() => navigate("/home")}
               whileHover={{ scale: 1.04 }}
               whileTap={{ scale: 0.96 }}
             >

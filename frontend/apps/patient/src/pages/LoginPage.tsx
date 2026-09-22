@@ -30,7 +30,7 @@ export default function LoginPage() {
   const [savingProfile, setSavingProfile] = useState(false);
 
   useEffect(() => {
-    if (mode === "live" && isAuthenticated && !onboarding) navigate("/", { replace: true });
+    if (mode === "live" && isAuthenticated && !onboarding) navigate("/home", { replace: true });
   }, [mode, isAuthenticated, onboarding, navigate]);
 
   async function submit(e: React.FormEvent) {
@@ -48,7 +48,7 @@ export default function LoginPage() {
         if (remember === false) {
           /* session-only is not supported yet; token stays in localStorage */
         }
-        navigate("/");
+        navigate("/home");
       }
     } catch {
       setLocalError(authError ?? "Sign-in failed. Try again.");
@@ -83,10 +83,10 @@ export default function LoginPage() {
           longitude: coords?.longitude ?? null,
         });
       }
-      navigate("/");
+      navigate("/home");
     } catch {
       setLocalError("Could not save your profile. You can set it later from Profile.");
-      navigate("/");
+      navigate("/home");
     } finally {
       setSavingProfile(false);
     }
