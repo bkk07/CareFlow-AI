@@ -21,7 +21,7 @@ import { useAdmin } from "../../store/AdminStore";
 import { Avatar } from "../common/ui";
 
 const HOSPITAL_NAV = [
-  { to: "/", label: "Overview", icon: LayoutDashboard, end: true, group: "" },
+  { to: "/overview", label: "Overview", icon: LayoutDashboard, end: true, group: "" },
   { to: "/setup", label: "Hospital Setup", icon: Building2, end: false, group: "" },
   { to: "/catalog/departments", label: "Departments", icon: Globe, end: false, group: "Catalog" },
   { to: "/catalog/specialties", label: "Specialties", icon: HeartPulse, end: false, group: "Catalog" },
@@ -66,7 +66,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-background">
       <aside className="hidden md:flex fixed inset-y-0 left-0 w-[264px] flex-col bg-white border-r border-border px-3.5 py-4 z-30" aria-label="Primary">
-        <Link to="/" className="flex items-center gap-2.5 px-1.5 py-1 rounded-xl hover:bg-background transition" aria-label="CareFlow AI home">
+        <Link to="/overview" className="flex items-center gap-2.5 px-1.5 py-1 rounded-xl hover:bg-background transition" aria-label="CareFlow AI home">
           <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-healthcare to-navy text-white flex items-center justify-center font-extrabold shadow-subtle">+</span>
           <span className="leading-none">
             <span className="block font-extrabold text-navy tracking-tight">CareFlow <span className="text-healthcare">AI</span></span>

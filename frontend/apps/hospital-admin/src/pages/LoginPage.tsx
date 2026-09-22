@@ -10,7 +10,7 @@ export default function LoginPage() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (mode === "live" && authed) navigate("/", { replace: true });
+    if (mode === "live" && authed) navigate("/overview", { replace: true });
   }, [mode, authed, navigate]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -24,7 +24,7 @@ export default function LoginPage() {
     setError(null);
     try {
       await login(email, password);
-      navigate("/");
+      navigate("/overview");
     } catch (err) {
       setError(err instanceof Error ? err.message : (backendError ?? "Sign-in failed. Check your credentials."));
     } finally {
@@ -44,7 +44,8 @@ export default function LoginPage() {
           <p className="flex items-center gap-2 text-[0.8rem] text-white/80"><Building2 size={15} /> Trusted by hospital operations teams</p>
         </div>
         <div className="p-6 sm:p-8">
-          <h1 className="text-[1.45rem] font-extrabold text-navy">Hospital sign in</h1>
+          <Link to="/" className="text-[0.78rem] font-bold text-ink-secondary hover:text-healthcare">← Back to home</Link>
+          <h1 className="text-[1.45rem] font-extrabold text-navy mt-2">Hospital sign in</h1>
           <p className="text-sm text-ink-secondary mt-1">
             Sign in with your administrator account.
           </p>

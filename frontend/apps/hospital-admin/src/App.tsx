@@ -2,6 +2,7 @@ import { MotionConfig } from "framer-motion";
 import { Navigate, Outlet, Route, BrowserRouter as Router, Routes } from "react-router-dom";
 import { AdminProvider, useAdmin } from "./store/AdminStore";
 import { AdminShell } from "./components/layout/AdminShell";
+import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import HospitalOverviewPage from "./pages/hospital/OverviewPage";
@@ -40,13 +41,28 @@ function ProtectedLayout() {
   );
 }
 
+function LandingRoute() {
+  const { authed, mode } = useAdmin();
+  if (mode === "checking") {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-ink-secondary text-sm">
+        Restoring your session…
+      </div>
+    );
+  }
+  if (authed) return <Navigate to="/overview" replace />;
+  return <LandingPage />;
+}
+
 function AppRoutes() {
   return (
     <Routes>
+      <Route path="/" element={<LandingRoute />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route element={<ProtectedLayout />}>
-        <Route path="/" element={<HospitalOverviewPage />} />
+        <Route path="/overview" element={<HospitalOverviewPage />} />
+        <Route path="/dashboard" element={<Navigate to="/overview" replace />} />
         <Route path="/setup" element={<HospitalSetupPage />} />
         <Route path="/catalog/departments" element={<DepartmentsPage />} />
         <Route path="/catalog/specialties" element={<SpecialtiesPage />} />

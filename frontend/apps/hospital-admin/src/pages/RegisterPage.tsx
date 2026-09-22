@@ -96,6 +96,7 @@ export default function RegisterPage() {
           <p className="text-white/85 text-sm mt-1">Submit for platform review. Once approved, your hospital goes live for patient bookings.</p>
         </div>
         <form onSubmit={(e) => void submit(e)} className="p-6 sm:p-8 space-y-5">
+          <p><Link to="/" className="text-[0.78rem] font-bold text-ink-secondary hover:text-healthcare">← Back to home</Link></p>
           <section>
             <h2 className="section-title">Hospital details</h2>
             <div className="grid sm:grid-cols-2 gap-3 mt-3">
