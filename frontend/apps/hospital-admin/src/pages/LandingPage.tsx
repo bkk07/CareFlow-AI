@@ -1,569 +1,910 @@
-import { useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
+import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
   Activity,
-  AlertTriangle,
   ArrowRight,
+  BarChart3,
   Bell,
-  Bot,
   Building2,
   CalendarDays,
   CheckCircle2,
   ClipboardList,
+  FileText,
   HeartPulse,
+  LayoutDashboard,
   LifeBuoy,
   Lock,
-  Mic,
-  Phone,
-  Play,
-  RotateCcw,
+  Menu,
+  Search,
   Settings,
   ShieldCheck,
   Stethoscope,
   Users,
   Workflow,
+  X,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { CareFlowLogo } from "../components/brand/CareFlowLogo";
 
 /* ------------------------------------------------------------------ */
-/* Grounded data — mirrors README / PRD / Architecture, no invented APIs */
+/* Subtle reveal only (150–250ms fade). No parallax, no floating.      */
 /* ------------------------------------------------------------------ */
 
-const CHAIN = [
-  {
-    title: "Patient request",
-    detail: "“I need to see a doctor for my shoulder pain sometime this week.” — voice, telephone, or chat. No department codes needed.",
-    tag: "web_voice · telephone · text",
-  },
-  {
-    title: "AI understanding + context",
-    detail: "Orchestrator detects admin intent, resolves AIContext (Redis, TTL 2h): intent, hospital, doctor, slot, appointment. Clarifies instead of guessing.",
-    tag: "POST /chat",
-  },
-  {
-    title: "Hospital / doctor discovery",
-    detail: "Grounded candidates via search_hospitals + search_doctors — specialty, mode (in-person/video/phone), geo distance.",
-    tag: "2 MCP tools",
-  },
-  {
-    title: "Real availability",
-    detail: "check_availability + GET …/slots. Calendar + weekly rules − blocked slots − bookings. 62-day window. Never invented.",
-    tag: "Scheduling Engine",
-  },
-  {
-    title: "Authorized action",
-    detail: "Explicit “yes” confirmation gate, then POST /appointments with idempotency_key. FOR UPDATE lock + unique backstop → 409 on race.",
-    tag: "no double-book",
-  },
-  {
-    title: "EHR integration",
-    detail: "IntegrationService → EHRConnector → Mock EHR (swappable). Mappings: patient ↔ external, doctor ↔ provider, appointment ↔ external.",
-    tag: "connector protocol",
-  },
-  {
-    title: "External verification",
-    detail: "Every vendor “success” is re-read before it counts. verify_external_appointment gates the Confirmed state.",
-    tag: "trust-but-verify",
-  },
-  {
-    title: "State synchronization",
-    detail: "synchronize_state moves pending / sync_pending → confirmed. Full appointment_history with correlation_id + actor.",
-    tag: "10-state machine",
-  },
-  {
-    title: "Workflow + questionnaire",
-    detail: "Celery on_appointment_booked → EHR verify + reminders + pre-visit questionnaire. AI collects answers, never diagnoses.",
-    tag: "event bus",
-  },
-  {
-    title: "Doctor + admin visibility",
-    detail: "Doctor agenda + hospital Ops/Analytics see the same correlation_id trace: capability, latency, verification, notification.",
-    tag: "observable",
-  },
-] as const;
-
-const RECOVERY_TABS = [
-  {
-    id: "retry",
-    label: "Option A · EHR failure → recover",
-    steps: ["Booking", "EHR timeout", "Failure classification", "Bounded retry", "External verification", "Synchronize", "Confirm"],
-    body: "Timeouts and 5xx are retried with bounds; 4xx validation fails fast. Confirm to patient only after verified match — never optimistically.",
-  },
-  {
-    id: "unknown",
-    label: "Option B · Unknown outcome → no duplicate",
-    steps: ["Booking sent", "Network timeout", "Unknown result", "Query EHR by idempotency_key", "Appointment found", "Synchronize", "Do NOT duplicate"],
-    body: "The highest-value demo: query first, then sync. If the external record exists we confirm without creating a second appointment.",
-  },
-  {
-    id: "escalate",
-    label: "Option C · Unrecoverable → human",
-    steps: ["EHR failure", "Retries exhausted", "External state check", "Reconciliation record", "Human escalation", "Ops dashboard resolve"],
-    body: "Still unknown after bounded retries → reconciliation_required + operator Retry / Resolve / Escalate in /ops with full audit trail.",
-  },
-] as const;
-
-const CAPABILITIES = [
-  {
-    icon: CalendarDays,
-    title: "Real-availability scheduling",
-    body: "Doctor active · calendar active · working hours · blocked slots · leave · existing bookings · type compatibility. Revalidated before booking.",
-    meta: "MAX_RANGE_DAYS 62 · HTTP 409",
-  },
-  {
-    icon: Bot,
-    title: "AI agent, capability-bound",
-    body: "20 audited MCP tools only — never direct DB/EHR. Deterministic guards: clinical decline, greeting-only, completeness + confirmation gates.",
-    meta: "MAX_ITERATIONS 8 · not RAG",
-  },
-  {
-    icon: Settings,
-    title: "EHR connector + verification",
-    body: "IntegrationService hides vendor details. Patient/provider/facility mapping, create/update/cancel/reschedule/retrieve/verify behind one interface.",
-    meta: "Mock EHR swappable",
-  },
-  {
-    icon: LifeBuoy,
-    title: "Failure recovery queues",
-    body: "Failed ops, unknown outcomes, reconciliation, escalations, retry queue, recovery history — all in /ops with correlation traces.",
-    meta: "trust-but-verify",
-  },
-  {
-    icon: Workflow,
-    title: "Event workflows + reminders",
-    body: "Celery worker + beat. Booking, cancellation, questionnaire, verification, escalation events trigger notifications, retries, analytics.",
-    meta: "publish_event → Celery",
-  },
-  {
-    icon: ClipboardList,
-    title: "Safe pre-visit questionnaires",
-    body: "Hospital/specialty/doctor/type-scoped forms. AI collects structured answers; concern-flag escalation, zero diagnostic interpretation.",
-    meta: "7 question types",
-  },
-];
-
-const LIFECYCLE = ["draft", "submitted", "under_review", "approved"] as const;
-
-function TopNav() {
+function Reveal({ children, className = "" }: { children: ReactNode; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisible(true);
+          io.disconnect();
+        }
+      },
+      { threshold: 0.08 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
   return (
-    <header className="sticky top-0 z-40 bg-white/92 backdrop-blur border-b border-border">
-      <div className="max-w-shell mx-auto px-4 sm:px-6 h-[64px] flex items-center gap-3">
-        <Link to="/" className="flex items-center gap-2.5" aria-label="CareFlow AI home">
-          <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-healthcare to-navy text-white flex items-center justify-center font-extrabold shadow-subtle">+</span>
-          <span className="leading-none">
-            <span className="block font-extrabold text-navy tracking-tight">CareFlow <span className="text-healthcare">AI</span></span>
-            <span className="block text-[0.62rem] font-bold uppercase tracking-widest text-ink-faint mt-0.5">Hospital Console</span>
-          </span>
-        </Link>
-        <nav className="hidden lg:flex items-center gap-1 ml-6 text-[0.83rem] font-semibold text-ink-secondary" aria-label="Landing sections">
-          {[
-            ["Live chain", "#chain"],
-            ["Capabilities", "#capabilities"],
-            ["Recovery", "#recovery"],
-            ["Onboarding", "#onboarding"],
-            ["Security", "#security"],
-          ].map(([label, href]) => (
-            <a key={href} href={href} className="px-3 py-2 rounded-lg hover:text-healthcare hover:bg-healthcare-soft transition">{label}</a>
-          ))}
-        </nav>
-        <div className="flex-1" />
-        <span className="hidden md:inline-flex items-center gap-1.5 text-[0.72rem] font-bold text-success bg-success-soft border border-success/25 rounded-full px-2.5 py-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-success" aria-hidden /> API live
-        </span>
-        <Link to="/login" className="text-[0.84rem] font-bold text-ink-secondary hover:text-healthcare px-3 py-2">Sign in</Link>
-        <Link to="/register" className="inline-flex items-center gap-1.5 bg-healthcare text-white hover:bg-healthcare-dark border border-healthcare-dark shadow-subtle rounded-control px-4 py-2 text-[0.85rem] font-bold transition">
-          Register hospital <ArrowRight size={15} />
-        </Link>
-      </div>
-    </header>
-  );
-}
-
-function HeroConsole() {
-  return (
-    <div className="relative" aria-label="Console preview">
-      <motion.div
-        initial={{ opacity: 0, y: 22 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="bg-white border border-border rounded-card shadow-card overflow-hidden"
-      >
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-background/60">
-          <span className="w-2.5 h-2.5 rounded-full bg-danger/70" aria-hidden />
-          <span className="w-2.5 h-2.5 rounded-full bg-warning/80" aria-hidden />
-          <span className="w-2.5 h-2.5 rounded-full bg-success/80" aria-hidden />
-          <p className="ml-2 text-[0.76rem] font-bold text-ink-secondary">Hospital Overview · St. Mary&apos;s General</p>
-          <span className="ml-auto inline-flex items-center gap-1.5 text-[0.68rem] font-bold text-success bg-success-soft rounded-full px-2 py-0.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-success" aria-hidden /> Live
-          </span>
-        </div>
-        <div className="grid grid-cols-4 gap-2 p-4">
-          {[
-            ["24 / 31", "doctors active"],
-            ["18", "today"],
-            ["132", "upcoming"],
-            ["2 open", "reconciliations"],
-          ].map(([v, l]) => (
-            <div key={l} className="bg-background border border-border/70 rounded-xl px-3 py-2.5">
-              <p className="font-extrabold text-navy tabular-nums leading-none">{v}</p>
-              <p className="text-[0.66rem] font-semibold text-ink-faint mt-1">{l}</p>
-            </div>
-          ))}
-        </div>
-        <ul className="px-4 pb-2 divide-y divide-border/70 text-left">
-          {[
-            ["09:30 · A. Sharma", "Dr. Rao · Cardiology", "confirmed"],
-            ["10:15 · J. D’Souza", "Dr. Iyer · Ortho · pre-visit ✓", "pending"],
-            ["11:00 · R. Khan", "Dr. Rao · Follow-up", "sync_pending"],
-          ].map(([a, b, s]) => (
-            <li key={a} className="py-2 flex items-center justify-between gap-2 text-[0.78rem]">
-              <span><span className="font-bold block">{a}</span><span className="text-ink-secondary">{b}</span></span>
-              <span className={`font-bold px-2 py-0.5 rounded-full ${s === "confirmed" ? "bg-success-soft text-success" : "bg-warning-soft text-warning"}`}>{s.replace("_", " ")}</span>
-            </li>
-          ))}
-        </ul>
-        <div className="m-4 mt-2 bg-navy text-white rounded-xl p-3.5 font-mono text-[0.68rem] leading-relaxed">
-          <p className="text-white/60">correlation 8f3a…c1 · capability trace</p>
-          <p><span className="text-teal-soft">create_appointment</span> → <span className="text-teal-soft">verify_external</span> → <span className="text-teal-soft">synchronize_state</span></p>
-          <p className="text-success-soft">✓ verified · 212 ms · no duplicate</p>
-        </div>
-      </motion.div>
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.25, duration: 0.4 }}
-        className="absolute -left-3 sm:-left-6 top-16 bg-white border border-border rounded-xl shadow-card px-3 py-2 flex items-center gap-2 text-[0.74rem] font-bold"
-      >
-        <CheckCircle2 size={15} className="text-success" /> EHR verified before confirm
-      </motion.div>
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.4, duration: 0.4 }}
-        className="absolute -right-3 sm:-right-5 bottom-20 bg-white border border-border rounded-xl shadow-card px-3 py-2 flex items-center gap-2 text-[0.74rem] font-bold"
-      >
-        <ShieldCheck size={15} className="text-healthcare" /> 409 race-safe · no double-book
-      </motion.div>
+    <div
+      ref={ref}
+      className={`${className} transition-opacity duration-200 ${visible ? "opacity-100" : "opacity-0"}`}
+    >
+      {children}
     </div>
   );
 }
 
-export default function LandingPage() {
-  const [active, setActive] = useState(0);
-  const [playing, setPlaying] = useState(true);
-  const [recovery, setRecovery] = useState<(typeof RECOVERY_TABS)[number]["id"]>("unknown");
-
-  useEffect(() => {
-    if (!playing) return;
-    const t = window.setInterval(() => setActive((a) => (a + 1) % CHAIN.length), 2400);
-    return () => window.clearInterval(t);
-  }, [playing]);
-
-  const recoveryTab = useMemo(() => RECOVERY_TABS.find((t) => t.id === recovery)!, [recovery]);
-  const step = CHAIN[active];
-
+function SectionHead({
+  eyebrow,
+  title,
+  sub,
+}: {
+  eyebrow?: string;
+  title: string;
+  sub?: string;
+}) {
   return (
-    <div className="min-h-screen bg-background text-ink font-sans antialiased">
-      <TopNav />
+    <div className="max-w-[68ch]">
+      {eyebrow && (
+        <p className="text-[0.7rem] font-bold uppercase tracking-[0.12em] text-teal-dark">{eyebrow}</p>
+      )}
+      <h2 className="text-[1.45rem] sm:text-[1.9rem] font-bold text-navy tracking-tight leading-tight mt-2">
+        {title}
+      </h2>
+      {sub && <p className="text-ink-secondary text-[1rem] leading-relaxed mt-3">{sub}</p>}
+    </div>
+  );
+}
 
-      {/* ---------------- HERO ---------------- */}
-      <section className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-navy via-healthcare-dark to-healthcare" aria-hidden />
-        <div className="absolute inset-0 opacity-[0.14]" aria-hidden
-          style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "26px 26px" }} />
-        <div className="relative max-w-shell mx-auto px-4 sm:px-6 pt-12 pb-16 lg:pt-16 lg:pb-20 grid lg:grid-cols-[1.05fr_0.95fr] gap-10 items-center">
-          <div>
-            <motion.p initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="inline-flex items-center gap-2 text-[0.72rem] font-bold uppercase tracking-widest text-white bg-white/15 border border-white/25 rounded-full px-3 py-1.5">
-              <Building2 size={13} /> Multi-tenant · AI-native · Trust-but-verify
-            </motion.p>
-            <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}
-              className="text-white font-extrabold tracking-tight leading-[1.05] text-[2.1rem] sm:text-[2.9rem] mt-4">
-              Run your hospital&apos;s scheduling truth — not just another dashboard.
-            </motion.h1>
-            <motion.p initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.16 }}
-              className="text-white/85 text-[1rem] sm:text-[1.08rem] leading-relaxed mt-4 max-w-[56ch]">
-              CareFlow AI gives hospital admins one console for catalog, doctors, real availability,
-              AI oversight, EHR verification, workflows, analytics, and recovery — so a patient saying
-              “shoulder pain this week” becomes a <strong className="text-white">verified booking</strong>, not a phone queue.
-            </motion.p>
-            <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.24 }} className="flex flex-wrap gap-2.5 mt-6">
-              <Link to="/register" className="inline-flex items-center gap-2 bg-white text-navy font-extrabold rounded-control px-5 py-3 text-[0.92rem] hover:bg-healthcare-soft transition shadow-card">
-                Register hospital <ArrowRight size={16} />
-              </Link>
-              <Link to="/login" className="inline-flex items-center gap-2 text-white font-bold rounded-control px-5 py-3 text-[0.92rem] border border-white/40 hover:bg-white/10 transition">
-                Sign in to console
-              </Link>
-              <a href="#chain" className="inline-flex items-center gap-2 text-white/85 font-semibold rounded-control px-4 py-3 text-[0.88rem] hover:text-white transition">
-                <Play size={15} /> Watch the live chain
-              </a>
-            </motion.div>
-            <dl className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-8">
-              {[
-                ["62-day", "real-availability window"],
-                ["10-state", "appointment lifecycle"],
-                ["20", "audited AI tools"],
-                ["409", "race-safe, no double-book"],
-              ].map(([v, l]) => (
-                <div key={l} className="bg-white/10 border border-white/20 rounded-xl px-3.5 py-3">
-                  <dt className="text-white font-extrabold text-[1.25rem] leading-none tabular-nums">{v}</dt>
-                  <dd className="text-white/70 text-[0.72rem] font-semibold mt-1">{l}</dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-          <HeroConsole />
-        </div>
-        <div className="relative max-w-shell mx-auto px-4 sm:px-6 pb-8">
-          <div className="bg-white/10 border border-white/20 rounded-2xl px-4 py-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-white/80 text-[0.78rem] font-semibold">
-            <span className="flex items-center gap-1.5"><Mic size={14} /> Web voice</span>
-            <span className="flex items-center gap-1.5"><Phone size={14} /> Twilio telephone</span>
-            <span className="flex items-center gap-1.5"><Bot size={14} /> Text chat + widgets</span>
-            <span className="flex items-center gap-1.5"><Lock size={14} /> JWT · Argon2 · RBAC</span>
-            <span className="flex items-center gap-1.5"><Activity size={14} /> correlation_id everywhere</span>
-          </div>
-        </div>
-      </section>
+function StatusDot({ tone, label }: { tone: "green" | "amber" | "blue" | "gray" | "red"; label: string }) {
+  const tones: Record<string, string> = {
+    green: "bg-success-soft text-success",
+    amber: "bg-warning-soft text-warning",
+    blue: "bg-healthcare-soft text-healthcare",
+    gray: "bg-slate-100 text-ink-secondary",
+    red: "bg-danger-soft text-danger",
+  };
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-[0.72rem] font-semibold px-2.5 py-1 rounded-full whitespace-nowrap ${tones[tone]}`}>
+      <span className="w-1.5 h-1.5 rounded-full bg-current" aria-hidden />
+      {label}
+    </span>
+  );
+}
 
-      {/* ---------------- PLATFORM STRIP ---------------- */}
-      <section className="border-b border-border bg-white" aria-label="Platform">
-        <div className="max-w-shell mx-auto px-4 sm:px-6 py-5 flex flex-wrap items-center gap-2.5 text-[0.78rem] font-bold">
-          <span className="text-ink-faint uppercase tracking-widest text-[0.66rem] mr-1">One backend · five role apps</span>
-          {["Patient :5173", "Doctor :5177", "Hospital :5174", "Ops :5176", "Platform :5178"].map((s) => (
-            <span key={s} className="bg-background border border-border rounded-full px-3 py-1.5 text-ink-secondary">{s}</span>
+/* ------------------------------- NAVBAR ------------------------------- */
+
+const NAV_LINKS = [
+  ["Platform", "#platform"],
+  ["Solutions", "#showcase"],
+  ["Features", "#features"],
+  ["Security", "#security"],
+  ["Resources", "#onboarding"],
+];
+
+function Navbar() {
+  const [open, setOpen] = useState(false);
+  return (
+    <header className="sticky top-0 z-40 bg-white border-b border-border">
+      <div className="max-w-shell mx-auto px-4 sm:px-6 h-16 md:h-[68px] flex items-center gap-4">
+        <Link to="/" aria-label="CareFlow AI home">
+          <CareFlowLogo />
+        </Link>
+        <nav className="hidden lg:flex items-center gap-1 ml-8" aria-label="Primary">
+          {NAV_LINKS.map(([label, href]) => (
+            <a
+              key={href}
+              href={href}
+              className="px-3 py-2 rounded-lg text-[0.875rem] font-medium text-ink-secondary hover:text-navy hover:bg-background transition-colors duration-200"
+            >
+              {label}
+            </a>
           ))}
-          <span className="bg-navy text-white rounded-full px-3 py-1.5">FastAPI · Postgres 16 · Redis · Celery</span>
+        </nav>
+        <div className="flex-1" />
+        <Link
+          to="/login"
+          className="hidden sm:inline-block text-[0.875rem] font-semibold text-ink-secondary hover:text-navy px-3 py-2 transition-colors duration-200"
+        >
+          Sign In
+        </Link>
+        <Link
+          to="/register"
+          className="hidden sm:inline-flex items-center gap-1.5 bg-healthcare hover:bg-healthcare-dark text-white text-[0.875rem] font-semibold rounded-control px-4 py-2.5 transition-colors duration-200"
+        >
+          Get Started
+        </Link>
+        <button
+          className="lg:hidden w-10 h-10 inline-flex items-center justify-center rounded-lg border border-border text-ink"
+          onClick={() => setOpen((v) => !v)}
+          aria-label={open ? "Close menu" : "Open menu"}
+          aria-expanded={open}
+        >
+          {open ? <X size={19} /> : <Menu size={19} />}
+        </button>
+      </div>
+      {open && (
+        <nav className="lg:hidden border-t border-border bg-white px-4 py-3 space-y-1" aria-label="Mobile">
+          {NAV_LINKS.map(([label, href]) => (
+            <a
+              key={href}
+              href={href}
+              onClick={() => setOpen(false)}
+              className="block px-3 py-2.5 rounded-lg text-[0.95rem] font-medium text-ink hover:bg-background"
+            >
+              {label}
+            </a>
+          ))}
+          <div className="flex gap-2 pt-2">
+            <Link to="/login" className="flex-1 text-center border border-border rounded-control py-2.5 font-semibold text-[0.9rem]">
+              Sign In
+            </Link>
+            <Link to="/register" className="flex-1 text-center bg-healthcare text-white rounded-control py-2.5 font-semibold text-[0.9rem]">
+              Get Started
+            </Link>
+          </div>
+        </nav>
+      )}
+    </header>
+  );
+}
+
+/* --------------------------- HERO DASHBOARD --------------------------- */
+
+function HeroDashboard() {
+  return (
+    <div className="bg-white border border-border rounded-2xl shadow-card overflow-hidden" aria-label="Hospital admin dashboard preview">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
+        <span className="w-2.5 h-2.5 rounded-full bg-border" aria-hidden />
+        <span className="w-2.5 h-2.5 rounded-full bg-border" aria-hidden />
+        <span className="w-2.5 h-2.5 rounded-full bg-border" aria-hidden />
+        <p className="ml-2 text-[0.75rem] font-semibold text-ink-secondary">Sample hospital overview</p>
+      </div>
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-2.5 p-4">
+        {[
+          ["Today's Appointments", "18", "6 confirmed · 4 pending"],
+          ["Active Doctors", "24", "across 6 departments"],
+          ["Upcoming", "132", "next 7 days"],
+          ["Operational Alerts", "2", "needs review"],
+        ].map(([label, value, sub]) => (
+          <div key={label} className="border border-border rounded-xl px-3.5 py-3">
+            <p className="text-[0.68rem] font-semibold uppercase tracking-wide text-ink-faint">{label}</p>
+            <p className="text-[1.4rem] font-bold text-navy tabular-nums leading-tight mt-0.5">{value}</p>
+            <p className="text-[0.72rem] text-ink-secondary mt-0.5">{sub}</p>
+          </div>
+        ))}
+      </div>
+      <div className="grid md:grid-cols-[1.5fr_1fr] gap-2.5 px-4 pb-4">
+        <div className="border border-border rounded-xl p-3.5">
+          <p className="text-[0.8rem] font-bold text-navy">Today&apos;s appointment activity</p>
+          <ul className="mt-2.5 divide-y divide-border/70">
+            {[
+              ["09:30 · Cardiology", "Confirmed", "green"],
+              ["10:15 · Orthopedics", "Pending", "amber"],
+              ["11:00 · Follow-up", "Completed", "blue"],
+              ["11:45 · General", "Cancelled", "gray"],
+            ].map(([row, s, tone]) => (
+              <li key={row} className="py-2 flex items-center justify-between gap-2 text-[0.8rem]">
+                <span className="font-medium text-ink">{row}</span>
+                <StatusDot tone={tone as "green" | "amber" | "blue" | "gray"} label={s} />
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="border border-border rounded-xl p-3.5 bg-background/50">
+          <p className="text-[0.8rem] font-bold text-navy">Operational activity</p>
+          <ul className="mt-2.5 space-y-2 text-[0.78rem]">
+            {[
+              ["Doctor added", "Cardiology"],
+              ["Appointment confirmed", "09:30 slot"],
+              ["Questionnaire submitted", "Pre-visit form"],
+              ["AI scheduling activity", "Availability checked"],
+              ["Integration status", "Connected"],
+            ].map(([t, d]) => (
+              <li key={t} className="flex gap-2">
+                <CheckCircle2 size={14} className="text-teal-dark shrink-0 mt-0.5" />
+                <span><span className="font-semibold text-ink">{t}</span><span className="block text-ink-secondary text-[0.72rem]">{d}</span></span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* --------------------------------- PAGE --------------------------------- */
+
+export default function LandingPage() {
+  return (
+    <div className="min-h-screen bg-white text-ink font-sans antialiased">
+      <Navbar />
+
+      {/* ------------------------------- HERO ------------------------------- */}
+      <section className="bg-background border-b border-border">
+        <div className="max-w-shell mx-auto px-4 sm:px-6 py-12 lg:py-20 grid lg:grid-cols-2 gap-10 items-center">
+          <div>
+            <p className="text-[0.72rem] font-bold uppercase tracking-[0.14em] text-teal-dark">
+              Healthcare Operations Platform
+            </p>
+            <h1 className="text-[2rem] sm:text-[2.75rem] font-bold text-navy tracking-tight leading-[1.1] mt-4">
+              Run your hospital operations with clarity.
+            </h1>
+            <p className="text-[1.05rem] font-medium text-ink mt-4 leading-relaxed">
+              Connect appointments, doctors, workflows, AI-assisted scheduling, and operational
+              visibility in one healthcare platform.
+            </p>
+            <p className="text-ink-secondary text-[1rem] leading-relaxed mt-3 max-w-[54ch]">
+              CareFlow AI gives hospital teams a centralized way to configure services, manage
+              doctors and appointments, monitor AI-assisted workflows, and maintain operational
+              visibility across the hospital.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2.5 mt-7">
+              <Link
+                to="/register"
+                className="inline-flex items-center justify-center gap-2 bg-healthcare hover:bg-healthcare-dark text-white font-semibold rounded-control px-6 py-3 text-[0.95rem] transition-colors duration-200"
+              >
+                Get Started <ArrowRight size={16} />
+              </Link>
+              <a
+                href="#platform"
+                className="inline-flex items-center justify-center gap-2 bg-white border border-border hover:border-healthcare hover:text-healthcare font-semibold rounded-control px-6 py-3 text-[0.95rem] transition-colors duration-200"
+              >
+                Explore Platform
+              </a>
+            </div>
+            <p className="flex flex-wrap gap-x-4 gap-y-1.5 mt-6 text-[0.8rem] font-medium text-ink-secondary">
+              {["Appointments", "Doctors", "Workflows", "Analytics", "AI Assistance"].map((t) => (
+                <span key={t} className="inline-flex items-center gap-1.5">
+                  <span className="w-1 h-1 rounded-full bg-teal" aria-hidden /> {t}
+                </span>
+              ))}
+            </p>
+          </div>
+          <Reveal>
+            <HeroDashboard />
+          </Reveal>
         </div>
       </section>
 
-      {/* ---------------- LIVE CHAIN ---------------- */}
-      <section id="chain" className="max-w-shell mx-auto px-4 sm:px-6 py-12 sm:py-16 scroll-mt-20">
-        <p className="text-[0.7rem] font-bold uppercase tracking-widest text-healthcare">Product goal · the chain that matters</p>
-        <div className="flex items-start justify-between gap-4 flex-wrap mt-2">
-          <div className="max-w-[62ch]">
-            <h2 className="page-title">One patient sentence, ten coordinated steps.</h2>
-            <p className="page-sub mt-2">The AI coordinates — it never diagnoses. Press play and watch a request flow from voice to verified booking to doctor review. This is the PRD §2 chain, live.</p>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => setPlaying((v) => !v)} className="inline-flex items-center gap-1.5 bg-white border border-border rounded-control px-4 py-2 text-[0.84rem] font-bold hover:border-healthcare hover:text-healthcare transition" aria-pressed={playing}>
-              {playing ? "Pause" : <><Play size={14} /> Play chain</>}
-            </button>
-            <button onClick={() => setActive(0)} className="inline-flex items-center gap-1.5 bg-white border border-border rounded-control px-4 py-2 text-[0.84rem] font-bold hover:border-healthcare hover:text-healthcare transition">
-              <RotateCcw size={14} /> Restart
-            </button>
+      {/* ---------------------------- TRUST STRIP ---------------------------- */}
+      <section className="border-b border-border">
+        <div className="max-w-shell mx-auto px-4 sm:px-6 py-8 grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {[
+            [Building2, "Centralized Operations", "Manage core hospital workflows from one platform."],
+            [CalendarDays, "Real-Time Availability", "Work with doctor calendars and appointment availability."],
+            [HeartPulse, "AI-Assisted Scheduling", "Help patients discover care and schedule appointments."],
+            [Activity, "Operational Visibility", "Monitor workflows, integrations, AI activity, and recovery operations."],
+          ].map(([Icon, title, body]) => {
+            const I = Icon as typeof Building2;
+            return (
+              <div key={title as string} className="flex gap-3">
+                <span className="w-10 h-10 rounded-xl bg-healthcare-soft text-healthcare flex items-center justify-center shrink-0">
+                  <I size={19} />
+                </span>
+                <div>
+                  <p className="font-bold text-navy text-[0.95rem]">{title as string}</p>
+                  <p className="text-ink-secondary text-[0.875rem] mt-1 leading-relaxed">{body as string}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* -------------------------- PLATFORM OVERVIEW -------------------------- */}
+      <section id="platform" className="scroll-mt-20">
+        <div className="max-w-shell mx-auto px-4 sm:px-6 py-14 lg:py-20">
+          <Reveal>
+            <SectionHead
+              eyebrow="Platform"
+              title="Everything your hospital needs to coordinate care."
+              sub="CareFlow AI brings hospital configuration, scheduling, appointments, doctors, AI assistance, integrations, and operational workflows into one platform."
+            />
+          </Reveal>
+          <div id="features" className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-9 scroll-mt-20">
+            {[
+              [Building2, "Hospital Setup", "Configure your hospital, departments, specialties, and appointment types."],
+              [Stethoscope, "Doctor Management", "Invite, activate, manage, and organize doctors across your hospital."],
+              [CalendarDays, "Appointment Management", "Monitor and manage appointment lifecycles from booking to completion."],
+              [HeartPulse, "AI Activity", "Review AI-assisted scheduling activity and escalations."],
+              [Settings, "Integrations", "Connect hospital workflows with external healthcare systems."],
+              [BarChart3, "Analytics & Operations", "Monitor workflows, operational activity, recovery queues, and performance."],
+            ].map(([Icon, title, body]) => {
+              const I = Icon as typeof Building2;
+              return (
+                <Reveal key={title as string}>
+                  <article className="h-full bg-white border border-border rounded-2xl p-6 hover:border-healthcare/50 hover:shadow-subtle transition-all duration-200">
+                    <span className="w-11 h-11 rounded-xl bg-healthcare-soft text-healthcare flex items-center justify-center">
+                      <I size={20} />
+                    </span>
+                    <h3 className="font-bold text-navy text-[1.02rem] mt-4">{title as string}</h3>
+                    <p className="text-ink-secondary text-[0.925rem] leading-relaxed mt-1.5">{body as string}</p>
+                  </article>
+                </Reveal>
+              );
+            })}
           </div>
         </div>
+      </section>
 
-        <div className="grid lg:grid-cols-[1.1fr_0.9fr] gap-4 mt-6">
-          <ol className="card-base p-3 sm:p-4" aria-label="Booking chain steps">
-            {CHAIN.map((s, i) => {
-              const done = i < active;
-              const current = i === active;
+      {/* ------------------------ OPERATIONS SHOWCASE ------------------------ */}
+      <section id="showcase" className="bg-background border-y border-border scroll-mt-20">
+        <div className="max-w-shell mx-auto px-4 sm:px-6 py-14 lg:py-20">
+          <Reveal>
+            <SectionHead
+              eyebrow="Workspace"
+              title="One workspace for your hospital team."
+              sub="The same navigation and structure your administrators use every day — overview to operations in one console."
+            />
+          </Reveal>
+          <Reveal className="mt-9">
+            <div className="bg-white border border-border rounded-2xl shadow-card overflow-hidden">
+              <div className="grid md:grid-cols-[230px_1fr]">
+                <aside className="hidden md:block border-r border-border p-3 bg-white" aria-label="Application sidebar preview">
+                  <div className="px-2 py-2"><CareFlowLogo size={30} /></div>
+                  <ul className="mt-2 space-y-0.5 text-[0.82rem] font-medium">
+                    {[
+                      [LayoutDashboard, "Overview", true],
+                      [Building2, "Setup", false],
+                      [ClipboardList, "Catalog", false],
+                      [Stethoscope, "Doctors", false],
+                      [CalendarDays, "Appointments", false],
+                      [FileText, "Questionnaires", false],
+                      [Activity, "AI Activity", false],
+                      [Settings, "Integration", false],
+                      [Workflow, "Workflows", false],
+                      [BarChart3, "Analytics", false],
+                      [Users, "Staff", false],
+                      [LifeBuoy, "Operations", false],
+                    ].map(([Icon, label, active]) => {
+                      const I = Icon as typeof Building2;
+                      return (
+                        <li
+                          key={label as string}
+                          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg ${active ? "bg-healthcare-soft text-healthcare font-semibold" : "text-ink-secondary"}`}
+                        >
+                          <I size={16} /> {label as string}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </aside>
+                <div className="p-4 sm:p-6 overflow-x-auto">
+                  <div className="min-w-[560px]">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div>
+                        <h3 className="font-bold text-navy text-[1.1rem]">Hospital overview</h3>
+                        <p className="text-ink-secondary text-[0.82rem]">Sample view of daily operations</p>
+                      </div>
+                      <StatusDot tone="green" label="Systems normal" />
+                    </div>
+                    <div className="grid grid-cols-3 gap-2.5 mt-4">
+                      {[
+                        ["Appointment volume", "High mid-morning", "blue"],
+                        ["Doctor availability", "22 of 26 available", "green"],
+                        ["Workflow status", "3 running", "amber"],
+                      ].map(([t, d, tone]) => (
+                        <div key={t as string} className="border border-border rounded-xl p-3">
+                          <p className="text-[0.7rem] font-semibold uppercase tracking-wide text-ink-faint">{t as string}</p>
+                          <p className="text-[0.85rem] font-bold text-navy mt-1">{d as string}</p>
+                          <span className={`inline-block mt-2 w-16 h-1.5 rounded-full ${tone === "green" ? "bg-success" : tone === "amber" ? "bg-warning" : "bg-healthcare"}`} aria-hidden />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2.5 mt-2.5">
+                      <div className="border border-border rounded-xl p-3">
+                        <p className="text-[0.78rem] font-bold text-navy">Appointment status</p>
+                        {[
+                          ["Confirmed", "68%", "bg-success"],
+                          ["Pending", "18%", "bg-warning"],
+                          ["Completed", "11%", "bg-healthcare"],
+                          ["Cancelled", "3%", "bg-border"],
+                        ].map(([s, w, c]) => (
+                          <div key={s as string} className="flex items-center gap-2 mt-2 text-[0.75rem]">
+                            <span className="w-20 text-ink-secondary font-medium">{s as string}</span>
+                            <span className="flex-1 h-1.5 bg-background rounded-full overflow-hidden">
+                              <span className={`block h-full rounded-full ${c as string}`} style={{ width: w as string }} />
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="border border-border rounded-xl p-3">
+                        <p className="text-[0.78rem] font-bold text-navy">Integration health</p>
+                        <ul className="mt-2 space-y-1.5 text-[0.78rem]">
+                          {[
+                            ["Scheduling sync", "Connected", "green"],
+                            ["Records verification", "Verifying", "amber"],
+                            ["Notifications", "Connected", "green"],
+                          ].map(([t, s, tone]) => (
+                            <li key={t as string} className="flex items-center justify-between gap-2">
+                              <span className="text-ink-secondary">{t as string}</span>
+                              <StatusDot tone={tone as "green" | "amber"} label={s as string} />
+                            </li>
+                          ))}
+                        </ul>
+                        <p className="text-[0.78rem] font-bold text-navy mt-3">Recent activity</p>
+                        <p className="text-[0.75rem] text-ink-secondary mt-1">Morning clinic confirmed · 2 questionnaires submitted · 1 escalation resolved</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="md:hidden border-t border-border px-4 py-2.5 overflow-x-auto no-scrollbar">
+                <div className="flex gap-1.5 min-w-max text-[0.72rem] font-semibold text-ink-secondary">
+                  {["Overview", "Setup", "Catalog", "Doctors", "Appointments", "AI Activity", "Integration", "Workflows", "Analytics", "Staff", "Operations"].map((s) => (
+                    <span key={s} className={`px-2.5 py-1.5 rounded-lg border border-border ${s === "Overview" ? "bg-healthcare-soft text-healthcare" : "bg-white"}`}>{s}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* --------------------------- DOCTOR MANAGEMENT --------------------------- */}
+      <section id="solutions" className="scroll-mt-20">
+        <div className="max-w-shell mx-auto px-4 sm:px-6 py-14 lg:py-20">
+          <Reveal>
+            <SectionHead
+              eyebrow="Care team"
+              title="Keep your care team organized."
+              sub="Search, filter, and manage doctors by department, specialty, and lifecycle status — from invitation to active practice."
+            />
+          </Reveal>
+          <Reveal className="mt-9">
+            <div className="bg-white border border-border rounded-2xl shadow-subtle overflow-hidden">
+              <div className="flex flex-col sm:flex-row gap-2.5 p-4 border-b border-border">
+                <label className="flex items-center gap-2 flex-1 border border-border rounded-control px-3 py-2 text-[0.875rem] text-ink-faint">
+                  <Search size={15} /> Search doctors
+                </label>
+                {["Department", "Specialty", "Status"].map((f) => (
+                  <span key={f} className="border border-border rounded-control px-3 py-2 text-[0.875rem] text-ink-secondary font-medium">
+                    {f} · All
+                  </span>
+                ))}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[760px] text-left">
+                  <thead>
+                    <tr className="border-b border-border">
+                      {["Doctor", "Specialty", "Department", "Status", "Availability", "Upcoming", "Actions"].map((h) => (
+                        <th key={h} className="th-cell">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/70">
+                    {[
+                      ["Dr. A. Rao", "Cardiology", "Medicine", "Active", "green", "Mon–Fri · 9–5", "12 visits", "Manage"],
+                      ["Dr. S. Iyer", "Orthopedics", "Surgery", "Active", "green", "Tue–Sat · 10–6", "9 visits", "Manage"],
+                      ["Dr. M. Khan", "Pediatrics", "Medicine", "Invited", "blue", "Pending setup", "—", "Resend"],
+                      ["Dr. L. D'Souza", "Dermatology", "Outpatient", "Inactive", "gray", "Paused", "—", "Activate"],
+                      ["Dr. R. Nair", "Neurology", "Medicine", "Suspended", "red", "Blocked", "—", "Review"],
+                    ].map(([doc, spec, dept, status, tone, avail, up, act]) => (
+                      <tr key={doc as string} className="hover:bg-background/60 transition-colors duration-200">
+                        <td className="td-cell font-semibold text-navy">{doc as string}</td>
+                        <td className="td-cell text-ink-secondary">{spec as string}</td>
+                        <td className="td-cell text-ink-secondary">{dept as string}</td>
+                        <td className="td-cell"><StatusDot tone={tone as "green" | "blue" | "gray" | "red"} label={status as string} /></td>
+                        <td className="td-cell text-ink-secondary">{avail as string}</td>
+                        <td className="td-cell tabular-nums text-ink-secondary">{up as string}</td>
+                        <td className="td-cell"><span className="font-semibold text-healthcare">{act as string}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* -------------------------- APPOINTMENT OPS -------------------------- */}
+      <section className="bg-background border-y border-border">
+        <div className="max-w-shell mx-auto px-4 sm:px-6 py-14 lg:py-20">
+          <Reveal>
+            <SectionHead
+              eyebrow="Appointments"
+              title="Stay ahead of every appointment."
+              sub="Each appointment moves through a defined lifecycle with full history — booking, confirmation, completion, and recovery are tracked as operational workflow."
+            />
+          </Reveal>
+          <Reveal className="mt-9">
+            <div className="bg-white border border-border rounded-2xl shadow-subtle overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[880px] text-left">
+                  <thead>
+                    <tr className="border-b border-border">
+                      {["Appointment ID", "Patient", "Doctor", "Specialty", "Date", "Time", "Mode", "Status"].map((h) => (
+                        <th key={h} className="th-cell">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/70">
+                    {[
+                      ["APT-1042", "A. Sharma", "Dr. Rao", "Cardiology", "Mon", "09:30", "In person", "Confirmed", "green"],
+                      ["APT-1043", "J. D'Souza", "Dr. Iyer", "Orthopedics", "Mon", "10:15", "In person", "Pending", "amber"],
+                      ["APT-1044", "R. Khan", "Dr. Rao", "Cardiology", "Mon", "11:00", "Video", "Completed", "blue"],
+                      ["APT-1045", "P. Menon", "Dr. Nair", "Neurology", "Tue", "09:00", "Phone", "Sync Pending", "amber"],
+                      ["APT-1046", "S. Verma", "Dr. Khan", "Pediatrics", "Tue", "10:30", "In person", "Cancelled", "gray"],
+                    ].map((r) => (
+                      <tr key={r[0] as string} className="hover:bg-background/60 transition-colors duration-200">
+                        <td className="td-cell font-mono text-[0.78rem] font-semibold">{r[0] as string}</td>
+                        <td className="td-cell font-medium">{r[1] as string}</td>
+                        <td className="td-cell text-ink-secondary">{r[2] as string}</td>
+                        <td className="td-cell text-ink-secondary">{r[3] as string}</td>
+                        <td className="td-cell text-ink-secondary">{r[4] as string}</td>
+                        <td className="td-cell tabular-nums">{r[5] as string}</td>
+                        <td className="td-cell text-ink-secondary">{r[6] as string}</td>
+                        <td className="td-cell"><StatusDot tone={r[8] as "green" | "amber" | "blue" | "gray"} label={r[7] as string} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* ------------------------------ AI SECTION ------------------------------ */}
+      <section className="scroll-mt-20">
+        <div className="max-w-shell mx-auto px-4 sm:px-6 py-14 lg:py-20">
+          <Reveal>
+            <SectionHead
+              eyebrow="AI assistance"
+              title="AI that assists your scheduling workflows."
+              sub="CareFlow AI helps patients discover doctors, check availability, and complete scheduling through a controlled scheduling assistant."
+            />
+          </Reveal>
+          <div className="grid md:grid-cols-2 gap-4 mt-9">
+            <Reveal>
+              <div className="h-full bg-white border border-border rounded-2xl p-6">
+                <p className="text-[0.7rem] font-bold uppercase tracking-[0.12em] text-ink-faint">Patient conversation</p>
+                <div className="mt-4 space-y-3">
+                  <p className="max-w-[85%] bg-background border border-border rounded-2xl rounded-bl-md px-4 py-3 text-[0.925rem]">
+                    I need a cardiologist this week.
+                  </p>
+                  <p className="max-w-[90%] ml-auto bg-navy text-white rounded-2xl rounded-br-md px-4 py-3 text-[0.925rem]">
+                    I found 2 cardiologists with availability on Thursday and Friday. Which day works for you?
+                  </p>
+                  <p className="max-w-[70%] bg-background border border-border rounded-2xl rounded-bl-md px-4 py-3 text-[0.925rem]">
+                    Friday morning, please.
+                  </p>
+                </div>
+              </div>
+            </Reveal>
+            <Reveal>
+              <div className="h-full bg-navy text-white rounded-2xl p-6">
+                <p className="text-[0.7rem] font-bold uppercase tracking-[0.12em] text-white/60">Hospital-side activity · AI Scheduling</p>
+                <ul className="mt-4 space-y-2.5">
+                  {[
+                    ["Doctor search", "2 cardiologists found", true],
+                    ["Availability checked", "Real calendar slots", true],
+                    ["Appointment type selected", "Follow-up · 20 min", true],
+                    ["Booking confirmation requested", "Awaiting patient", false],
+                  ].map(([t, d, done]) => (
+                    <li key={t as string} className="flex gap-3 bg-white/[0.07] border border-white/10 rounded-xl px-4 py-3">
+                      <CheckCircle2 size={17} className={done ? "text-teal-soft shrink-0 mt-0.5" : "text-white/40 shrink-0 mt-0.5"} />
+                      <span>
+                        <span className="block font-semibold text-[0.9rem]">{t as string}</span>
+                        <span className="block text-white/65 text-[0.8rem]">{d as string}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="inline-block mt-4 text-[0.72rem] font-semibold bg-white/10 border border-white/15 rounded-full px-3 py-1.5">
+                  Human-controlled healthcare workflows
+                </p>
+              </div>
+            </Reveal>
+          </div>
+        </div>
+      </section>
+
+      {/* --------------------------- INTEGRATION --------------------------- */}
+      <section className="bg-background border-y border-border">
+        <div className="max-w-shell mx-auto px-4 sm:px-6 py-14 lg:py-20">
+          <Reveal>
+            <SectionHead
+              eyebrow="Reliability"
+              title="Built for reliable healthcare workflows."
+              sub="CareFlow AI verifies external appointment outcomes and provides operational recovery workflows when an integration encounters an unexpected state."
+            />
+          </Reveal>
+          <Reveal className="mt-9">
+            <ol className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {[
+                ["01 · Appointment", "Booking is created in the hospital schedule with full history."],
+                ["02 · Integration", "The appointment is sent to the connected healthcare system."],
+                ["03 · Verification", "The external result is re-checked before it counts."],
+                ["04 · Confirmed / Recovery", "Verified bookings confirm; uncertain cases go to the recovery queue."],
+              ].map(([t, d]) => (
+                <li key={t as string} className="bg-white border border-border rounded-2xl p-6">
+                  <p className="font-bold text-healthcare text-[0.95rem]">{t as string}</p>
+                  <p className="text-ink-secondary text-[0.9rem] leading-relaxed mt-2">{d as string}</p>
+                </li>
+              ))}
+            </ol>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* ----------------------------- ANALYTICS ----------------------------- */}
+      <section className="scroll-mt-20">
+        <div className="max-w-shell mx-auto px-4 sm:px-6 py-14 lg:py-20">
+          <Reveal>
+            <SectionHead
+              eyebrow="Analytics"
+              title="See what's happening across your hospital."
+              sub="Sample views of the trends, statuses, and alerts your team reviews each day."
+            />
+          </Reveal>
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 mt-9">
+            <Reveal>
+              <div className="bg-white border border-border rounded-2xl p-5">
+                <p className="font-bold text-navy text-[0.92rem]">Appointment trends</p>
+                <p className="text-[0.75rem] text-ink-secondary">Sample view · last 7 days</p>
+                <svg viewBox="0 0 260 90" className="w-full h-28 mt-3" role="img" aria-label="Sample appointment trend line">
+                  <polyline points="5,70 45,62 85,64 125,48 165,52 205,34 255,38" fill="none" stroke="#1769AA" strokeWidth="2.5" strokeLinecap="round" />
+                  <circle cx="205" cy="34" r="4" fill="#1769AA" />
+                </svg>
+              </div>
+            </Reveal>
+            <Reveal>
+              <div className="bg-white border border-border rounded-2xl p-5">
+                <p className="font-bold text-navy text-[0.92rem]">Appointment status</p>
+                <p className="text-[0.75rem] text-ink-secondary">Sample distribution</p>
+                <div className="flex items-center gap-4 mt-3">
+                  <svg viewBox="0 0 80 80" className="w-24 h-24" role="img" aria-label="Sample status donut">
+                    <circle cx="40" cy="40" r="30" fill="none" stroke="#E4EDF4" strokeWidth="12" />
+                    <circle cx="40" cy="40" r="30" fill="none" stroke="#2E8B68" strokeWidth="12" strokeDasharray="120 188" strokeLinecap="round" transform="rotate(-90 40 40)" />
+                    <circle cx="40" cy="40" r="30" fill="none" stroke="#C58A22" strokeWidth="12" strokeDasharray="34 188" strokeLinecap="round" transform="rotate(140 40 40)" />
+                  </svg>
+                  <ul className="text-[0.78rem] space-y-1.5">
+                    <li className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-sm bg-success" /> Confirmed</li>
+                    <li className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-sm bg-warning" /> Pending</li>
+                    <li className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-sm bg-border" /> Other</li>
+                  </ul>
+                </div>
+              </div>
+            </Reveal>
+            <Reveal>
+              <div className="bg-white border border-border rounded-2xl p-5">
+                <p className="font-bold text-navy text-[0.92rem]">Doctor utilization</p>
+                <p className="text-[0.75rem] text-ink-secondary">Sample week</p>
+                <div className="mt-3 space-y-2.5">
+                  {[["Cardiology", "72%"], ["Orthopedics", "58%"], ["Pediatrics", "44%"]].map(([d, w]) => (
+                    <div key={d as string}>
+                      <div className="flex justify-between text-[0.75rem] font-medium"><span className="text-ink-secondary">{d as string}</span><span className="text-navy tabular-nums">{w as string}</span></div>
+                      <div className="h-2 bg-background rounded-full mt-1 overflow-hidden"><div className="h-full bg-teal rounded-full" style={{ width: w as string }} /></div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Reveal>
+            <Reveal>
+              <div className="bg-white border border-border rounded-2xl p-5">
+                <p className="font-bold text-navy text-[0.92rem]">Workflow health</p>
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  {[["Running", "3", "blue"], ["Completed", "41", "green"], ["Failed", "1", "red"], ["Retried", "2", "amber"]].map(([t, v, tone]) => (
+                    <div key={t as string} className="border border-border rounded-xl p-3">
+                      <p className="text-[1.2rem] font-bold text-navy tabular-nums">{v as string}</p>
+                      <StatusDot tone={tone as "green" | "amber" | "blue" | "red"} label={t as string} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Reveal>
+            <Reveal>
+              <div className="bg-white border border-border rounded-2xl p-5">
+                <p className="font-bold text-navy text-[0.92rem]">AI activity</p>
+                <ul className="mt-3 space-y-0 relative">
+                  {["Availability check completed", "Doctor search completed", "Escalation resolved"].map((t, i, arr) => (
+                    <li key={t} className="flex gap-2.5 pb-3 last:pb-0 relative">
+                      {i < arr.length - 1 && <span className="absolute left-[5px] top-4 bottom-0 w-px bg-border" aria-hidden />}
+                      <span className="w-[11px] h-[11px] rounded-full bg-healthcare shrink-0 mt-1" aria-hidden />
+                      <span className="text-[0.82rem] font-medium">{t}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </Reveal>
+            <Reveal>
+              <div className="bg-white border border-border rounded-2xl p-5">
+                <p className="font-bold text-navy text-[0.92rem]">Operational alerts</p>
+                <ul className="mt-3 space-y-2 text-[0.82rem]">
+                  <li className="flex gap-2 bg-warning-soft border border-warning/25 rounded-xl px-3 py-2.5"><Bell size={15} className="text-warning shrink-0 mt-0.5" /> 1 verification awaiting review</li>
+                  <li className="flex gap-2 bg-background border border-border rounded-xl px-3 py-2.5"><CheckCircle2 size={15} className="text-success shrink-0 mt-0.5" /> Nightly sync completed</li>
+                </ul>
+              </div>
+            </Reveal>
+          </div>
+        </div>
+      </section>
+
+      {/* ----------------------------- SECURITY ----------------------------- */}
+      <section id="security" className="bg-background border-y border-border scroll-mt-20">
+        <div className="max-w-shell mx-auto px-4 sm:px-6 py-14 lg:py-20 grid lg:grid-cols-2 gap-10">
+          <Reveal>
+            <SectionHead
+              eyebrow="Trust"
+              title="Designed around controlled access."
+              sub="Hospital data stays hospital-scoped. Every sensitive action is authenticated, authorized, and audited."
+            />
+            <ul className="mt-7 space-y-3">
+              {[
+                [Lock, "Secure authentication", "Password-based sign-in with hashed credentials and short-lived sessions."],
+                [Users, "Role-based access", "Hospital admins, doctors, and staff each see only what their role allows."],
+                [Building2, "Hospital-scoped data", "One hospital can never access another hospital's private data."],
+                [ShieldCheck, "Audited AI capabilities", "Every AI-assisted action is validated, permission-checked, and logged."],
+                [FileText, "Operational audit trail", "Logins, appointments, configuration changes, and recoveries are recorded."],
+              ].map(([Icon, title, body]) => {
+                const I = Icon as typeof Building2;
+                return (
+                  <li key={title as string} className="flex gap-3">
+                    <span className="w-9 h-9 rounded-lg bg-white border border-border text-healthcare flex items-center justify-center shrink-0">
+                      <I size={17} />
+                    </span>
+                    <span>
+                      <span className="block font-bold text-navy text-[0.92rem]">{title as string}</span>
+                      <span className="block text-ink-secondary text-[0.875rem] mt-0.5">{body as string}</span>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </Reveal>
+          <Reveal>
+            <div className="h-full bg-navy text-white rounded-2xl p-6 sm:p-8">
+              <p className="text-[0.7rem] font-bold uppercase tracking-[0.12em] text-white/60">How access is enforced</p>
+              <ul className="mt-4 space-y-3 text-[0.9rem] leading-relaxed">
+                <li className="bg-white/[0.07] border border-white/10 rounded-xl px-4 py-3">Sign in → identity and hospital scope resolved from the server record.</li>
+                <li className="bg-white/[0.07] border border-white/10 rounded-xl px-4 py-3">Every request → role check, then hospital filter applied at the query layer.</li>
+                <li className="bg-white/[0.07] border border-white/10 rounded-xl px-4 py-3">Every AI action → permission check, validation, and audit entry.</li>
+              </ul>
+              <p className="text-white/60 text-[0.8rem] mt-4">No exaggerated claims — controls are implemented in code and verified by tests.</p>
+            </div>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* ----------------------------- ONBOARDING ----------------------------- */}
+      <section id="onboarding" className="scroll-mt-20">
+        <div className="max-w-shell mx-auto px-4 sm:px-6 py-14 lg:py-20">
+          <Reveal>
+            <SectionHead
+              eyebrow="Onboarding"
+              title="Get your hospital ready in a few steps."
+            />
+          </Reveal>
+          <ol className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-9">
+            {[
+              [Building2, "01 · Create Hospital", "Register your hospital and administrator account for review."],
+              [ClipboardList, "02 · Configure Departments & Specialties", "Set up clinical units and care categories."],
+              [Stethoscope, "03 · Add Doctors & Appointment Types", "Invite doctors, define visit types and availability."],
+              [CalendarDays, "04 · Start Managing Care", "Publish availability and manage daily operations."],
+            ].map(([Icon, title, body]) => {
+              const I = Icon as typeof Building2;
               return (
-                <li key={s.title}>
-                  <button onClick={() => { setActive(i); setPlaying(false); }}
-                    className={`w-full text-left flex gap-3 px-3 py-2.5 rounded-xl transition ${current ? "bg-healthcare-soft border border-healthcare/30" : "border border-transparent hover:bg-background"}`}
-                    aria-current={current ? "step" : undefined}>
-                    <span className={`w-7 h-7 rounded-full flex items-center justify-center text-[0.72rem] font-extrabold shrink-0 border-2 ${done || current ? "bg-success text-white border-success" : "bg-white text-ink-faint border-border"}`}>
-                      {done ? "✓" : i + 1}
-                    </span>
-                    <span className="min-w-0">
-                      <span className={`block font-bold text-[0.88rem] ${current ? "text-navy" : "text-ink"}`}>{s.title}</span>
-                      <span className="block text-[0.7rem] font-bold uppercase tracking-wide text-ink-faint mt-0.5">{s.tag}</span>
-                    </span>
-                    {current && <span className="ml-auto text-[0.7rem] font-bold text-healthcare bg-white border border-healthcare/30 rounded-full px-2 py-1 shrink-0">live</span>}
-                  </button>
+                <li key={title as string} className="bg-white border border-border rounded-2xl p-6">
+                  <span className="w-10 h-10 rounded-xl bg-teal-soft text-teal-dark flex items-center justify-center">
+                    <I size={19} />
+                  </span>
+                  <p className="font-bold text-navy text-[0.95rem] mt-4">{title as string}</p>
+                  <p className="text-ink-secondary text-[0.875rem] mt-1.5 leading-relaxed">{body as string}</p>
                 </li>
               );
             })}
           </ol>
-          <div className="space-y-4">
-            <motion.div key={active} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card-base p-5 sm:p-6 border-t-4 border-t-healthcare">
-              <p className="text-[0.7rem] font-bold uppercase tracking-widest text-ink-faint">Step {active + 1} of {CHAIN.length}</p>
-              <h3 className="text-[1.25rem] font-extrabold text-navy mt-1">{step.title}</h3>
-              <p className="text-[0.92rem] text-ink-secondary leading-relaxed mt-2">{step.detail}</p>
-              <div className="h-1.5 bg-background rounded-full mt-4 overflow-hidden" role="progressbar" aria-valuenow={active + 1} aria-valuemin={1} aria-valuemax={CHAIN.length}>
-                <div className="h-full bg-gradient-to-r from-healthcare to-teal transition-all" style={{ width: `${((active + 1) / CHAIN.length) * 100}%` }} />
+        </div>
+      </section>
+
+      {/* ------------------------------ FINAL CTA ------------------------------ */}
+      <section className="max-w-shell mx-auto px-4 sm:px-6 pb-14">
+        <Reveal>
+          <div className="relative overflow-hidden rounded-2xl bg-healthcare-faint border border-healthcare/25 px-6 py-12 sm:p-14 text-center">
+            <svg className="absolute inset-0 w-full h-full" aria-hidden preserveAspectRatio="none" viewBox="0 0 800 300">
+              <path d="M-20 220 C150 200 220 140 380 150 C540 160 600 220 820 190" fill="none" stroke="#1769AA" strokeOpacity="0.18" strokeWidth="2" />
+              <path d="M-20 250 C160 235 260 180 420 190 C580 200 640 250 820 225" fill="none" stroke="#168C8C" strokeOpacity="0.16" strokeWidth="2" />
+              <circle cx="380" cy="150" r="4" fill="#168C8C" fillOpacity="0.35" />
+              <circle cx="540" cy="168" r="4" fill="#1769AA" fillOpacity="0.3" />
+            </svg>
+            <div className="relative">
+              <h2 className="text-[1.6rem] sm:text-[2rem] font-bold text-navy tracking-tight">
+                Bring your hospital operations into one place.
+              </h2>
+              <p className="text-ink-secondary text-[1rem] mt-3 max-w-[58ch] mx-auto">
+                Configure your hospital, manage your care team, monitor appointments, and gain
+                operational visibility with CareFlow AI.
+              </p>
+              <div className="flex flex-col sm:flex-row justify-center gap-2.5 mt-7">
+                <Link
+                  to="/register"
+                  className="inline-flex items-center justify-center gap-2 bg-healthcare hover:bg-healthcare-dark text-white font-semibold rounded-control px-7 py-3 text-[0.95rem] transition-colors duration-200"
+                >
+                  Get Started <ArrowRight size={16} />
+                </Link>
+                <Link
+                  to="/login"
+                  className="inline-flex items-center justify-center bg-white border border-border hover:border-healthcare hover:text-healthcare font-semibold rounded-control px-7 py-3 text-[0.95rem] transition-colors duration-200"
+                >
+                  Sign In
+                </Link>
               </div>
-              <div className="flex gap-2 mt-4">
-                <button onClick={() => setActive((a) => (a + CHAIN.length - 1) % CHAIN.length)} className="flex-1 bg-white border border-border rounded-control py-2 text-[0.84rem] font-bold hover:border-healthcare transition">← Prev</button>
-                <button onClick={() => setActive((a) => (a + 1) % CHAIN.length)} className="flex-1 bg-healthcare text-white rounded-control py-2 text-[0.84rem] font-bold hover:bg-healthcare-dark transition">Next →</button>
-              </div>
-            </motion.div>
-            <div className="card-base p-5 bg-gradient-to-br from-navy to-healthcare-dark text-white border-0">
-              <p className="flex items-center gap-2 text-[0.78rem] font-bold uppercase tracking-widest text-white/70"><HeartPulse size={14} /> Innovation spotlight</p>
-              <p className="font-bold mt-2 leading-snug">“Confirm only after verify” — the patient hears <em>confirmed</em> only when the external record matches.</p>
-              <p className="text-white/75 text-[0.85rem] mt-1.5">Unknown EHR outcomes are queried by <code className="bg-white/15 rounded px-1.5 py-0.5">idempotency_key</code> first — retried or parked for humans, never duplicated.</p>
             </div>
           </div>
-        </div>
+        </Reveal>
       </section>
 
-      {/* ---------------- CAPABILITIES ---------------- */}
-      <section id="capabilities" className="bg-white border-y border-border scroll-mt-20">
-        <div className="max-w-shell mx-auto px-4 sm:px-6 py-12 sm:py-16">
-          <p className="text-[0.7rem] font-bold uppercase tracking-widest text-healthcare">What the console controls</p>
-          <h2 className="page-title mt-2">Everything a hospital admin owns, in one workspace.</h2>
-          <p className="page-sub mt-2 max-w-[70ch]">Catalog, doctors, appointments, questionnaires, AI activity, EHR integration, workflows, analytics, staff, and ops/recovery — mapped 1:1 to the sidebar you get after sign-in.</p>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3.5 mt-7">
-            {CAPABILITIES.map((c) => (
-              <motion.article key={c.title} whileHover={{ y: -3 }} className="card-base p-5 hover:shadow-card transition-shadow">
-                <span className="w-11 h-11 rounded-xl bg-healthcare-soft text-healthcare flex items-center justify-center"><c.icon size={20} /></span>
-                <h3 className="font-extrabold text-navy mt-3 text-[1rem]">{c.title}</h3>
-                <p className="text-[0.86rem] text-ink-secondary leading-relaxed mt-1.5">{c.body}</p>
-                <p className="inline-block mt-3 text-[0.7rem] font-bold font-mono bg-background border border-border rounded-full px-2.5 py-1 text-teal-dark">{c.meta}</p>
-              </motion.article>
-            ))}
-          </div>
-          <div className="grid sm:grid-cols-3 gap-3.5 mt-4">
-            {[
-              { icon: Stethoscope, t: "Doctor lifecycle", d: "Invited → active → inactive/suspended. Specialty, department, compatible visit type required before activation." },
-              { icon: Bell, t: "Notifications that fire", d: "Confirmation, reminders, cancellations, questionnaire nudges — patient, doctor, and hospital channels." },
-              { icon: Users, t: "Staff & access", d: "Invite hospital staff, deactivate in one click. Every action audited with actor + correlation ID." },
-            ].map((r) => (
-              <div key={r.t} className="bg-background border border-border/70 rounded-card p-4 flex gap-3">
-                <r.icon size={18} className="text-healthcare shrink-0 mt-0.5" />
-                <div><p className="font-bold text-[0.9rem]">{r.t}</p><p className="text-[0.82rem] text-ink-secondary mt-0.5">{r.d}</p></div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ---------------- RECOVERY ---------------- */}
-      <section id="recovery" className="max-w-shell mx-auto px-4 sm:px-6 py-12 sm:py-16 scroll-mt-20">
-        <p className="text-[0.7rem] font-bold uppercase tracking-widest text-healthcare">Required failure demonstration · PRD §28</p>
-        <h2 className="page-title mt-2">Failures are first-class. Recovery is observable.</h2>
-        <p className="page-sub mt-2 max-w-[70ch]">A vendor “success” means nothing until re-read. Pick the scenario evaluators must see — the console walks each one to a correct final state.</p>
-        <div className="flex flex-wrap gap-2 mt-5" role="tablist" aria-label="Recovery scenarios">
-          {RECOVERY_TABS.map((t) => (
-            <button key={t.id} role="tab" aria-selected={recovery === t.id} onClick={() => setRecovery(t.id)}
-              className={`px-4 py-2.5 rounded-control text-[0.83rem] font-bold border transition ${recovery === t.id ? "bg-navy text-white border-navy" : "bg-white text-ink-secondary border-border hover:border-healthcare hover:text-healthcare"}`}>
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <motion.div key={recovery} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card-base p-5 sm:p-6 mt-4">
-          <ol className="flex flex-wrap items-center gap-2" aria-label="Recovery flow">
-            {recoveryTab.steps.map((s, i) => (
-              <li key={s} className="flex items-center gap-2">
-                <span className={`text-[0.8rem] font-bold rounded-full px-3 py-1.5 border ${i === recoveryTab.steps.length - 1 ? "bg-success-soft text-success border-success/30" : i === 0 ? "bg-navy text-white border-navy" : "bg-background text-ink border-border"}`}>{s}</span>
-                {i < recoveryTab.steps.length - 1 && <ArrowRight size={14} className="text-ink-faint" aria-hidden />}
-              </li>
-            ))}
-          </ol>
-          <p className="text-[0.9rem] text-ink-secondary leading-relaxed mt-4 max-w-[75ch]">{recoveryTab.body}</p>
-          <div className="flex items-start gap-2 mt-4 bg-warning-soft border border-warning/30 rounded-xl px-4 py-3 text-[0.84rem]">
-            <AlertTriangle size={16} className="text-warning shrink-0 mt-0.5" />
-            <p><strong>Operator view:</strong> open items land in <Link to="/login" className="font-bold text-healthcare hover:underline">/ops</Link> — failed, unknown, reconciliation, escalations, retry queue, recovery history — with Retry / Resolve / Escalate.</p>
-          </div>
-        </motion.div>
-      </section>
-
-      {/* ---------------- ONBOARDING ---------------- */}
-      <section id="onboarding" className="bg-white border-y border-border scroll-mt-20">
-        <div className="max-w-shell mx-auto px-4 sm:px-6 py-12 sm:py-16 grid lg:grid-cols-2 gap-8">
+      {/* -------------------------------- FOOTER -------------------------------- */}
+      <footer className="border-t border-border bg-white">
+        <div className="max-w-shell mx-auto px-4 sm:px-6 py-12 grid sm:grid-cols-2 lg:grid-cols-[1.3fr_1fr_1fr_1fr] gap-8">
           <div>
-            <p className="text-[0.7rem] font-bold uppercase tracking-widest text-healthcare">Hospital onboarding · PRD §5</p>
-            <h2 className="page-title mt-2">From registration to bookable in four moves.</h2>
-            <ol className="flex items-center mt-6" aria-label="Hospital status lifecycle">
-              {LIFECYCLE.map((s, i) => (
-                <li key={s} className={`flex items-center ${i < LIFECYCLE.length - 1 ? "flex-1" : ""}`}>
-                  <div className="flex flex-col items-center gap-1.5">
-                    <span className="w-8 h-8 rounded-full flex items-center justify-center text-[0.75rem] font-bold bg-success text-white border-2 border-success">{i + 1}</span>
-                    <span className="text-[0.68rem] font-bold capitalize text-success">{s.replace("_", " ")}</span>
-                  </div>
-                  {i < LIFECYCLE.length - 1 && <div className="h-0.5 flex-1 mx-1.5 mb-6 rounded-full bg-success" aria-hidden />}
-                </li>
-              ))}
-            </ol>
-            <div className="space-y-2.5 mt-6">
-              {[
-                ["1 · Register", "Submit hospital + admin account. Starts as submitted for platform review."],
-                ["2 · Configure catalog", "Departments, specialties, appointment types with durations — in /setup and /catalog."],
-                ["3 · Invite doctors", "Add doctors, set calendars + availability rules + blocked slots, then activate."],
-                ["4 · Go live", "Platform approves → publish availability → receive AI-driven verified bookings."],
-              ].map(([t, d]) => (
-                <div key={t} className="flex gap-3 bg-background border border-border/70 rounded-xl p-3.5">
-                  <CheckCircle2 size={17} className="text-success shrink-0 mt-0.5" />
-                  <div><p className="font-bold text-[0.88rem]">{t}</p><p className="text-[0.82rem] text-ink-secondary">{d}</p></div>
-                </div>
-              ))}
-            </div>
+            <CareFlowLogo tagline />
+            <p className="text-ink-secondary text-[0.875rem] leading-relaxed mt-4 max-w-[34ch]">
+              Healthcare scheduling and hospital operations platform.
+            </p>
           </div>
-          <div className="card-base p-5 sm:p-6 bg-gradient-to-b from-healthcare-faint to-white">
-            <p className="section-title">Try the console path</p>
-            <p className="text-[0.85rem] text-ink-secondary mt-1">New hospitals land in <code className="font-mono bg-white border border-border rounded px-1.5 py-0.5">/setup</code> right after registration — the same guided flow your reviewers see.</p>
-            <div className="grid grid-cols-2 gap-2.5 mt-4 text-[0.82rem] font-bold">
-              <Link to="/register" className="bg-healthcare text-white rounded-control py-3 text-center hover:bg-healthcare-dark transition">Start registration</Link>
-              <Link to="/login" className="bg-white border border-border rounded-control py-3 text-center hover:border-healthcare hover:text-healthcare transition">Open live console</Link>
-            </div>
-            <div className="mt-5 border-t border-border pt-4 space-y-2 text-[0.82rem]">
-              <p className="flex items-center gap-2"><Mic size={14} className="text-healthcare" /> Patient books by voice: “cardiologist this week”</p>
-              <p className="flex items-center gap-2"><CalendarDays size={14} className="text-healthcare" /> Slot grid shows only real availability</p>
-              <p className="flex items-center gap-2"><ShieldCheck size={14} className="text-healthcare" /> EHR verify → sync → confirm + notify</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ---------------- SECURITY ---------------- */}
-      <section id="security" className="max-w-shell mx-auto px-4 sm:px-6 py-12 sm:py-16 scroll-mt-20">
-        <div className="card-base overflow-hidden grid lg:grid-cols-[1fr_1fr]">
-          <div className="p-6 sm:p-8">
-            <p className="text-[0.7rem] font-bold uppercase tracking-widest text-healthcare">Security · privacy · audit</p>
-            <h2 className="page-title mt-2">Tenant isolation isn’t a claim. It’s the query layer.</h2>
-            <ul className="mt-5 space-y-2.5 text-[0.87rem]">
-              {[
-                "DB user row is authoritative — token hospital_id is a hint only; only platform_admin bypasses scope.",
-                "hospital_scoped_query filters every tenant table; patients book only for their own user_id.",
-                "Argon2 hashing, short-lived JWT access + refresh, per-request inactive rejection, no sessions/SSO.",
-                "All 20 AI tools carry RBAC allowlists; denied calls are still audited with latency + correlation.",
-                "No raw clinical content in logs or AI context — structured AIContext only, privacy-aware by design.",
-              ].map((s) => (
-                <li key={s} className="flex gap-2.5"><CheckCircle2 size={16} className="text-success shrink-0 mt-0.5" /><span className="text-ink-secondary">{s}</span></li>
+          <nav aria-label="Platform">
+            <p className="text-[0.72rem] font-bold uppercase tracking-[0.12em] text-ink-faint">Platform</p>
+            <ul className="mt-3 space-y-2 text-[0.875rem]">
+              {["Hospital Admin", "Doctor", "Patient", "AI Assistant", "Analytics", "Integrations"].map((s) => (
+                <li key={s}><span className="text-ink-secondary">{s}</span></li>
               ))}
             </ul>
-          </div>
-          <div className="bg-navy text-white p-6 sm:p-8 font-mono text-[0.74rem] leading-relaxed">
-            <p className="text-white/50 uppercase tracking-widest text-[0.64rem] font-bold">Trace one booking across every hop</p>
-            <pre className="mt-3 whitespace-pre-wrap">{`conversation  conv_9f2e
-→ ai decision   clarify → search → offer
-→ capability    check_availability  84ms ✓
-→ scheduling    reserve_slot FOR UPDATE ✓
-→ ehr           create + verify_external ✓
-→ sync          pending → confirmed
-→ workflow      reminder T-24h + questionnaire
-→ notify        patient + doctor sent
-correlation_id  8f3a…c1 · audit sealed`}</pre>
-            <p className="mt-4 inline-flex items-center gap-1.5 bg-white/10 border border-white/20 rounded-full px-3 py-1.5 font-sans text-[0.74rem] font-bold"><Lock size={13} /> Secrets via env only · never committed</p>
+          </nav>
+          <nav aria-label="Resources">
+            <p className="text-[0.72rem] font-bold uppercase tracking-[0.12em] text-ink-faint">Resources</p>
+            <ul className="mt-3 space-y-2 text-[0.875rem]">
+              {["Documentation", "Security", "Help Center", "Contact"].map((s) => (
+                <li key={s}><span className="text-ink-secondary">{s}</span></li>
+              ))}
+            </ul>
+          </nav>
+          <nav aria-label="Company">
+            <p className="text-[0.72rem] font-bold uppercase tracking-[0.12em] text-ink-faint">Company</p>
+            <ul className="mt-3 space-y-2 text-[0.875rem]">
+              {["About", "Privacy", "Terms"].map((s) => (
+                <li key={s}><span className="text-ink-secondary">{s}</span></li>
+              ))}
+            </ul>
+          </nav>
+        </div>
+        <div className="border-t border-border">
+          <div className="max-w-shell mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row gap-2 items-center justify-between text-[0.78rem] text-ink-secondary">
+            <p>© 2026 CareFlow AI. All rights reserved.</p>
+            <p className="flex gap-4">
+              <Link to="/login" className="hover:text-healthcare font-medium">Sign In</Link>
+              <Link to="/register" className="hover:text-healthcare font-medium">Get Started</Link>
+            </p>
           </div>
         </div>
-      </section>
-
-      {/* ---------------- CTA ---------------- */}
-      <section className="max-w-shell mx-auto px-4 sm:px-6 pb-14">
-        <div className="relative overflow-hidden rounded-card bg-gradient-to-r from-navy to-healthcare-dark text-white px-6 py-10 sm:p-12 text-center">
-          <div className="absolute inset-0 opacity-15" aria-hidden style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "22px 22px" }} />
-          <div className="relative">
-            <h2 className="text-[1.6rem] sm:text-[2rem] font-extrabold tracking-tight">Bring verified scheduling to your hospital.</h2>
-            <p className="text-white/80 mt-2 max-w-[60ch] mx-auto text-[0.95rem]">Register for platform review today — configure catalog and doctors tomorrow, receive AI-driven verified bookings this week.</p>
-            <div className="flex flex-wrap justify-center gap-2.5 mt-6">
-              <Link to="/register" className="inline-flex items-center gap-2 bg-white text-navy font-extrabold rounded-control px-6 py-3 text-[0.92rem] hover:bg-healthcare-soft transition">Register hospital <ArrowRight size={16} /></Link>
-              <Link to="/login" className="inline-flex items-center gap-2 border border-white/40 text-white font-bold rounded-control px-6 py-3 text-[0.92rem] hover:bg-white/10 transition">Sign in</Link>
-            </div>
-            <p className="text-white/60 text-[0.76rem] mt-4">Draft → submitted → under review → approved · suspend/reinstate supported</p>
-          </div>
-        </div>
-        <footer className="flex flex-wrap items-center gap-x-5 gap-y-2 justify-between pt-6 text-[0.78rem] text-ink-secondary">
-          <p className="flex items-center gap-2 font-bold text-navy"><span className="w-6 h-6 rounded-lg bg-gradient-to-br from-healthcare to-navy text-white flex items-center justify-center text-[0.8rem] font-extrabold">+</span> CareFlow AI · Hospital Console</p>
-          <p>Patient · Doctor · Platform consoles share one scheduling truth (PostgreSQL) + one production API.</p>
-          <p className="flex items-center gap-3">
-            <Link to="/login" className="hover:text-healthcare font-semibold">Console</Link>
-            <Link to="/register" className="hover:text-healthcare font-semibold">Onboarding</Link>
-            <a href="#chain" className="hover:text-healthcare font-semibold">Live chain</a>
-          </p>
-        </footer>
-      </section>
+      </footer>
     </div>
   );
 }

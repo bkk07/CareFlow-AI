@@ -90,10 +90,10 @@ export default function RegisterPage() {
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4 sm:p-6">
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }} className="w-full max-w-3xl card-base overflow-hidden">
-        <div className="bg-gradient-to-r from-navy to-healthcare-dark text-white p-6 sm:p-8">
-          <p className="text-[0.72rem] font-bold uppercase tracking-widest text-white/70 flex items-center gap-1.5"><Building2 size={14} /> Hospital onboarding</p>
-          <h1 className="text-[1.5rem] font-extrabold mt-2">Register your hospital</h1>
-          <p className="text-white/85 text-sm mt-1">Submit for platform review. Once approved, your hospital goes live for patient bookings.</p>
+        <div className="bg-navy text-white p-6 sm:p-8">
+          <p className="text-[0.72rem] font-bold uppercase tracking-widest text-white/65 flex items-center gap-1.5"><Building2 size={14} /> Hospital onboarding</p>
+          <h1 className="text-[1.5rem] font-bold mt-2">Register your hospital</h1>
+          <p className="text-white/75 text-sm mt-1">Submit for platform review. Once approved, your hospital goes live for patient bookings.</p>
         </div>
         <form onSubmit={(e) => void submit(e)} className="p-6 sm:p-8 space-y-5">
           <p><Link to="/" className="text-[0.78rem] font-bold text-ink-secondary hover:text-healthcare">← Back to home</Link></p>

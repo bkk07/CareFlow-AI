@@ -4,6 +4,7 @@ import { Building2, Eye, EyeOff, Lock, Mail, ShieldCheck } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAdmin } from "../store/AdminStore";
 import { Button } from "../components/common/ui";
+import { CareFlowLogo } from "../components/brand/CareFlowLogo";
 
 export default function LoginPage() {
   const { login, backendError, authed, mode } = useAdmin();
@@ -35,13 +36,13 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4 sm:p-6">
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }} className="w-full max-w-3xl card-base overflow-hidden grid md:grid-cols-[0.9fr_1.1fr]">
-        <div className="hidden md:flex flex-col justify-between bg-gradient-to-b from-navy to-healthcare-dark text-white p-8">
+        <div className="hidden md:flex flex-col justify-between bg-navy text-white p-8">
           <div>
-            <p className="text-[0.72rem] font-bold uppercase tracking-widest text-white/70">CareFlow AI · Operations Console</p>
-            <h2 className="text-[1.45rem] font-extrabold mt-3 leading-snug">Hospital operations, under control.</h2>
-            <p className="text-white/80 text-sm mt-2">Scheduling, integrations, AI oversight, and recovery — one enterprise workspace.</p>
+            <CareFlowLogo theme="dark" />
+            <h2 className="text-[1.45rem] font-bold mt-5 leading-snug">Hospital operations, under control.</h2>
+            <p className="text-white/75 text-sm mt-2">Scheduling, integrations, AI oversight, and recovery — one enterprise workspace.</p>
           </div>
-          <p className="flex items-center gap-2 text-[0.8rem] text-white/80"><Building2 size={15} /> Trusted by hospital operations teams</p>
+          <p className="flex items-center gap-2 text-[0.8rem] text-white/75"><Building2 size={15} /> Trusted by hospital operations teams</p>
         </div>
         <div className="p-6 sm:p-8">
           <Link to="/" className="text-[0.78rem] font-bold text-ink-secondary hover:text-healthcare">← Back to home</Link>

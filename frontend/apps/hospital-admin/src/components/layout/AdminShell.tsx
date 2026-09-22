@@ -19,6 +19,7 @@ import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { useAdmin } from "../../store/AdminStore";
 import { Avatar } from "../common/ui";
+import { CareFlowLogo } from "../brand/CareFlowLogo";
 
 const HOSPITAL_NAV = [
   { to: "/overview", label: "Overview", icon: LayoutDashboard, end: true, group: "" },
@@ -66,12 +67,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-background">
       <aside className="hidden md:flex fixed inset-y-0 left-0 w-[264px] flex-col bg-white border-r border-border px-3.5 py-4 z-30" aria-label="Primary">
-        <Link to="/overview" className="flex items-center gap-2.5 px-1.5 py-1 rounded-xl hover:bg-background transition" aria-label="CareFlow AI home">
-          <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-healthcare to-navy text-white flex items-center justify-center font-extrabold shadow-subtle">+</span>
-          <span className="leading-none">
-            <span className="block font-extrabold text-navy tracking-tight">CareFlow <span className="text-healthcare">AI</span></span>
-            <span className="block text-[0.64rem] font-bold uppercase tracking-widest text-ink-faint mt-0.5">Hospital Console</span>
-          </span>
+        <Link to="/overview" className="flex items-center gap-2.5 px-1.5 py-1 rounded-xl hover:bg-background transition-colors duration-200" aria-label="CareFlow AI home">
+          <CareFlowLogo size={34} />
           <span className={`ml-auto w-2 h-2 rounded-full ${live ? (busy ? "bg-warning animate-pulse" : "bg-success") : "bg-border"}`} title={live ? (busy ? "Syncing" : "Live") : "Offline"} />
         </Link>
         <div className="flex-1 overflow-y-auto mt-3 pb-2"><NavList items={HOSPITAL_NAV} /></div>
