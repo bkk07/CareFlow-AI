@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { AlertTriangle, CheckCircle2, RotateCcw, Search } from "lucide-react";
 import { useAdmin } from "../../store/AdminStore";
 import { LiveBanner } from "../hospital/InsightPages";
-import { Button, EmptyState, MetricCard, StatusBadge } from "../../components/common/ui";
+import { Button, EmptyState, MetricCard, PageHeader, StatusBadge, TableSkeleton } from "../../components/common/ui";
 import { Drawer, Modal, ResponsiveTable } from "../../components/common/Modal";
+import { Pagination, usePagination } from "../../components/common/Pagination";
 import type { Operation } from "../../types";
 
 function shortId(id: string): string {
@@ -97,7 +98,7 @@ function OpDrawer({ op, onClose }: { op: Operation | null; onClose: () => void }
 }
 
 export function OpsOverviewPage() {
-  const { operations, reconciliations, escalations } = useAdmin();
+  const { operations, reconciliations, escalations, loading, refreshSection } = useAdmin();
   const [selected, setSelected] = useState<Operation | null>(null);
   const failed = operations.filter((o) => o.status === "failed").length;
   const unknown = operations.filter((o) => o.status === "unknown").length;
@@ -106,13 +107,15 @@ export function OpsOverviewPage() {
   const retryQueue = operations.filter((o) => ["failed", "unknown"].includes(o.status)).length;
   const healthy = operations.filter((o) => o.status === "resolved").length;
   const attention = failed + unknown + reconciling;
+  const pager = usePagination(operations, { initialSize: 10 });
+  const isInitial = loading && operations.length === 0;
 
   return (
     <div className="space-y-5">
-      <div><h1 className="page-title">Operations Overview</h1><p className="page-sub mt-1">Integration health, failures, and recovery.</p></div>
-      <LiveBanner text="Live vendor-call log for your hospital" />
+      <PageHeader title="Operations Overview" sub="Integration health, failures, and recovery." count={`${operations.length}`} />
+      <LiveBanner text="Live vendor-call log for your hospital" onRefresh={() => void refreshSection("ops")} />
       {attention > 0 && (
-        <p className="flex items-center gap-2 bg-danger-soft border border-danger/25 rounded-card px-4 py-3 text-sm font-bold text-danger">
+        <p className="flex items-center gap-2 bg-danger-soft border border-danger/25 rounded-xl px-4 py-3 text-sm font-bold text-danger">
           <AlertTriangle size={17} /> {attention} operations require attention
         </p>
       )}
@@ -124,38 +127,56 @@ export function OpsOverviewPage() {
         <MetricCard label="Escalations" value={String(openEsc)} tone="danger" />
         <MetricCard label="Retry queue" value={String(retryQueue)} />
       </div>
-      <ResponsiveTable headers={["Operation", "Type", "Appointment", "System", "Status", "Attempts"]}>
-        {operations.slice(0, 4).map((o) => (
+      {isInitial ? (
+        <TableSkeleton rows={5} cols={5} />
+      ) : (
+      <ResponsiveTable
+        headers={["Operation", "Type", "Appointment", "System", "Status", "Attempts"]}
+        footer={
+          <Pagination page={pager.page} totalPages={pager.totalPages} total={pager.total} start={pager.start} end={pager.end} pageSize={pager.pageSize} onPage={pager.setPage} onSize={pager.setPageSize} />
+        }
+      >
+        {pager.pageItems.map((o) => (
           <tr key={o.id} className="hover:bg-background/60 cursor-pointer" onClick={() => setSelected(o)}>
             <td className="td-cell font-mono font-bold text-[0.8rem]">{shortId(o.id)}</td>
             <td className="td-cell">{o.type}</td>
             <td className="td-cell">{shortId(o.appointment)}</td>
             <td className="td-cell">{o.system}</td>
             <td className="td-cell"><StatusBadge status={o.status} /></td>
-            <td className="td-cell">{o.attempts}</td>
+            <td className="td-cell tabular-nums">{o.attempts}</td>
           </tr>
         ))}
       </ResponsiveTable>
+      )}
       <OpDrawer op={selected} onClose={() => setSelected(null)} />
     </div>
   );
 }
 
 export function FailedOpsPage() {
-  const { operations, retryOperation } = useAdmin();
+  const { operations, retryOperation, loading, refreshSection } = useAdmin();
   const [selected, setSelected] = useState<Operation | null>(null);
   const { error, run } = useOpError();
-  const failed = operations.filter((o) => ["failed", "retrying", "recovered", "needs_reconciliation"].includes(o.status));
+  const failed = useMemo(() => operations.filter((o) => ["failed", "retrying", "recovered", "needs_reconciliation"].includes(o.status)), [operations]);
+  const pager = usePagination(failed, { initialSize: 10 });
+  const isInitial = loading && operations.length === 0;
   return (
     <div className="space-y-4">
-      <div><h1 className="page-title">Failed Operations</h1><p className="page-sub mt-1">What failed, where, and what happens next.</p></div>
-      <LiveBanner text="Live failed vendor calls" />
+      <PageHeader title="Failed Operations" sub="What failed, where, and what happens next." count={`${failed.length}`} />
+      <LiveBanner text="Live failed vendor calls" onRefresh={() => void refreshSection("ops")} />
       {error && <p role="alert" className="text-[0.83rem] font-semibold text-danger">{error}</p>}
-      {failed.length === 0 ? (
+      {isInitial ? (
+        <TableSkeleton rows={6} cols={5} />
+      ) : failed.length === 0 ? (
         <div className="card-base"><EmptyState title="No failed operations" body="All integration operations are currently healthy." /></div>
       ) : (
-        <ResponsiveTable headers={["Operation", "Type", "Appointment", "System", "Status", "Attempts", "Last attempt", "Action"]}>
-          {failed.map((o) => (
+        <ResponsiveTable
+          headers={["Operation", "Type", "Appointment", "System", "Status", "Attempts", "Last attempt", "Action"]}
+          footer={
+            <Pagination page={pager.page} totalPages={pager.totalPages} total={pager.total} start={pager.start} end={pager.end} pageSize={pager.pageSize} onPage={pager.setPage} onSize={pager.setPageSize} />
+          }
+        >
+          {pager.pageItems.map((o) => (
             <tr key={o.id} className="hover:bg-background/60">
               <td className="td-cell font-mono font-bold text-[0.8rem]">{shortId(o.id)}</td>
               <td className="td-cell">{o.type}</td>
@@ -180,24 +201,33 @@ export function FailedOpsPage() {
 }
 
 export function UnknownOutcomesPage() {
-  const { operations, verifyOperation } = useAdmin();
+  const { operations, verifyOperation, loading, refreshSection } = useAdmin();
   const [selected, setSelected] = useState<Operation | null>(null);
   const [outcome, setOutcome] = useState<string | null>(null);
   const { error, run } = useOpError();
-  const unknown = operations.filter((o) => o.status === "unknown" || o.status === "verifying");
+  const unknown = useMemo(() => operations.filter((o) => o.status === "unknown" || o.status === "verifying"), [operations]);
+  const pager = usePagination(unknown, { initialSize: 10 });
+  const isInitial = loading && operations.length === 0;
 
   return (
     <div className="space-y-4">
-      <div><h1 className="page-title">Unknown Outcomes</h1><p className="page-sub mt-1">Appointment creation outcome could not be determined — verify before retrying.</p></div>
-      <LiveBanner text="Live unknown-outcome vendor calls" />
+      <PageHeader title="Unknown Outcomes" sub="Appointment creation outcome could not be determined — verify before retrying." count={`${unknown.length}`} />
+      <LiveBanner text="Live unknown-outcome vendor calls" onRefresh={() => void refreshSection("ops")} />
       {error && <p role="alert" className="text-[0.83rem] font-semibold text-danger">{error}</p>}
       {outcome && <p className="text-[0.83rem] font-semibold text-success">Verification outcome: {outcome}</p>}
 
-      {unknown.length === 0 ? (
+      {isInitial ? (
+        <TableSkeleton rows={6} cols={5} />
+      ) : unknown.length === 0 ? (
         <div className="card-base"><EmptyState title="No unknown outcomes" body="All operations have a determined final state." /></div>
       ) : (
-        <ResponsiveTable headers={["Operation", "Appointment", "System", "Request time", "Last known", "Verification", "Action"]}>
-          {unknown.map((o) => (
+        <ResponsiveTable
+          headers={["Operation", "Appointment", "System", "Request time", "Last known", "Verification", "Action"]}
+          footer={
+            <Pagination page={pager.page} totalPages={pager.totalPages} total={pager.total} start={pager.start} end={pager.end} pageSize={pager.pageSize} onPage={pager.setPage} onSize={pager.setPageSize} />
+          }
+        >
+          {pager.pageItems.map((o) => (
             <tr key={o.id} className="hover:bg-background/60">
               <td className="td-cell font-mono font-bold text-[0.8rem]">{shortId(o.id)}</td>
               <td className="td-cell">{shortId(o.appointment)}</td>
@@ -226,24 +256,34 @@ export function UnknownOutcomesPage() {
 }
 
 export function ReconciliationPage() {
-  const { reconciliations, resolveReconciliation, retryReconciliation } = useAdmin();
+  const { reconciliations, resolveReconciliation, retryReconciliation, loading, refreshSection } = useAdmin();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [finalState, setFinalState] = useState("Confirmed");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const { error, run } = useOpError();
   const selected = reconciliations.find((r) => r.id === selectedId) ?? null;
+  const pager = usePagination(reconciliations, { initialSize: 10 });
+  const isInitial = loading && reconciliations.length === 0;
+  const openCount = reconciliations.filter((r) => r.resolution !== "resolved").length;
 
   return (
     <div className="space-y-4">
-      <div><h1 className="page-title">Reconciliation</h1><p className="page-sub mt-1">Match internal state with external reality.</p></div>
-      <LiveBanner text="Live reconciliation work queue" />
+      <PageHeader title="Reconciliation" sub="Match internal state with external reality." count={`${reconciliations.length}`} />
+      <LiveBanner text="Live reconciliation work queue" onRefresh={() => void refreshSection("ops")} />
       {error && <p role="alert" className="text-[0.83rem] font-semibold text-danger">{error}</p>}
-      {reconciliations.filter((r) => r.resolution !== "resolved").length === 0 ? (
+      {isInitial ? (
+        <TableSkeleton rows={6} cols={5} />
+      ) : openCount === 0 ? (
         <div className="card-base"><EmptyState title="All integration operations are currently reconciled." body="New mismatches will open a case here." /></div>
       ) : (
-        <ResponsiveTable headers={["Case", "Operation", "Appointment", "External ID", "Error", "Attempts", "External", "Internal", "Resolution", "Action"]}>
-          {reconciliations.map((r) => (
+        <ResponsiveTable
+          headers={["Case", "Operation", "Appointment", "External ID", "Error", "Attempts", "External", "Internal", "Resolution", "Action"]}
+          footer={
+            <Pagination page={pager.page} totalPages={pager.totalPages} total={pager.total} start={pager.start} end={pager.end} pageSize={pager.pageSize} onPage={pager.setPage} onSize={pager.setPageSize} />
+          }
+        >
+          {pager.pageItems.map((r) => (
             <tr key={r.id} className="hover:bg-background/60">
               <td className="td-cell font-mono font-bold text-[0.8rem]">{shortId(r.id)}</td>
               <td className="td-cell font-mono text-[0.78rem]">{shortId(r.operationId)}</td>
@@ -303,20 +343,24 @@ export function ReconciliationPage() {
 }
 
 export function EscalationsPage() {
-  const { escalations, assignEscalation, resolveEscalation } = useAdmin();
+  const { escalations, assignEscalation, resolveEscalation, loading, refreshSection } = useAdmin();
   const { error, run } = useOpError();
-  const open = escalations.filter((e) => e.status !== "resolved");
+  const open = useMemo(() => escalations.filter((e) => e.status !== "resolved"), [escalations]);
+  const pager = usePagination(escalations, { initialSize: 10 });
+  const isInitial = loading && escalations.length === 0;
   return (
     <div className="space-y-4">
-      <div><h1 className="page-title">Human Escalations</h1><p className="page-sub mt-1">{open.length} open cases in the operator queue.</p></div>
-      <LiveBanner text="Live human-escalation queue" />
+      <PageHeader title="Human Escalations" sub={`${open.length} open cases in the operator queue.`} count={`${escalations.length}`} />
+      <LiveBanner text="Live human-escalation queue" onRefresh={() => void refreshSection("ops")} />
       {error && <p role="alert" className="text-[0.83rem] font-semibold text-danger">{error}</p>}
-      {open.length === 0 ? (
+      {isInitial ? (
+        <TableSkeleton rows={5} cols={3} />
+      ) : open.length === 0 ? (
         <div className="card-base"><EmptyState title="No human escalations" body="Cases needing operator judgment will queue here." /></div>
       ) : (
         <div className="space-y-2.5">
-          {escalations.map((e) => (
-            <article key={e.id} className="card-base p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+          {pager.pageItems.map((e) => (
+            <article key={e.id} className="card-base p-4 flex flex-col sm:flex-row sm:items-center gap-3 hover:shadow-card transition-shadow">
               <div className="flex-1 min-w-0">
                 <p className="font-bold text-[0.9rem]">{e.title} <span className="font-mono text-ink-faint text-[0.75rem]">{shortId(e.id)}</span></p>
                 <p className="text-[0.8rem] text-ink-secondary">{shortId(e.appointment)} · {e.issue} · {e.assignee} · {e.created}</p>
@@ -331,6 +375,9 @@ export function EscalationsPage() {
               )}
             </article>
           ))}
+          <div className="card-base overflow-hidden">
+            <Pagination page={pager.page} totalPages={pager.totalPages} total={pager.total} start={pager.start} end={pager.end} pageSize={pager.pageSize} onPage={pager.setPage} onSize={pager.setPageSize} />
+          </div>
         </div>
       )}
     </div>
@@ -338,24 +385,33 @@ export function EscalationsPage() {
 }
 
 export function RetryQueuePage() {
-  const { operations, retryOperation } = useAdmin();
+  const { operations, retryOperation, loading, refreshSection } = useAdmin();
   const { error, run } = useOpError();
-  const queue = operations.filter((o) => ["retrying", "failed", "unknown"].includes(o.status));
+  const queue = useMemo(() => operations.filter((o) => ["retrying", "failed", "unknown"].includes(o.status)), [operations]);
+  const pager = usePagination(queue, { initialSize: 10 });
+  const isInitial = loading && operations.length === 0;
   return (
     <div className="space-y-4">
-      <div><h1 className="page-title">Retry Queue</h1><p className="page-sub mt-1">Operations waiting for another attempt.</p></div>
-      <LiveBanner text="Live retry queue" />
+      <PageHeader title="Retry Queue" sub="Operations waiting for another attempt." count={`${queue.length}`} />
+      <LiveBanner text="Live retry queue" onRefresh={() => void refreshSection("ops")} />
       {error && <p role="alert" className="text-[0.83rem] font-semibold text-danger">{error}</p>}
-      {queue.length === 0 ? (
+      {isInitial ? (
+        <TableSkeleton rows={6} cols={5} />
+      ) : queue.length === 0 ? (
         <div className="card-base"><EmptyState title="Retry queue is empty" body="Failed operations scheduled for retry will appear here." /></div>
       ) : (
-        <ResponsiveTable headers={["Operation", "Type", "Appointment", "Attempts", "Next retry", "Status", "Action"]}>
-          {queue.map((o) => (
+        <ResponsiveTable
+          headers={["Operation", "Type", "Appointment", "Attempts", "Next retry", "Status", "Action"]}
+          footer={
+            <Pagination page={pager.page} totalPages={pager.totalPages} total={pager.total} start={pager.start} end={pager.end} pageSize={pager.pageSize} onPage={pager.setPage} onSize={pager.setPageSize} />
+          }
+        >
+          {pager.pageItems.map((o) => (
             <tr key={o.id} className="hover:bg-background/60">
               <td className="td-cell font-mono font-bold text-[0.8rem]">{shortId(o.id)}</td>
               <td className="td-cell">{o.type}</td>
               <td className="td-cell">{shortId(o.appointment)}</td>
-              <td className="td-cell">{o.attempts}</td>
+              <td className="td-cell tabular-nums">{o.attempts}</td>
               <td className="td-cell">{o.nextRetry}</td>
               <td className="td-cell"><StatusBadge status={o.status} /></td>
               <td className="td-cell"><div className="flex gap-2">
@@ -370,17 +426,21 @@ export function RetryQueuePage() {
 }
 
 export function RecoveryHistoryPage() {
-  const { reconciliations } = useAdmin();
-  const recovered = reconciliations.filter((r) => r.resolution === "resolved");
+  const { reconciliations, loading, refreshSection } = useAdmin();
+  const recovered = useMemo(() => reconciliations.filter((r) => r.resolution === "resolved"), [reconciliations]);
+  const pager = usePagination(recovered, { initialSize: 10 });
+  const isInitial = loading && reconciliations.length === 0;
   return (
     <div className="space-y-4">
-      <div><h1 className="page-title">Recovery History</h1><p className="page-sub mt-1">How past failures were recovered.</p></div>
-      <LiveBanner text="Live recovery history" />
-      {recovered.length === 0 ? (
+      <PageHeader title="Recovery History" sub="How past failures were recovered." count={`${recovered.length}`} />
+      <LiveBanner text="Live recovery history" onRefresh={() => void refreshSection("ops")} />
+      {isInitial ? (
+        <TableSkeleton rows={5} cols={3} />
+      ) : recovered.length === 0 ? (
         <div className="card-base"><EmptyState title="No recoveries yet" body="Resolved reconciliation cases will be recorded here." /></div>
       ) : (
         <div className="space-y-2.5">
-          {recovered.map((r) => (
+          {pager.pageItems.map((r) => (
             <article key={r.id} className="card-base p-4">
               <p className="font-bold text-[0.9rem] flex items-center gap-1.5"><CheckCircle2 size={16} className="text-success" /> Case {shortId(r.id)} · resolved</p>
               <p className="text-[0.82rem] text-ink-secondary mt-1">Original failure: {r.error}</p>
@@ -388,6 +448,9 @@ export function RecoveryHistoryPage() {
               <p className="text-[0.82rem] mt-1">Final state: {r.internalState} <span className="text-ink-faint">· {r.updated}</span></p>
             </article>
           ))}
+          <div className="card-base overflow-hidden">
+            <Pagination page={pager.page} totalPages={pager.totalPages} total={pager.total} start={pager.start} end={pager.end} pageSize={pager.pageSize} onPage={pager.setPage} onSize={pager.setPageSize} />
+          </div>
         </div>
       )}
     </div>

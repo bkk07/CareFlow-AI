@@ -100,12 +100,14 @@ def hospital_ai_activity(
     tool: str | None = None,
     status: str | None = None,
     limit: int = 50,
+    offset: int = 0,
 ) -> dict:
     del ctx
     query = (
         db.query(CapabilityExecution)
         .filter(CapabilityExecution.hospital_id == hospital.id)
         .order_by(CapabilityExecution.created_at.desc())
+        .offset(max(offset, 0))
         .limit(min(max(limit, 1), 100))
     )
     rows = query.all()

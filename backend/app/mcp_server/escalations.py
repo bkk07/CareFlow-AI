@@ -67,6 +67,8 @@ def _scoped(
 def list_escalations(
     status: EscalationStatus | None = None,
     hospital_id: uuid.UUID | None = None,
+    limit: int = 100,
+    offset: int = 0,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(_operator),
 ) -> list:
@@ -77,13 +79,16 @@ def list_escalations(
                 detail="Not allowed to list this hospital",
             )
         hospital_id = ctx.hospital_id
+    limit = min(max(limit, 1), 500)
+    offset = max(offset, 0)
     rows = (
-        db.query(Escalation).order_by(Escalation.created_at.desc()).all()
+        db.query(Escalation).order_by(Escalation.created_at.desc()).offset(offset).limit(limit + 500).all()
     )
     if status is not None:
         rows = [r for r in rows if r.status == status]
     if hospital_id is not None:
         rows = [r for r in rows if _hospital_of(db, r) == hospital_id]
+    rows = rows[:limit]
     return [
         EscalationOut(
             id=r.id,

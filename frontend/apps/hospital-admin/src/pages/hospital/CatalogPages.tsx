@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Pencil, Plus } from "lucide-react";
 import { useAdmin } from "../../store/AdminStore";
-import { Button, EmptyState, StatusBadge } from "../../components/common/ui";
+import { Button, EmptyState, LivePill, PageHeader, StatusBadge, TableSkeleton } from "../../components/common/ui";
 import { Modal, ResponsiveTable } from "../../components/common/Modal";
+import { Pagination, usePagination } from "../../components/common/Pagination";
 
 export function DepartmentsPage() {
-  const { departments, addDepartment, renameDepartment, deleteDepartment, live, loading, backendError, refreshAll } = useAdmin();
+  const { departments, addDepartment, renameDepartment, deleteDepartment, live, loading, syncing, backendError, refreshSection } = useAdmin();
   const [addOpen, setAddOpen] = useState(false);
   const [name, setName] = useState("");
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
@@ -20,40 +21,37 @@ export function DepartmentsPage() {
     }
   }
 
-  if (loading && departments.length === 0) {
-    return (
-      <div className="space-y-4">
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div><h1 className="page-title">Departments</h1><p className="page-sub mt-1">Clinical units and their coverage.</p></div>
-        </div>
-        <div className="card-base p-5 text-sm text-ink-secondary">Loading departments…</div>
-      </div>
-    );
-  }
+  const pager = usePagination(departments, { initialSize: 10 });
+  const isInitial = loading && departments.length === 0;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div><h1 className="page-title">Departments</h1><p className="page-sub mt-1">Clinical units and their coverage.</p></div>
-        <Button size="sm" onClick={() => setAddOpen(true)}><Plus size={15} /> Add department</Button>
-      </div>
-      {live && (
-        <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">
-          {loading ? "Syncing…" : "Live catalog — deletes are blocked while doctors reference a row."}
-        </p>
-      )}
+      <PageHeader
+        title="Departments"
+        sub="Clinical units and their coverage."
+        count={`${departments.length}`}
+        actions={<Button size="sm" onClick={() => setAddOpen(true)}><Plus size={15} /> Add department</Button>}
+      />
+      {live && <LivePill syncing={syncing} loading={loading} text="Live catalog — deletes are blocked while doctors reference a row." />}
       {(error ?? backendError) && (
-        <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">{error ?? backendError}</p>
+        <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-xl px-3.5 py-2.5">{error ?? backendError}</p>
       )}
-      {departments.length === 0 ? (
-        <div className="card-base"><EmptyState title="No departments found" body="Add your first clinical department to get started." action={<Button size="sm" variant="outline" onClick={() => void refreshAll()}>Refresh</Button>} /></div>
+      {isInitial ? (
+        <TableSkeleton rows={6} cols={4} />
+      ) : departments.length === 0 ? (
+        <div className="card-base"><EmptyState title="No departments found" body="Add your first clinical department to get started." action={<Button size="sm" variant="outline" onClick={() => void refreshSection("departments")}>Refresh</Button>} /></div>
       ) : (
-        <ResponsiveTable headers={["Department", "Specialties", "Doctors", "Status", "Updated", "Actions"]}>
-          {departments.map((d) => (
+        <ResponsiveTable
+          headers={["Department", "Specialties", "Doctors", "Status", "Updated", "Actions"]}
+          footer={
+            <Pagination page={pager.page} totalPages={pager.totalPages} total={pager.total} start={pager.start} end={pager.end} pageSize={pager.pageSize} onPage={pager.setPage} onSize={pager.setPageSize} />
+          }
+        >
+          {pager.pageItems.map((d) => (
             <tr key={d.id} className="hover:bg-background/60 transition">
               <td className="td-cell font-bold">{d.name}</td>
               <td className="td-cell text-ink-secondary text-[0.8rem]">{d.specialtyNames.length > 0 ? d.specialtyNames.join(", ") : "—"}</td>
-              <td className="td-cell">{d.doctors}</td>
+              <td className="td-cell tabular-nums">{d.doctors}</td>
               <td className="td-cell"><StatusBadge status={d.status} /></td>
               <td className="td-cell text-ink-secondary">{d.updated}</td>
               <td className="td-cell">
@@ -79,7 +77,7 @@ export function DepartmentsPage() {
 }
 
 export function SpecialtiesPage() {
-  const { specialties, addSpecialty, renameSpecialty, deleteSpecialty, live, loading, backendError, refreshAll } = useAdmin();
+  const { specialties, addSpecialty, renameSpecialty, deleteSpecialty, live, loading, syncing, backendError, refreshSection } = useAdmin();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
@@ -94,36 +92,37 @@ export function SpecialtiesPage() {
     }
   }
 
-  if (loading && specialties.length === 0) {
-    return (
-      <div className="space-y-4">
-        <div><h1 className="page-title">Specialties</h1><p className="page-sub mt-1">Care areas within departments.</p></div>
-        <div className="card-base p-5 text-sm text-ink-secondary">Loading specialties…</div>
-      </div>
-    );
-  }
+  const pager = usePagination(specialties, { initialSize: 10 });
+  const isInitial = loading && specialties.length === 0;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div><h1 className="page-title">Specialties</h1><p className="page-sub mt-1">Care areas within departments.</p></div>
-        <Button size="sm" onClick={() => setOpen(true)}><Plus size={15} /> Add specialty</Button>
-      </div>
-      {live && loading && (
-        <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">Syncing…</p>
-      )}
+      <PageHeader
+        title="Specialties"
+        sub="Care areas within departments."
+        count={`${specialties.length}`}
+        actions={<Button size="sm" onClick={() => setOpen(true)}><Plus size={15} /> Add specialty</Button>}
+      />
+      {live && <LivePill syncing={syncing} loading={loading} text="Live specialties — deletes are blocked while doctors reference a row." />}
       {(error ?? backendError) && (
-        <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">{error ?? backendError}</p>
+        <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-xl px-3.5 py-2.5">{error ?? backendError}</p>
       )}
-      {specialties.length === 0 ? (
-        <div className="card-base"><EmptyState title="No specialties found" body="Add your first specialty to get started." action={<Button size="sm" variant="outline" onClick={() => void refreshAll()}>Refresh</Button>} /></div>
+      {isInitial ? (
+        <TableSkeleton rows={6} cols={4} />
+      ) : specialties.length === 0 ? (
+        <div className="card-base"><EmptyState title="No specialties found" body="Add your first specialty to get started." action={<Button size="sm" variant="outline" onClick={() => void refreshSection("specialties")}>Refresh</Button>} /></div>
       ) : (
-        <ResponsiveTable headers={["Specialty", "Department", "Doctors", "Status", "Actions"]}>
-          {specialties.map((s) => (
+        <ResponsiveTable
+          headers={["Specialty", "Department", "Doctors", "Status", "Actions"]}
+          footer={
+            <Pagination page={pager.page} totalPages={pager.totalPages} total={pager.total} start={pager.start} end={pager.end} pageSize={pager.pageSize} onPage={pager.setPage} onSize={pager.setPageSize} />
+          }
+        >
+          {pager.pageItems.map((s) => (
             <tr key={s.id} className="hover:bg-background/60 transition">
               <td className="td-cell font-bold">{s.name}</td>
               <td className="td-cell text-ink-secondary text-[0.8rem]">{s.department || "—"}</td>
-              <td className="td-cell">{s.doctors}</td>
+              <td className="td-cell tabular-nums">{s.doctors}</td>
               <td className="td-cell"><StatusBadge status={s.status} /></td>
               <td className="td-cell">
                 <div className="flex gap-1.5">
@@ -150,7 +149,7 @@ export function SpecialtiesPage() {
 }
 
 export function AppointmentTypesPage() {
-  const { types, addType, updateType, deleteType, live, loading, backendError, refreshAll } = useAdmin();
+  const { types, addType, updateType, deleteType, live, loading, syncing, backendError, refreshSection } = useAdmin();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [duration, setDuration] = useState("30");
@@ -166,36 +165,37 @@ export function AppointmentTypesPage() {
     }
   }
 
-  if (loading && types.length === 0) {
-    return (
-      <div className="space-y-4">
-        <div><h1 className="page-title">Appointment Types</h1><p className="page-sub mt-1">Visit kinds, durations, and modes.</p></div>
-        <div className="card-base p-5 text-sm text-ink-secondary">Loading appointment types…</div>
-      </div>
-    );
-  }
+  const pager = usePagination(types, { initialSize: 10 });
+  const isInitial = loading && types.length === 0;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div><h1 className="page-title">Appointment Types</h1><p className="page-sub mt-1">Visit kinds, durations, and modes.</p></div>
-        <Button size="sm" onClick={() => setOpen(true)}><Plus size={15} /> Add type</Button>
-      </div>
-      {live && loading && (
-        <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">Syncing…</p>
-      )}
+      <PageHeader
+        title="Appointment Types"
+        sub="Visit kinds, durations, and modes."
+        count={`${types.length}`}
+        actions={<Button size="sm" onClick={() => setOpen(true)}><Plus size={15} /> Add type</Button>}
+      />
+      {live && <LivePill syncing={syncing} loading={loading} text="Live visit types — durations drive slot math." />}
       {(error ?? backendError) && (
-        <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">{error ?? backendError}</p>
+        <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-xl px-3.5 py-2.5">{error ?? backendError}</p>
       )}
-      {types.length === 0 ? (
-        <div className="card-base"><EmptyState title="No appointment types found" body="Add your first visit type to get started." action={<Button size="sm" variant="outline" onClick={() => void refreshAll()}>Refresh</Button>} /></div>
+      {isInitial ? (
+        <TableSkeleton rows={6} cols={4} />
+      ) : types.length === 0 ? (
+        <div className="card-base"><EmptyState title="No appointment types found" body="Add your first visit type to get started." action={<Button size="sm" variant="outline" onClick={() => void refreshSection("types")}>Refresh</Button>} /></div>
       ) : (
-        <ResponsiveTable headers={["Name", "Description", "Duration", "Mode", "Status", "Actions"]}>
-          {types.map((t) => (
+        <ResponsiveTable
+          headers={["Name", "Description", "Duration", "Mode", "Status", "Actions"]}
+          footer={
+            <Pagination page={pager.page} totalPages={pager.totalPages} total={pager.total} start={pager.start} end={pager.end} pageSize={pager.pageSize} onPage={pager.setPage} onSize={pager.setPageSize} />
+          }
+        >
+          {pager.pageItems.map((t) => (
             <tr key={t.id} className="hover:bg-background/60 transition">
               <td className="td-cell font-bold">{t.name}</td>
               <td className="td-cell text-ink-secondary">{t.description}</td>
-              <td className="td-cell font-semibold">{t.duration} min</td>
+              <td className="td-cell font-semibold tabular-nums">{t.duration} min</td>
               <td className="td-cell">{t.mode}</td>
               <td className="td-cell"><StatusBadge status={t.status} /></td>
               <td className="td-cell">

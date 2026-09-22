@@ -121,10 +121,51 @@ export function MetricCard({ label, value, sub, tone = "navy" }: { label: string
     teal: "text-teal-dark",
   };
   return (
-    <div className="card-base p-4">
+    <div className="card-base p-4 hover:shadow-card transition-shadow">
       <p className="text-[0.74rem] font-bold uppercase tracking-wide text-ink-faint">{label}</p>
-      <p className={`text-[1.5rem] font-extrabold leading-tight mt-1 ${tints[tone]}`}>{value}</p>
+      <p className={`text-[1.5rem] font-extrabold leading-tight mt-1 tabular-nums ${tints[tone]}`}>{value}</p>
       {sub && <p className="text-[0.76rem] text-ink-secondary mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
+export function PageHeader({
+  title,
+  sub,
+  count,
+  actions,
+}: {
+  title: string;
+  sub: string;
+  count?: string;
+  actions?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3 flex-wrap">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <h1 className="page-title">{title}</h1>
+          {count && (
+            <span className="inline-flex items-center text-[0.72rem] font-bold bg-navy text-white rounded-full px-2.5 py-1 tabular-nums">
+              {count}
+            </span>
+          )}
+        </div>
+        <p className="page-sub mt-1">{sub}</p>
+      </div>
+      {actions && <div className="flex items-center gap-2 flex-wrap shrink-0">{actions}</div>}
+    </div>
+  );
+}
+
+export function LivePill({ syncing, loading, text }: { syncing?: boolean; loading?: boolean; text: string }) {
+  const busy = Boolean(syncing || loading);
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <p className="inline-flex items-center gap-1.5 text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-full px-3 py-1.5 w-fit">
+        <span className={`w-1.5 h-1.5 rounded-full ${busy ? "bg-teal-dark animate-pulse" : "bg-success"}`} aria-hidden />
+        {busy ? "Syncing…" : text}
+      </p>
     </div>
   );
 }

@@ -38,11 +38,25 @@ from app.domain.hospital_config.schemas import (
 router = APIRouter(tags=["hospital-config"])
 
 
-def _scoped_list(model, hospital: Hospital, ctx: RequestContext, db: Session):
+def _clamp_pagination(limit: int, offset: int, max_limit: int = 500) -> tuple[int, int]:
+    return min(max(limit, 1), max_limit), max(offset, 0)
+
+
+def _scoped_list(
+    model,
+    hospital: Hospital,
+    ctx: RequestContext,
+    db: Session,
+    limit: int = 500,
+    offset: int = 0,
+):
+    limit, offset = _clamp_pagination(limit, offset)
     return (
         hospital_scoped_query(model, ctx, db)
         .filter(model.hospital_id == hospital.id)
         .order_by(model.name)
+        .offset(offset)
+        .limit(limit)
         .all()
     )
 
@@ -72,8 +86,10 @@ def list_departments(
     hospital: Hospital = Depends(require_managed_hospital),
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(require_role(Role.hospital_admin)),
+    limit: int = 500,
+    offset: int = 0,
 ):
-    return _scoped_list(Department, hospital, ctx, db)
+    return _scoped_list(Department, hospital, ctx, db, limit, offset)
 
 
 @router.post(
@@ -159,8 +175,10 @@ def list_specialties(
     hospital: Hospital = Depends(require_managed_hospital),
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(require_role(Role.hospital_admin)),
+    limit: int = 500,
+    offset: int = 0,
 ):
-    return _scoped_list(Specialty, hospital, ctx, db)
+    return _scoped_list(Specialty, hospital, ctx, db, limit, offset)
 
 
 @router.post(
@@ -269,8 +287,10 @@ def list_appointment_types(
     hospital: Hospital = Depends(require_managed_hospital),
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(require_role(Role.hospital_admin)),
+    limit: int = 500,
+    offset: int = 0,
 ):
-    return _scoped_list(AppointmentType, hospital, ctx, db)
+    return _scoped_list(AppointmentType, hospital, ctx, db, limit, offset)
 
 
 @router.post(

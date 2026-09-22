@@ -367,8 +367,13 @@ export interface StaffMember {
   created_at: string;
 }
 
-export async function listStaff(hospitalId: string): Promise<StaffMember[]> {
-  return (await api.get(`/hospitals/${hospitalId}/staff`)).data;
+export interface PageParams {
+  limit?: number;
+  offset?: number;
+}
+
+export async function listStaff(hospitalId: string, page?: PageParams): Promise<StaffMember[]> {
+  return (await api.get(`/hospitals/${hospitalId}/staff`, { params: page })).data;
 }
 
 export async function inviteStaff(
@@ -400,8 +405,8 @@ export interface Specialty {
   updated_at: string;
 }
 
-export async function listDepartments(hospitalId: string): Promise<Department[]> {
-  return (await api.get(`/hospitals/${hospitalId}/departments`)).data;
+export async function listDepartments(hospitalId: string, page?: PageParams): Promise<Department[]> {
+  return (await api.get(`/hospitals/${hospitalId}/departments`, { params: page })).data;
 }
 
 export async function createDepartment(hospitalId: string, name: string): Promise<Department> {
@@ -420,8 +425,8 @@ export async function deleteDepartment(hospitalId: string, id: string): Promise<
   await api.delete(`/hospitals/${hospitalId}/departments/${id}`);
 }
 
-export async function listSpecialties(hospitalId: string): Promise<Specialty[]> {
-  return (await api.get(`/hospitals/${hospitalId}/specialties`)).data;
+export async function listSpecialties(hospitalId: string, page?: PageParams): Promise<Specialty[]> {
+  return (await api.get(`/hospitals/${hospitalId}/specialties`, { params: page })).data;
 }
 
 export async function createSpecialty(hospitalId: string, name: string): Promise<Specialty> {
@@ -440,8 +445,8 @@ export async function renameSpecialty(
   return (await api.put(`/hospitals/${hospitalId}/specialties/${id}`, { name })).data;
 }
 
-export async function listAppointmentTypes(hospitalId: string): Promise<AppointmentType[]> {
-  return (await api.get(`/hospitals/${hospitalId}/appointment-types`)).data;
+export async function listAppointmentTypes(hospitalId: string, page?: PageParams): Promise<AppointmentType[]> {
+  return (await api.get(`/hospitals/${hospitalId}/appointment-types`, { params: page })).data;
 }
 
 export async function createAppointmentType(
@@ -481,8 +486,8 @@ export interface DoctorDetail extends Doctor {
   updated_at: string;
 }
 
-export async function listDoctors(hospitalId: string): Promise<DoctorDetail[]> {
-  return (await api.get(`/hospitals/${hospitalId}/doctors`)).data;
+export async function listDoctors(hospitalId: string, page?: PageParams): Promise<DoctorDetail[]> {
+  return (await api.get(`/hospitals/${hospitalId}/doctors`, { params: page })).data;
 }
 
 export async function createDoctor(
@@ -546,8 +551,15 @@ export async function deleteDoctor(hospitalId: string, id: string): Promise<void
 
 // -- appointments ---------------------------------------------------------------
 
-export async function listAppointments(hospitalId: string): Promise<Appointment[]> {
-  return (await api.get("/appointments", { params: { hospital_id: hospitalId } })).data;
+export async function listAppointments(
+  hospitalId: string,
+  page?: PageParams & { state?: string },
+): Promise<Appointment[]> {
+  return (
+    await api.get("/appointments", {
+      params: { hospital_id: hospitalId, limit: page?.limit ?? 200, offset: page?.offset ?? 0, ...(page?.state ? { state: page.state } : {}) },
+    })
+  ).data;
 }
 
 export async function cancelAppointment(id: string, reason?: string): Promise<Appointment> {
@@ -597,8 +609,8 @@ export interface QuestionnaireDetail {
   questions: QuestionnaireQuestion[];
 }
 
-export async function listQuestionnaires(hospitalId: string): Promise<Questionnaire[]> {
-  return (await api.get(`/hospitals/${hospitalId}/questionnaires`)).data;
+export async function listQuestionnaires(hospitalId: string, page?: PageParams): Promise<Questionnaire[]> {
+  return (await api.get(`/hospitals/${hospitalId}/questionnaires`, { params: page })).data;
 }
 
 export async function createQuestionnaire(
@@ -673,8 +685,8 @@ export interface AIActivityResponse {
   executions: AIActivityEntry[];
 }
 
-export async function fetchAIActivity(hospitalId: string): Promise<AIActivityResponse> {
-  return (await api.get(`/hospitals/${hospitalId}/ai-activity`)).data;
+export async function fetchAIActivity(hospitalId: string, page?: PageParams): Promise<AIActivityResponse> {
+  return (await api.get(`/hospitals/${hospitalId}/ai-activity`, { params: { limit: page?.limit ?? 100, offset: page?.offset ?? 0 } })).data;
 }
 
 export async function fetchIntegrationStatus(hospitalId: string): Promise<IntegrationStatus> {
@@ -703,8 +715,8 @@ export interface WorkflowExecution {
   updated_at: string;
 }
 
-export async function listWorkflows(): Promise<WorkflowExecution[]> {
-  return (await api.get("/workflows")).data;
+export async function listWorkflows(page?: PageParams): Promise<WorkflowExecution[]> {
+  return (await api.get("/workflows", { params: { limit: page?.limit ?? 100, offset: page?.offset ?? 0 } })).data;
 }
 
 // -- operations (retry queue / recovery history) ------------------------------------
@@ -723,8 +735,10 @@ export interface Operation {
 export async function listOperations(params?: {
   status?: string;
   operation_type?: string;
+  limit?: number;
+  offset?: number;
 }): Promise<Operation[]> {
-  return (await api.get("/operations", { params })).data;
+  return (await api.get("/operations", { params: { limit: 100, offset: 0, ...params } })).data;
 }
 
 export async function retryOperation(id: string): Promise<{
@@ -749,8 +763,10 @@ export async function verifyAppointment(
 
 export async function listReconciliations(params?: {
   resolution_status?: string;
+  limit?: number;
+  offset?: number;
 }): Promise<ReconciliationRecord[]> {
-  return (await api.get("/reconciliation/records", { params })).data;
+  return (await api.get("/reconciliation/records", { params: { limit: 100, offset: 0, ...params } })).data;
 }
 
 export async function fetchReconciliation(id: string): Promise<ReconciliationDetail> {
@@ -781,8 +797,8 @@ export interface Escalation {
   created_at: string;
 }
 
-export async function listEscalations(): Promise<Escalation[]> {
-  return (await api.get("/escalations")).data;
+export async function listEscalations(page?: PageParams): Promise<Escalation[]> {
+  return (await api.get("/escalations", { params: { limit: page?.limit ?? 100, offset: page?.offset ?? 0 } })).data;
 }
 
 export async function resolveEscalation(id: string): Promise<Escalation> {

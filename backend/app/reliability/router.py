@@ -111,6 +111,8 @@ def _detail_out(db: Session, record: ReconciliationRecord) -> RecordDetailOut:
 def list_records(
     resolution_status: ResolutionStatus | None = None,
     hospital_id: uuid.UUID | None = None,
+    limit: int = 100,
+    offset: int = 0,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(_operator),
 ) -> list:
@@ -121,6 +123,8 @@ def list_records(
                 detail="Not allowed to list this hospital",
             )
         hospital_id = ctx.hospital_id
+    limit = min(max(limit, 1), 500)
+    offset = max(offset, 0)
     query = db.query(ReconciliationRecord)
     if hospital_id is not None:
         query = query.filter(ReconciliationRecord.hospital_id == hospital_id)
@@ -128,7 +132,7 @@ def list_records(
         query = query.filter(
             ReconciliationRecord.resolution_status == resolution_status
         )
-    return query.order_by(ReconciliationRecord.created_at.desc()).all()
+    return query.order_by(ReconciliationRecord.created_at.desc()).offset(offset).limit(limit).all()
 
 
 @router.get(
@@ -242,6 +246,7 @@ def list_operations(
     operation_type: OperationType | None = None,
     hospital_id: uuid.UUID | None = None,
     limit: int = 50,
+    offset: int = 0,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(_operator),
 ) -> list:
@@ -265,6 +270,7 @@ def list_operations(
         query = query.filter(IntegrationOperation.operation_type == operation_type)
     return (
         query.order_by(IntegrationOperation.created_at.desc())
+        .offset(max(offset, 0))
         .limit(min(max(limit, 1), 200))
         .all()
     )

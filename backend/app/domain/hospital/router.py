@@ -112,12 +112,18 @@ def list_staff(
     hospital_id: uuid.UUID,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(require_role(Role.hospital_admin)),
+    limit: int = 200,
+    offset: int = 0,
 ) -> list:
     hospital = _own_hospital_or_403(db, ctx, hospital_id)
+    limit = min(max(limit, 1), 500)
+    offset = max(offset, 0)
     return (
         db.query(User)
         .filter(User.hospital_id == hospital.id)
-        .order_by(User.created_at)
+        .order_by(User.created_at.desc())
+        .offset(offset)
+        .limit(limit)
         .all()
     )
 

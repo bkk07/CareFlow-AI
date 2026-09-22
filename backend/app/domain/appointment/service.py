@@ -813,6 +813,8 @@ def list_appointments(
     patient_id: uuid.UUID | None = None,
     doctor_id: uuid.UUID | None = None,
     state: AppointmentState | None = None,
+    limit: int = 200,
+    offset: int = 0,
 ) -> list[Appointment]:
     query = session.query(Appointment)
     if hospital_id is not None:
@@ -823,7 +825,9 @@ def list_appointments(
         query = query.filter(Appointment.doctor_id == doctor_id)
     if state is not None:
         query = query.filter(Appointment.state == state)
-    return query.order_by(Appointment.slot_start).all()
+    limit = min(max(limit, 1), 500)
+    offset = max(offset, 0)
+    return query.order_by(Appointment.slot_start.desc()).offset(offset).limit(limit).all()
 
 
 __all__ = [

@@ -34,11 +34,17 @@ def list_doctors(
     hospital: Hospital = Depends(require_managed_hospital),
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(require_role(Role.hospital_admin)),
+    limit: int = 200,
+    offset: int = 0,
 ):
+    limit = min(max(limit, 1), 500)
+    offset = max(offset, 0)
     rows = (
         hospital_scoped_query(Doctor, ctx, db)
         .filter(Doctor.hospital_id == hospital.id)
         .order_by(Doctor.name)
+        .offset(offset)
+        .limit(limit)
         .all()
     )
     return service.attach_login_emails(db, rows)

@@ -1,45 +1,53 @@
-import { useState } from "react";
-import { Activity, CheckCircle2, XCircle } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Activity, CheckCircle2, Search, XCircle } from "lucide-react";
 import { useAdmin } from "../../store/AdminStore";
-import { Button, MetricCard, StatusBadge } from "../../components/common/ui";
+import { Button, MetricCard, PageHeader, StatusBadge, TableSkeleton } from "../../components/common/ui";
 import { Drawer, ResponsiveTable } from "../../components/common/Modal";
+import { Pagination, usePagination } from "../../components/common/Pagination";
 import type { AIExecRow } from "../../store/AdminStore";
 
-export function LiveBanner({ text }: { text: string }) {
-  const { live, loading, refreshAll } = useAdmin();
+export function LiveBanner({ text, onRefresh }: { text: string; onRefresh?: () => void }) {
+  const { live, loading, syncing, refreshAll } = useAdmin();
   if (!live) return null;
+  const busy = loading || syncing;
   return (
-    <div className="flex items-center gap-2">
-      <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">
-        {loading ? "Syncing…" : text}
+    <div className="flex items-center gap-2 flex-wrap">
+      <p className="inline-flex items-center gap-1.5 text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-full px-3 py-1.5 w-fit">
+        <span className={`w-1.5 h-1.5 rounded-full ${busy ? "bg-teal-dark animate-pulse" : "bg-success"}`} aria-hidden />
+        {busy ? "Syncing…" : text}
       </p>
-      <button onClick={() => void refreshAll()} className="text-[0.8rem] font-bold text-healthcare hover:underline">Refresh</button>
+      <button
+        onClick={() => (onRefresh ? onRefresh() : void refreshAll())}
+        disabled={busy}
+        className="text-[0.8rem] font-bold text-healthcare hover:underline disabled:opacity-50 disabled:no-underline"
+      >
+        Refresh
+      </button>
     </div>
   );
 }
 
 export function AIActivityPage() {
-  const { aiExecutions, loading, backendError, refreshAll } = useAdmin();
+  const { aiExecutions, loading, syncing, backendError, refreshSection } = useAdmin();
   const [selected, setSelected] = useState<AIExecRow | null>(null);
+  const [query, setQuery] = useState("");
 
-  if (loading && aiExecutions.length === 0) {
+  const filtered = useMemo(() => {
+    const q = query.toLowerCase().trim();
+    if (!q) return aiExecutions;
+    return aiExecutions.filter((e) => e.tool.toLowerCase().includes(q) || e.status.toLowerCase().includes(q));
+  }, [aiExecutions, query]);
+  const pager = usePagination(filtered, { initialSize: 10 });
+  const isInitial = loading && aiExecutions.length === 0;
+
+  if (backendError && aiExecutions.length === 0 && !isInitial) {
     return (
       <div className="space-y-4">
-        <div><h1 className="page-title">AI Activity</h1><p className="page-sub mt-1">Administrative assistant oversight. No patient conversation content shown.</p></div>
-        <LiveBanner text="Live capability executions from your hospital" />
-        <div className="card-base p-5 text-sm text-ink-secondary">Loading AI activity…</div>
-      </div>
-    );
-  }
-
-  if (backendError && aiExecutions.length === 0) {
-    return (
-      <div className="space-y-4">
-        <div><h1 className="page-title">AI Activity</h1><p className="page-sub mt-1">Administrative assistant oversight. No patient conversation content shown.</p></div>
-        <LiveBanner text="Live capability executions from your hospital" />
+        <PageHeader title="AI Activity" sub="Administrative assistant oversight. No patient conversation content shown." />
+        <LiveBanner text="Live capability executions from your hospital" onRefresh={() => void refreshSection("insights")} />
         <div className="card-base p-5">
           <p role="alert" className="text-[0.83rem] font-semibold text-danger">{backendError}</p>
-          <button onClick={() => void refreshAll()} className="mt-2 text-[0.8rem] font-bold text-healthcare hover:underline">Retry</button>
+          <button onClick={() => void refreshSection("insights")} className="mt-2 text-[0.8rem] font-bold text-healthcare hover:underline">Retry</button>
         </div>
       </div>
     );
@@ -52,16 +60,30 @@ export function AIActivityPage() {
     : 0;
   return (
     <div className="space-y-4">
-      <div><h1 className="page-title">AI Activity</h1><p className="page-sub mt-1">Administrative assistant oversight. No patient conversation content shown.</p></div>
-      <LiveBanner text="Live capability executions from your hospital" />
+      <PageHeader title="AI Activity" sub="Administrative assistant oversight. No patient conversation content shown." count={`${filtered.length}`} />
+      <LiveBanner text="Live capability executions from your hospital" onRefresh={() => void refreshSection("insights")} />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
         <MetricCard label="Executions" value={String(aiExecutions.length)} sub="recent" />
         <MetricCard label="Success" value={String(success)} sub="capability level" tone="success" />
         <MetricCard label="Errors" value={String(errors)} sub="needs review" tone={errors > 0 ? "danger" : "navy"} />
         <MetricCard label="Avg latency" value={`${avg} ms`} sub="per execution" tone="teal" />
       </div>
-      <ResponsiveTable headers={["Time", "Capability", "Status", "Duration", "Correlation", "Error"]}>
-        {aiExecutions.map((e) => (
+      <div className="card-base p-3.5 flex flex-col sm:flex-row gap-2">
+        <div className="flex items-center gap-2 flex-1 bg-background border border-border rounded-xl px-3 focus-within:border-healthcare focus-within:ring-2 focus-within:ring-healthcare/15 transition">
+          <Search size={15} className="text-ink-faint shrink-0" />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter by capability or status…" aria-label="Filter AI activity" className="w-full bg-transparent outline-none py-2 text-[0.86rem]" />
+        </div>
+      </div>
+      {isInitial ? (
+        <TableSkeleton rows={8} cols={5} />
+      ) : (
+      <ResponsiveTable
+        headers={["Time", "Capability", "Status", "Duration", "Correlation", "Error"]}
+        footer={
+          <Pagination page={pager.page} totalPages={pager.totalPages} total={pager.total} start={pager.start} end={pager.end} pageSize={pager.pageSize} onPage={pager.setPage} onSize={pager.setPageSize} />
+        }
+      >
+        {pager.pageItems.map((e) => (
           <tr key={e.id} className="hover:bg-background/60 transition cursor-pointer" onClick={() => setSelected(e)}>
             <td className="td-cell whitespace-nowrap">{e.time}</td>
             <td className="td-cell font-mono text-[0.78rem]">{e.tool}</td>
@@ -72,9 +94,11 @@ export function AIActivityPage() {
           </tr>
         ))}
       </ResponsiveTable>
-      {aiExecutions.length === 0 && (
+      )}
+      {filtered.length === 0 && !isInitial && (
         <div className="card-base p-5 text-sm text-ink-secondary">No capability executions recorded yet.</div>
       )}
+      {syncing && <p className="text-[0.75rem] text-ink-faint">Syncing in background…</p>}
       <Drawer open={!!selected} onClose={() => setSelected(null)} title="Capability execution">
         {selected && (
           <dl className="text-sm border border-border rounded-control overflow-hidden">
@@ -99,39 +123,30 @@ export function AIActivityPage() {
 }
 
 export function IntegrationPage() {
-  const { integration, integrationRows, operations, loading, backendError, refreshAll } = useAdmin();
+  const { integration, integrationRows, operations, loading, backendError, refreshSection } = useAdmin();
   const [tested, setTested] = useState(false);
+  const pager = usePagination(integrationRows, { initialSize: 10 });
+  const isInitial = loading && integrationRows.length === 0 && !integration;
 
-  if (loading && integrationRows.length === 0 && !integration) {
+  if (backendError && integrationRows.length === 0 && !integration && !isInitial) {
     return (
       <div className="space-y-4">
-        <div><h1 className="page-title">Integration</h1><p className="page-sub mt-1">Vendor connection health for your hospital.</p></div>
-        <LiveBanner text="Live integration status" />
-        <div className="card-base p-5 text-sm text-ink-secondary">Loading integration status…</div>
-      </div>
-    );
-  }
-
-  if (backendError && integrationRows.length === 0 && !integration) {
-    return (
-      <div className="space-y-4">
-        <div><h1 className="page-title">Integration</h1><p className="page-sub mt-1">Vendor connection health for your hospital.</p></div>
-        <LiveBanner text="Live integration status" />
+        <PageHeader title="Integration" sub="Vendor connection health for your hospital." />
+        <LiveBanner text="Live integration status" onRefresh={() => void refreshSection("insights")} />
         <div className="card-base p-5">
           <p role="alert" className="text-[0.83rem] font-semibold text-danger">{backendError}</p>
-          <button onClick={() => void refreshAll()} className="mt-2 text-[0.8rem] font-bold text-healthcare hover:underline">Retry</button>
+          <button onClick={() => void refreshSection("insights")} className="mt-2 text-[0.8rem] font-bold text-healthcare hover:underline">Retry</button>
         </div>
       </div>
     );
   }
 
-  const recent = integrationRows.slice(0, 8);
-  const failed = recent.filter((o) => o.status === "error").length;
+  const failed = integrationRows.filter((o) => o.status === "error").length;
   const unknown = operations.filter((o) => o.status === "unknown").length;
   return (
     <div className="space-y-4">
-      <div><h1 className="page-title">Integration</h1><p className="page-sub mt-1">Vendor connection health for your hospital.</p></div>
-      <LiveBanner text="Live integration status" />
+      <PageHeader title="Integration" sub="Vendor connection health for your hospital." count={`${integrationRows.length}`} />
+      <LiveBanner text="Live integration status" onRefresh={() => void refreshSection("insights")} />
       <div className="card-base p-5 flex flex-col sm:flex-row sm:items-center gap-4">
         <span className="w-12 h-12 rounded-xl bg-teal-soft text-teal-dark flex items-center justify-center font-extrabold">EHR</span>
         <div className="flex-1">
@@ -145,24 +160,33 @@ export function IntegrationPage() {
           <Button size="sm" variant="outline" onClick={() => setTested(true)}>Test connection</Button>
         </div>
       </div>
-      {tested && <p className="flex items-center gap-1.5 text-[0.85rem] font-bold text-success bg-success-soft border border-success/25 rounded-control px-3.5 py-2.5"><CheckCircle2 size={15} /> Connection test passed — vendor reachable.</p>}
+      {tested && <p className="flex items-center gap-1.5 text-[0.85rem] font-bold text-success bg-success-soft border border-success/25 rounded-xl px-3.5 py-2.5"><CheckCircle2 size={15} /> Connection test passed — vendor reachable.</p>}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-        <MetricCard label="Recent executions" value={String(recent.length)} />
+        <MetricCard label="Recent executions" value={String(integrationRows.length)} />
         <MetricCard label="Errors" value={String(failed)} tone={failed > 0 ? "danger" : "success"} />
         <MetricCard label="Unknown outcomes" value={String(unknown)} tone={unknown > 0 ? "warning" : "navy"} />
         <MetricCard label="Verifications (24h)" value={String(Object.values(integration?.verifications_24h ?? {}).reduce((s, n) => s + n, 0))} tone="teal" />
       </div>
-      <ResponsiveTable headers={["Capability", "Status", "Latency", "At"]}>
-        {recent.map((op) => (
+      {isInitial ? (
+        <TableSkeleton rows={6} cols={4} />
+      ) : (
+      <ResponsiveTable
+        headers={["Capability", "Status", "Latency", "At"]}
+        footer={
+          <Pagination page={pager.page} totalPages={pager.totalPages} total={pager.total} start={pager.start} end={pager.end} pageSize={pager.pageSize} onPage={pager.setPage} onSize={pager.setPageSize} />
+        }
+      >
+        {pager.pageItems.map((op) => (
           <tr key={op.id} className="hover:bg-background/60">
             <td className="td-cell font-mono text-[0.8rem]">{op.tool_name}</td>
             <td className="td-cell"><StatusBadge status={op.status} /></td>
-            <td className="td-cell">{Math.round(op.latency_ms)} ms</td>
+            <td className="td-cell tabular-nums">{Math.round(op.latency_ms)} ms</td>
             <td className="td-cell">{op.created_at}</td>
           </tr>
         ))}
       </ResponsiveTable>
-      {recent.length === 0 && (
+      )}
+      {integrationRows.length === 0 && !isInitial && (
         <div className="card-base p-5 text-sm text-ink-secondary">No recent vendor executions recorded yet.</div>
       )}
     </div>
@@ -170,27 +194,19 @@ export function IntegrationPage() {
 }
 
 export function WorkflowsPage() {
-  const { workflows, loading, backendError, refreshAll } = useAdmin();
+  const { workflows, loading, backendError, refreshSection } = useAdmin();
   const [openId, setOpenId] = useState<string | null>(null);
+  const pager = usePagination(workflows, { initialSize: 10 });
+  const isInitial = loading && workflows.length === 0;
 
-  if (loading && workflows.length === 0) {
+  if (backendError && workflows.length === 0 && !isInitial) {
     return (
       <div className="space-y-4">
-        <div><h1 className="page-title">Workflows</h1><p className="page-sub mt-1">Automated follow-ups triggered by scheduling events.</p></div>
-        <LiveBanner text="Live workflow executions for your hospital" />
-        <div className="card-base p-5 text-sm text-ink-secondary">Loading workflows…</div>
-      </div>
-    );
-  }
-
-  if (backendError && workflows.length === 0) {
-    return (
-      <div className="space-y-4">
-        <div><h1 className="page-title">Workflows</h1><p className="page-sub mt-1">Automated follow-ups triggered by scheduling events.</p></div>
-        <LiveBanner text="Live workflow executions for your hospital" />
+        <PageHeader title="Workflows" sub="Automated follow-ups triggered by scheduling events." />
+        <LiveBanner text="Live workflow executions for your hospital" onRefresh={() => void refreshSection("ops")} />
         <div className="card-base p-5">
           <p role="alert" className="text-[0.83rem] font-semibold text-danger">{backendError}</p>
-          <button onClick={() => void refreshAll()} className="mt-2 text-[0.8rem] font-bold text-healthcare hover:underline">Retry</button>
+          <button onClick={() => void refreshSection("ops")} className="mt-2 text-[0.8rem] font-bold text-healthcare hover:underline">Retry</button>
         </div>
       </div>
     );
@@ -198,10 +214,13 @@ export function WorkflowsPage() {
 
   return (
     <div className="space-y-4">
-      <div><h1 className="page-title">Workflows</h1><p className="page-sub mt-1">Automated follow-ups triggered by scheduling events.</p></div>
-      <LiveBanner text="Live workflow executions for your hospital" />
+      <PageHeader title="Workflows" sub="Automated follow-ups triggered by scheduling events." count={`${workflows.length}`} />
+      <LiveBanner text="Live workflow executions for your hospital" onRefresh={() => void refreshSection("ops")} />
+      {isInitial ? (
+        <TableSkeleton rows={5} cols={3} />
+      ) : (
       <div className="space-y-2.5">
-        {workflows.map((w) => {
+        {pager.pageItems.map((w) => {
           const open = openId === w.id;
           return (
             <article key={w.id} className="card-base p-4">
@@ -233,7 +252,13 @@ export function WorkflowsPage() {
           );
         })}
       </div>
-      {workflows.length === 0 && (
+      )}
+      {workflows.length > 0 && (
+        <div className="card-base overflow-hidden">
+          <Pagination page={pager.page} totalPages={pager.totalPages} total={pager.total} start={pager.start} end={pager.end} pageSize={pager.pageSize} onPage={pager.setPage} onSize={pager.setPageSize} />
+        </div>
+      )}
+      {workflows.length === 0 && !isInitial && (
         <div className="card-base p-5 text-sm text-ink-secondary">No workflow executions recorded yet — bookings and sweeps will appear here.</div>
       )}
     </div>

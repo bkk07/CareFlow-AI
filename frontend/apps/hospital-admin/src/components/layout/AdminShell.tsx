@@ -58,36 +58,47 @@ function NavList({ items }: { items: typeof HOSPITAL_NAV }) {
 }
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
-  const { logout, unread, notifications, markAllRead, hospital, user, live, loading } = useAdmin();
+  const { logout, unread, notifications, markAllRead, hospital, user, live, loading, syncing } = useAdmin();
   const [panelOpen, setPanelOpen] = useState(false);
   const navigate = useNavigate();
+  const busy = loading || syncing;
 
   return (
     <div className="min-h-screen bg-background">
-      <aside className="hidden md:flex fixed inset-y-0 left-0 w-[252px] flex-col bg-white border-r border-border px-3.5 py-4 z-30" aria-label="Primary">
-        <Link to="/" className="flex items-center gap-2.5 px-1" aria-label="CareFlow AI home">
-          <span className="w-9 h-9 rounded-[10px] bg-gradient-to-br from-healthcare to-navy text-white flex items-center justify-center font-extrabold">+</span>
+      <aside className="hidden md:flex fixed inset-y-0 left-0 w-[264px] flex-col bg-white border-r border-border px-3.5 py-4 z-30" aria-label="Primary">
+        <Link to="/" className="flex items-center gap-2.5 px-1.5 py-1 rounded-xl hover:bg-background transition" aria-label="CareFlow AI home">
+          <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-healthcare to-navy text-white flex items-center justify-center font-extrabold shadow-subtle">+</span>
           <span className="leading-none">
-            <span className="block font-extrabold text-navy">CareFlow <span className="text-healthcare">AI</span></span>
+            <span className="block font-extrabold text-navy tracking-tight">CareFlow <span className="text-healthcare">AI</span></span>
             <span className="block text-[0.64rem] font-bold uppercase tracking-widest text-ink-faint mt-0.5">Hospital Console</span>
           </span>
+          <span className={`ml-auto w-2 h-2 rounded-full ${live ? (busy ? "bg-warning animate-pulse" : "bg-success") : "bg-border"}`} title={live ? (busy ? "Syncing" : "Live") : "Offline"} />
         </Link>
         <div className="flex-1 overflow-y-auto mt-3 pb-2"><NavList items={HOSPITAL_NAV} /></div>
-        <button onClick={() => { logout(); navigate("/login"); }} className="w-full flex items-center gap-2.5 px-3.5 py-2 rounded-control text-[0.83rem] font-semibold text-ink-secondary hover:text-danger hover:bg-danger-soft transition">
-          <LogOut size={15} /> Sign out
-        </button>
+        <div className="border-t border-border pt-2.5 mt-1">
+          <div className="px-3.5 py-2 mb-1.5 rounded-xl bg-background border border-border/70">
+            <p className="text-[0.72rem] font-bold text-navy truncate">{hospital?.name ?? "Hospital"}</p>
+            <p className="text-[0.68rem] text-ink-faint truncate">{hospital?.status?.replace("_", " ") ?? "—"}</p>
+          </div>
+          <button onClick={() => { logout(); navigate("/login"); }} className="w-full flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-[0.83rem] font-semibold text-ink-secondary hover:text-danger hover:bg-danger-soft transition">
+            <LogOut size={15} /> Sign out
+          </button>
+        </div>
       </aside>
 
-      <header className="md:pl-[252px] sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-border">
-        <div className="max-w-shell mx-auto px-4 sm:px-6 h-[60px] flex items-center gap-3">
+      <header className="md:pl-[264px] sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-border">
+        <div className="max-w-shell mx-auto px-4 sm:px-6 h-[62px] flex items-center gap-3">
           <div className="min-w-0">
-            <p className="font-bold text-navy text-[0.9rem] truncate">{hospital?.name ?? (live ? "Hospital" : loading ? "Connecting…" : "Hospital")}</p>
-            <p className="text-[0.72rem] text-ink-secondary leading-none">{user?.email ?? "Hospital Administrator"}</p>
+            <p className="font-bold text-navy text-[0.92rem] truncate flex items-center gap-2">
+              {hospital?.name ?? (live ? "Hospital" : loading ? "Connecting…" : "Hospital")}
+              {busy && <span className="inline-flex items-center gap-1 text-[0.68rem] font-bold text-warning bg-warning-soft border border-warning/25 rounded-full px-2 py-0.5"><span className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse" />Syncing</span>}
+            </p>
+            <p className="text-[0.72rem] text-ink-secondary leading-none truncate">{user?.email ?? "Hospital Administrator"}</p>
           </div>
           <div className="flex-1" />
-          <div className="hidden sm:flex items-center gap-2 bg-background border border-border rounded-control px-3 py-2 w-64">
-            <input placeholder="Search…" aria-label="Search" className="w-full bg-transparent outline-none text-[0.83rem]" />
-          </div>
+          <Link to="/appointments" className="hidden sm:inline-flex items-center gap-1.5 text-[0.78rem] font-bold text-ink-secondary hover:text-healthcare border border-border rounded-full px-3 py-1.5 hover:border-healthcare transition">
+            View bookings
+          </Link>
           <div className="relative">
             <button onClick={() => setPanelOpen((v) => !v)} aria-label={`Notifications, ${unread} unread`} className="relative w-10 h-10 rounded-full border border-border bg-white flex items-center justify-center text-ink-secondary hover:text-healthcare hover:border-healthcare transition">
               <Bell size={17} />
@@ -121,13 +132,13 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <div className="md:pl-[252px]">
-        <main className="shell-container pt-5">{children}</main>
+      <div className="md:pl-[264px]">
+        <main className="shell-container pt-5 pb-24 md:pb-10">{children}</main>
       </div>
 
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-border px-2 pt-1.5 pb-[calc(0.4rem+env(safe-area-inset-bottom))] overflow-x-auto no-scrollbar" aria-label="Mobile">
         <div className="flex gap-1 min-w-max">
-          {HOSPITAL_NAV.slice(0, 6).map((n) => (
+          {HOSPITAL_NAV.map((n) => (
             <NavLink key={n.to + n.label} to={n.to} end={n.end} className={({ isActive }) => `flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl text-[0.64rem] font-semibold whitespace-nowrap ${isActive ? "text-healthcare bg-healthcare-soft" : "text-ink-faint"}`}>
               <n.icon size={19} />{n.label}
             </NavLink>

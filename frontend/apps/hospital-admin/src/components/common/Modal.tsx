@@ -83,17 +83,26 @@ export function Tabs<T extends string>({ tabs, active, onChange }: { tabs: { id:
   );
 }
 
-export function ResponsiveTable({ headers, children }: { headers: string[]; children: React.ReactNode }) {
+export function ResponsiveTable({
+  headers,
+  children,
+  footer,
+}: {
+  headers: string[];
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+}) {
   return (
     <div className="card-base overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px]">
-          <thead className="bg-background/70 border-b border-border">
+          <thead className="bg-background/80 border-b border-border sticky top-0 z-[1]">
             <tr>{headers.map((h) => <th key={h} scope="col" className="th-cell">{h}</th>)}</tr>
           </thead>
           <tbody className="divide-y divide-border/70">{children}</tbody>
         </table>
       </div>
+      {footer}
     </div>
   );
 }

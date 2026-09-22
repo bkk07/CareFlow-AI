@@ -187,6 +187,8 @@ def list_appointments(
     doctor_id: uuid.UUID | None = None,
     hospital_id: uuid.UUID | None = None,
     state: AppointmentState | None = None,
+    limit: int = 200,
+    offset: int = 0,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(_reader),
 ) -> list:
@@ -230,6 +232,8 @@ def list_appointments(
         patient_id=patient_id,
         doctor_id=doctor_id,
         state=state,
+        limit=limit,
+        offset=offset,
     )
 
 

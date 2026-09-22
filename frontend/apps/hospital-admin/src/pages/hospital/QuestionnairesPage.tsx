@@ -1,13 +1,15 @@
-import { useState } from "react";
-import { Copy, Eye, Plus } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Copy, Eye, Plus, Search } from "lucide-react";
 import { useAdmin } from "../../store/AdminStore";
-import { Button, EmptyState, StatusBadge } from "../../components/common/ui";
+import { Button, EmptyState, LivePill, PageHeader, StatusBadge, TableSkeleton } from "../../components/common/ui";
 import { Drawer, Modal, ResponsiveTable } from "../../components/common/Modal";
+import { Pagination, usePagination } from "../../components/common/Pagination";
 import type { Questionnaire } from "../../types";
 import type { QuestionnaireDetail } from "../../api";
 
 export default function QuestionnairesPage() {
-  const { questionnaires, duplicateQuestionnaire, toggleQuestionnaire, deleteQuestionnaire, updateQuestionnaireQuestion, deleteQuestionnaireQuestion, createQuestionnaire, fetchQuestionnaireDetail, addQuestionnaireQuestion, specialties, doctors, types, live, loading, backendError, refreshAll } = useAdmin();
+  const { questionnaires, duplicateQuestionnaire, toggleQuestionnaire, deleteQuestionnaire, updateQuestionnaireQuestion, deleteQuestionnaireQuestion, createQuestionnaire, fetchQuestionnaireDetail, addQuestionnaireQuestion, specialties, doctors, types, live, loading, syncing, backendError, refreshSection } = useAdmin();
+  const [query, setQuery] = useState("");
   const [preview, setPreview] = useState<Questionnaire | null>(null);
   const [previewDetail, setPreviewDetail] = useState<QuestionnaireDetail | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -95,36 +97,47 @@ export default function QuestionnairesPage() {
     options: f.options ?? undefined,
   }));
 
-  if (loading && questionnaires.length === 0) {
-    return (
-      <div className="space-y-4">
-        <div><h1 className="page-title">Questionnaires</h1><p className="page-sub mt-1">Administrative pre-visit forms. No diagnostic content.</p></div>
-        <div className="card-base p-5 text-sm text-ink-secondary">Loading questionnaires…</div>
-      </div>
-    );
-  }
+  const filtered = useMemo(() => {
+    const q = query.toLowerCase().trim();
+    if (!q) return questionnaires;
+    return questionnaires.filter((f) => f.name.toLowerCase().includes(q));
+  }, [questionnaires, query]);
+  const pager = usePagination(filtered, { initialSize: 10 });
+  const isInitial = loading && questionnaires.length === 0;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div><h1 className="page-title">Questionnaires</h1><p className="page-sub mt-1">Administrative pre-visit forms. No diagnostic content.</p></div>
-        <Button size="sm" onClick={() => setCreateOpen(true)}><Plus size={15} /> Create</Button>
+      <PageHeader
+        title="Questionnaires"
+        sub="Administrative pre-visit forms. No diagnostic content."
+        count={`${filtered.length}`}
+        actions={<Button size="sm" onClick={() => setCreateOpen(true)}><Plus size={15} /> Create</Button>}
+      />
+
+      {live && <LivePill syncing={syncing} loading={loading} text="Live forms — only active forms resolve for new appointments." />}
+      {(error ?? backendError) && (
+        <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-xl px-3.5 py-2.5">{error ?? backendError}</p>
+      )}
+
+      <div className="card-base p-3.5 flex flex-col sm:flex-row gap-2 sticky top-[60px] z-10">
+        <div className="flex items-center gap-2 flex-1 bg-background border border-border rounded-xl px-3 focus-within:border-healthcare focus-within:ring-2 focus-within:ring-healthcare/15 transition">
+          <Search size={15} className="text-ink-faint shrink-0" />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search forms…" aria-label="Search questionnaires" className="w-full bg-transparent outline-none py-2 text-[0.86rem]" />
+        </div>
       </div>
 
-      {live && (
-        <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">
-          {loading ? "Syncing…" : "Live forms — only active forms resolve for new appointments."}
-        </p>
-      )}
-      {(error ?? backendError) && (
-        <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">{error ?? backendError}</p>
-      )}
-
-      {questionnaires.length === 0 ? (
-        <div className="card-base"><EmptyState title="No questionnaires" body="Create your first pre-visit form." action={<Button size="sm" variant="outline" onClick={() => void refreshAll()}>Refresh</Button>} /></div>
+      {isInitial ? (
+        <TableSkeleton rows={6} cols={4} />
+      ) : filtered.length === 0 ? (
+        <div className="card-base"><EmptyState title="No questionnaires" body="Create your first pre-visit form." action={<Button size="sm" variant="outline" onClick={() => void refreshSection("questionnaires")}>Refresh</Button>} /></div>
       ) : (
-        <ResponsiveTable headers={["Form", "Specialty", "Doctor", "Type", "Questions", "Status", "Updated", "Actions"]}>
-          {questionnaires.map((q) => (
+        <ResponsiveTable
+          headers={["Form", "Specialty", "Doctor", "Type", "Questions", "Status", "Updated", "Actions"]}
+          footer={
+            <Pagination page={pager.page} totalPages={pager.totalPages} total={pager.total} start={pager.start} end={pager.end} pageSize={pager.pageSize} onPage={pager.setPage} onSize={pager.setPageSize} />
+          }
+        >
+          {pager.pageItems.map((q) => (
             <tr key={q.id} className="hover:bg-background/60 transition">
               <td className="td-cell font-bold">{q.name}</td>
               <td className="td-cell">{q.specialty}</td>

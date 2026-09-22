@@ -50,16 +50,16 @@ body {
     @apply text-[0.98rem] font-bold text-ink tracking-tight;
   }
   .page-title {
-    @apply text-[1.4rem] sm:text-[1.6rem] font-extrabold text-navy tracking-tight leading-tight;
+    @apply text-[1.4rem] sm:text-[1.65rem] font-extrabold text-navy tracking-tight leading-tight;
   }
   .page-sub {
     @apply text-ink-secondary text-[0.86rem] leading-relaxed;
   }
   .th-cell {
-    @apply text-left text-[0.7rem] font-bold uppercase tracking-wider text-ink-secondary px-3 py-2.5 whitespace-nowrap;
+    @apply text-left text-[0.7rem] font-bold uppercase tracking-wider text-ink-secondary px-3.5 py-3 whitespace-nowrap;
   }
   .td-cell {
-    @apply px-3 py-2.5 text-[0.85rem] align-top;
+    @apply px-3.5 py-3 text-[0.85rem] align-middle;
   }
 }
 

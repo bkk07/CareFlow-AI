@@ -64,6 +64,7 @@ def list_workflows(
     status: ExecutionStatus | None = None,
     hospital_id: uuid.UUID | None = None,
     limit: int = 50,
+    offset: int = 0,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(_operator),
 ) -> list:
@@ -74,10 +75,13 @@ def list_workflows(
                 detail="Not allowed to list this hospital",
             )
         hospital_id = ctx.hospital_id
+    limit = min(max(limit, 1), 200)
+    offset = max(offset, 0)
     query = (
         db.query(WorkflowExecution)
         .order_by(WorkflowExecution.created_at.desc())
-        .limit(min(max(limit, 1), 200))
+        .offset(offset)
+        .limit(limit)
     )
     rows = query.all()
     if event_type is not None:

@@ -1,19 +1,19 @@
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Bar, BarChart, Cell } from "recharts";
 import { useAdmin } from "../../store/AdminStore";
 import { LiveBanner } from "./InsightPages";
-import { EmptyState, MetricCard } from "../../components/common/ui";
+import { EmptyState, MetricCard, PageHeader } from "../../components/common/ui";
 
 const CHART_BLUE = "#1769AA";
 const STATUS_COLORS = ["#2E8B68", "#168C8C", "#C58A22", "#1769AA", "#C94C4C"];
 
 export default function AnalyticsPage() {
-  const { analytics, loading, backendError, refreshAll } = useAdmin();
+  const { analytics, loading, backendError, refreshSection } = useAdmin();
 
   if (loading && !analytics) {
     return (
       <div className="space-y-4">
-        <div><h1 className="page-title">Analytics</h1><p className="page-sub mt-1">Scheduling and operational performance for your hospital.</p></div>
-        <LiveBanner text="Live analytics" />
+        <PageHeader title="Analytics" sub="Scheduling and operational performance for your hospital." />
+        <LiveBanner text="Live analytics" onRefresh={() => void refreshSection("insights")} />
         <div className="card-base p-5 text-sm text-ink-secondary">Loading analytics…</div>
       </div>
     );
@@ -22,11 +22,11 @@ export default function AnalyticsPage() {
   if (backendError && !analytics) {
     return (
       <div className="space-y-4">
-        <div><h1 className="page-title">Analytics</h1><p className="page-sub mt-1">Scheduling and operational performance for your hospital.</p></div>
-        <LiveBanner text="Live analytics" />
+        <PageHeader title="Analytics" sub="Scheduling and operational performance for your hospital." />
+        <LiveBanner text="Live analytics" onRefresh={() => void refreshSection("insights")} />
         <div className="card-base p-5">
           <p role="alert" className="text-[0.83rem] font-semibold text-danger">{backendError}</p>
-          <button onClick={() => void refreshAll()} className="mt-2 text-[0.8rem] font-bold text-healthcare hover:underline">Retry</button>
+          <button onClick={() => void refreshSection("insights")} className="mt-2 text-[0.8rem] font-bold text-healthcare hover:underline">Retry</button>
         </div>
       </div>
     );
@@ -35,8 +35,8 @@ export default function AnalyticsPage() {
   if (!analytics || analytics.appointments_total === 0) {
     return (
       <div className="space-y-4">
-        <div><h1 className="page-title">Analytics</h1><p className="page-sub mt-1">Scheduling and operational performance for your hospital.</p></div>
-        <LiveBanner text="Live analytics" />
+        <PageHeader title="Analytics" sub="Scheduling and operational performance for your hospital." />
+        <LiveBanner text="Live analytics" onRefresh={() => void refreshSection("insights")} />
         <div className="card-base"><EmptyState title="No analytics data yet" body="Bookings will appear here once the backend records appointments." /></div>
       </div>
     );
@@ -50,8 +50,8 @@ export default function AnalyticsPage() {
   const cancelled = analytics.appointments_by_state.cancelled ?? 0;
   return (
     <div className="space-y-4">
-      <div><h1 className="page-title">Analytics</h1><p className="page-sub mt-1">Scheduling and operational performance for your hospital.</p></div>
-      <LiveBanner text="Live analytics" />
+      <PageHeader title="Analytics" sub="Scheduling and operational performance for your hospital." />
+      <LiveBanner text="Live analytics" onRefresh={() => void refreshSection("insights")} />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
         <MetricCard label="Appointments (30d)" value={String(total)} sub="all states" />
         <MetricCard label="Confirmed share" value={total > 0 ? `${Math.round((confirmed / total) * 100)}%` : "—"} sub="confirmed / total" tone="success" />

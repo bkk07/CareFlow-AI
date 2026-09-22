@@ -1,13 +1,14 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Plus, Search } from "lucide-react";
 import { useAdmin } from "../../store/AdminStore";
-import { Avatar, Button, EmptyState, StatusBadge } from "../../components/common/ui";
+import { Avatar, Button, EmptyState, LivePill, PageHeader, StatusBadge, TableSkeleton } from "../../components/common/ui";
 import { ConfirmDialog, Drawer, ResponsiveTable } from "../../components/common/Modal";
 import { Modal } from "../../components/common/Modal";
+import { Pagination, usePagination } from "../../components/common/Pagination";
 import type { Doctor } from "../../types";
 
 export default function DoctorsPage() {
-  const { doctors, specialties, departments, setDoctorStatus, createDoctor, updateDoctor, deleteDoctor, inviteDoctorLogin, removeDoctorLogin, live, loading, backendError, refreshAll } = useAdmin();
+  const { doctors, specialties, departments, setDoctorStatus, createDoctor, updateDoctor, deleteDoctor, inviteDoctorLogin, removeDoctorLogin, live, loading, syncing, backendError, refreshSection } = useAdmin();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [selected, setSelected] = useState<Doctor | null>(null);
@@ -50,47 +51,38 @@ export default function DoctorsPage() {
     }
   }
 
-  const visible = doctors.filter((d) => {
-    if (status !== "all" && d.status !== status) return false;
+  const visible = useMemo(() => {
     const q = query.toLowerCase().trim();
-    if (q && !d.name.toLowerCase().includes(q) && !d.specialty.toLowerCase().includes(q)) return false;
-    return true;
-  });
+    return doctors.filter((d) => {
+      if (status !== "all" && d.status !== status) return false;
+      if (q && !d.name.toLowerCase().includes(q) && !d.specialty.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [doctors, query, status]);
 
-  if (loading && doctors.length === 0) {
-    return (
-      <div className="space-y-4">
-        <div>
-          <h1 className="page-title">Doctors</h1>
-          <p className="page-sub mt-1">Hospital roster.</p>
-        </div>
-        <div className="card-base p-5 text-sm text-ink-secondary">Loading doctors…</div>
-      </div>
-    );
-  }
+  const pager = usePagination(visible, { initialSize: 10 });
+  const activeCount = useMemo(() => doctors.filter((d) => d.status === "active").length, [doctors]);
+  const isInitial = loading && doctors.length === 0;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="page-title">Doctors</h1>
-          <p className="page-sub mt-1">{doctors.length} doctors · {doctors.filter((d) => d.status === "active").length} active.</p>
-        </div>
-        <Button size="sm" onClick={() => { setNewName(""); setNewSpecialty(specialties[0]?.id ?? ""); setNewDepartment(departments[0]?.id ?? ""); setNewExperience("0"); setNewLanguages("English"); setNewModes(["in_person", "video"]); setCreateOpen(true); }}><Plus size={15} /> Add doctor</Button>
-      </div>
+      <PageHeader
+        title="Doctors"
+        sub={`${doctors.length} doctors · ${activeCount} active`}
+        count={`${visible.length}`}
+        actions={
+          <Button size="sm" onClick={() => { setNewName(""); setNewSpecialty(specialties[0]?.id ?? ""); setNewDepartment(departments[0]?.id ?? ""); setNewExperience("0"); setNewLanguages("English"); setNewModes(["in_person", "video"]); setCreateOpen(true); }}><Plus size={15} /> Add doctor</Button>
+        }
+      />
 
-      {live && (
-        <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">
-          {loading ? "Syncing…" : "Live roster — activation needs specialty, department and a compatible visit type."}
-        </p>
-      )}
+      {live && <LivePill syncing={syncing} loading={loading} text="Live roster — activation needs specialty, department and a compatible visit type." />}
       {(error ?? backendError) && (
-        <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">{error ?? backendError}</p>
+        <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-xl px-3.5 py-2.5">{error ?? backendError}</p>
       )}
 
-      <div className="card-base p-3.5 flex flex-col sm:flex-row gap-2">
-        <div className="flex items-center gap-2 flex-1 bg-background border border-border rounded-control px-3">
-          <Search size={15} className="text-ink-faint" />
+      <div className="card-base p-3.5 flex flex-col sm:flex-row gap-2 sticky top-[60px] z-10">
+        <div className="flex items-center gap-2 flex-1 bg-background border border-border rounded-xl px-3 focus-within:border-healthcare focus-within:ring-2 focus-within:ring-healthcare/15 transition">
+          <Search size={15} className="text-ink-faint shrink-0" />
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search doctor or specialty…" aria-label="Search doctors" className="w-full bg-transparent outline-none py-2 text-[0.86rem]" />
         </div>
         <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Filter by status" className="input-base sm:!w-44">
@@ -99,11 +91,27 @@ export default function DoctorsPage() {
         </select>
       </div>
 
-      {visible.length === 0 ? (
-        <div className="card-base"><EmptyState title="No doctors found" body={doctors.length === 0 ? "No doctors registered yet — add your first doctor." : "Try a different search or status filter."} action={doctors.length === 0 ? <Button size="sm" variant="outline" onClick={() => void refreshAll()}>Refresh</Button> : undefined} /></div>
+      {isInitial ? (
+        <TableSkeleton rows={8} cols={5} />
+      ) : visible.length === 0 ? (
+        <div className="card-base"><EmptyState title="No doctors found" body={doctors.length === 0 ? "No doctors registered yet — add your first doctor." : "Try a different search or status filter."} action={doctors.length === 0 ? <Button size="sm" variant="outline" onClick={() => void refreshSection("doctors")}>Refresh</Button> : undefined} /></div>
       ) : (
-        <ResponsiveTable headers={["Doctor", "Specialty", "Department", "Exp.", "Modes", "Status", "Availability", "Login", "Actions"]}>
-          {visible.map((d) => (
+        <ResponsiveTable
+          headers={["Doctor", "Specialty", "Department", "Exp.", "Modes", "Status", "Availability", "Login", "Actions"]}
+          footer={
+            <Pagination
+              page={pager.page}
+              totalPages={pager.totalPages}
+              total={pager.total}
+              start={pager.start}
+              end={pager.end}
+              pageSize={pager.pageSize}
+              onPage={pager.setPage}
+              onSize={pager.setPageSize}
+            />
+          }
+        >
+          {pager.pageItems.map((d) => (
             <tr key={d.id} className="hover:bg-background/60 transition">
               <td className="td-cell">
                 <button onClick={() => setSelected(d)} className="flex items-center gap-2 text-left">
@@ -113,7 +121,7 @@ export default function DoctorsPage() {
               </td>
               <td className="td-cell">{d.specialty}</td>
               <td className="td-cell">{d.department}</td>
-              <td className="td-cell">{d.experience} yrs</td>
+              <td className="td-cell tabular-nums">{d.experience} yrs</td>
               <td className="td-cell text-ink-secondary text-[0.8rem]">{d.modes.join(", ")}</td>
               <td className="td-cell"><StatusBadge status={d.status} /></td>
               <td className="td-cell text-ink-secondary text-[0.8rem]">{d.availability}</td>
@@ -154,7 +162,7 @@ export default function DoctorsPage() {
                 <div className="mt-1"><StatusBadge status={selected.status} /></div>
               </div>
             </div>
-            <dl className="text-sm border border-border rounded-control overflow-hidden">
+            <dl className="text-sm border border-border rounded-xl overflow-hidden">
               {[
                 ["Qualifications", selected.qualifications],
                 ["Experience", `${selected.experience} years`],
@@ -263,7 +271,7 @@ export default function DoctorsPage() {
             <p className="text-[0.83rem] font-bold">Consultation modes</p>
             <div className="flex gap-2 mt-1.5">
               {MODES.map((m) => (
-                <label key={m.id} className={`flex-1 text-[0.8rem] font-bold border rounded-control py-2 text-center cursor-pointer transition ${newModes.includes(m.id) ? "bg-navy text-white border-navy" : "bg-white border-border hover:border-healthcare"}`}>
+                <label key={m.id} className={`flex-1 text-[0.8rem] font-bold border rounded-xl py-2 text-center cursor-pointer transition ${newModes.includes(m.id) ? "bg-navy text-white border-navy" : "bg-white border-border hover:border-healthcare"}`}>
                   <input type="checkbox" className="sr-only" checked={newModes.includes(m.id)} onChange={() => toggleMode(m.id)} />
                   {m.label}
                 </label>

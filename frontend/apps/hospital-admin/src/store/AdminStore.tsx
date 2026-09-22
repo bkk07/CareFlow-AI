@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   activateDoctor as apiActivateDoctor,
@@ -119,10 +119,14 @@ interface AdminStore {
   /** True when signed in with a hospital-scoped backend session. */
   live: boolean;
   loading: boolean;
+  /** Background revalidation (no skeleton flash). */
+  syncing: boolean;
   backendError: string | null;
   user: CurrentUser | null;
   hospital: ApiHospital | null;
   refreshAll: () => Promise<void>;
+  /** Targeted re-fetch of one section (avoids full reload flicker). */
+  refreshSection: (section: "departments" | "specialties" | "types" | "doctors" | "appointments" | "questionnaires" | "staff" | "ops" | "insights") => Promise<void>;
   updateHospital: (patch: {
     name?: string;
     address?: string;
@@ -248,7 +252,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const [hospital, setHospital] = useState<ApiHospital | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [liveLoaded, setLiveLoaded] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const refreshInFlight = useRef(false);
+  const didInitialFetch = useRef(false);
 
   const live = mode === "live" && authed && user?.hospital_id != null;
   const hospitalId = live && user?.hospital_id ? user.hospital_id : null;
@@ -280,82 +286,113 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     return new Error(message);
   }, []);
 
-  const refreshAll = useCallback(async () => {
-    if (!live || !hospitalId) return;
-    setLoading(true);
-    setBackendError(null);
-    try {
-      const hid = hospitalId;
-      const hosp = await apiGetHospital(hid).catch(() => null);
-      if (hosp) setHospital(hosp);
-      const hospitalName = hosp?.name ?? "Hospital";
-
-      const [depts, specs, types, docs, appts, forms, staff, ops, recs, escs, flows] =
-        await Promise.all([
-          apiDepartments(hid).catch(() => []),
-          apiSpecialties(hid).catch(() => []),
-          apiTypes(hid).catch(() => []),
-          apiDoctors(hid).catch(() => []),
-          apiAppointments(hid).catch(() => []),
-          apiQuestionnaires(hid).catch(() => []),
-          apiStaff(hid).catch(() => []),
-          apiOperations().catch(() => []),
-          apiReconciliations().catch(() => []),
-          apiEscalations().catch(() => []),
-          apiWorkflows().catch(() => []),
-        ]);
+  const applyCatalog = useCallback(
+    (
+      depts: Awaited<ReturnType<typeof apiDepartments>>,
+      specs: Awaited<ReturnType<typeof apiSpecialties>>,
+      types: Awaited<ReturnType<typeof apiTypes>>,
+      docs: Awaited<ReturnType<typeof apiDoctors>>,
+      hospitalName: string,
+    ) => {
       const specName = (id: string | null) => specs.find((s) => s.id === id)?.name ?? "";
       const deptName = (id: string | null) => depts.find((d) => d.id === id)?.name ?? "";
       const typeName = (id: string) => types.find((t) => t.id === id)?.name ?? "Visit";
-
       setLiveDepartments(
         depts.map((d) => {
           const deptDocs = docs.filter((doc) => doc.department_id === d.id);
-          const specialtyNames = [...new Set(
-            deptDocs
-              .map((doc) => specs.find((s) => s.id === doc.specialty_id)?.name)
-              .filter((n): n is string => !!n),
-          )].sort();
+          const specialtyNames = [
+            ...new Set(
+              deptDocs
+                .map((doc) => specs.find((s) => s.id === doc.specialty_id)?.name)
+                .filter((n): n is string => !!n),
+            ),
+          ].sort();
           return mapDepartment(d, specialtyNames, deptDocs.length);
         }),
       );
       setLiveSpecialties(
         specs.map((s) => {
           const specDocs = docs.filter((doc) => doc.specialty_id === s.id);
-          const departmentNames = [...new Set(
-            specDocs
-              .map((doc) => depts.find((d) => d.id === doc.department_id)?.name)
-              .filter((n): n is string => !!n),
-          )].sort();
+          const departmentNames = [
+            ...new Set(
+              specDocs
+                .map((doc) => depts.find((d) => d.id === doc.department_id)?.name)
+                .filter((n): n is string => !!n),
+            ),
+          ].sort();
           return mapSpecialty(s, specDocs.length, departmentNames.join(", "));
         }),
       );
-      setLiveTypes(types.map((t) => ({
-        id: t.id,
-        name: t.name,
-        description: `${t.duration_minutes} min visit`,
-        duration: t.duration_minutes,
-        mode: "In person",
-        status: "active" as const,
-      })));
-      setLiveDoctors(
-        docs.map((d) =>
-          mapDoctor(d, specName(d.specialty_id), deptName(d.department_id), hospitalName, 0),
-        ),
+      setLiveTypes(
+        types.map((t) => ({
+          id: t.id,
+          name: t.name,
+          description: `${t.duration_minutes} min visit`,
+          duration: t.duration_minutes,
+          mode: "In person",
+          status: "active" as const,
+        })),
       );
+      setLiveDoctors(
+        docs.map((d) => mapDoctor(d, specName(d.specialty_id), deptName(d.department_id), hospitalName, 0)),
+      );
+      return typeName;
+    },
+    [],
+  );
+
+  const refreshAll = useCallback(async () => {
+    if (!live || !hospitalId) return;
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
+    const isInitial = !didInitialFetch.current;
+    if (isInitial) setLoading(true);
+    else setSyncing(true);
+    setBackendError(null);
+    try {
+      const hid = hospitalId;
+      const hosp = await apiGetHospital(hid).catch(() => null);
+      if (hosp) setHospital(hosp);
+      const hospitalName = hosp?.name ?? hospital?.name ?? "Hospital";
+
+      const [depts, specs, types, docs, appts, forms, staff, ops, recs, escs, flows] =
+        await Promise.all([
+          apiDepartments(hid, { limit: 500 }).catch(() => []),
+          apiSpecialties(hid, { limit: 500 }).catch(() => []),
+          apiTypes(hid, { limit: 500 }).catch(() => []),
+          apiDoctors(hid, { limit: 200 }).catch(() => []),
+          apiAppointments(hid, { limit: 200 }).catch(() => []),
+          apiQuestionnaires(hid, { limit: 200 }).catch(() => []),
+          apiStaff(hid, { limit: 200 }).catch(() => []),
+          apiOperations({ limit: 100 }).catch(() => []),
+          apiReconciliations({ limit: 100 }).catch(() => []),
+          apiEscalations({ limit: 100 }).catch(() => []),
+          apiWorkflows({ limit: 100 }).catch(() => []),
+        ]);
+      const typeName = applyCatalog(depts, specs, types, docs, hospitalName);
       setLiveAppointments(
         appts.map((a) => {
           const doc = docs.find((d) => d.id === a.doctor_id);
           const spec = specs.find((s) => s.id === doc?.specialty_id)?.name ?? "";
-          return mapAppointment(a, doc?.name ?? a.doctor_id.slice(0, 8), spec, hospitalName, typeName(a.appointment_type_id));
+          return mapAppointment(
+            a,
+            doc?.name ?? a.doctor_id.slice(0, 8),
+            spec,
+            hospitalName,
+            typeName(a.appointment_type_id),
+          );
         }),
       );
-      const details = await Promise.all(
-        forms.map((f) => apiQuestionDetail(hid, f.id).catch(() => null)),
-      );
-      setLiveQuestionnaires(
-        forms.map((f, i) => mapQuestionnaire(f, details[i])),
-      );
+      // Forms render immediately; question counts enrich in background
+      // (avoids N+1 blocking the whole console).
+      setLiveQuestionnaires(forms.map((f) => mapQuestionnaire(f, null)));
+      if (forms.length > 0) {
+        void Promise.all(forms.map((f) => apiQuestionDetail(hid, f.id).catch(() => null))).then(
+          (details) => {
+            setLiveQuestionnaires(forms.map((f, i) => mapQuestionnaire(f, details[i])));
+          },
+        );
+      }
       setLiveStaff(staff.map(mapStaff));
       setLiveOperations(ops.map(mapOperation));
       setLiveReconciliations(recs.map(mapReconciliation));
@@ -363,26 +400,28 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       setLiveWorkflows(flows.map(mapWorkflow));
 
       const [ai, integ, analytic, over] = await Promise.all([
-        apiAIActivity(hid).catch(() => null),
+        apiAIActivity(hid, { limit: 100 }).catch(() => null),
         apiIntegration(hid).catch(() => null),
         apiAnalytics(hid).catch(() => null),
         apiOverview(hid).catch(() => null),
       ]);
       if (ai) {
         setLiveIntegrationRows(ai.executions);
-        setLiveAI(ai.executions.map((e) => {
-          const m = mapAIExecution(e);
-          return {
-            id: m.id,
-            time: m.time,
-            tool: m.tool,
-            status: m.status,
-            latency: m.latency,
-            correlation: m.correlation,
-            actor: m.actor,
-            error: m.error,
-          };
-        }));
+        setLiveAI(
+          ai.executions.map((e) => {
+            const m = mapAIExecution(e);
+            return {
+              id: m.id,
+              time: m.time,
+              tool: m.tool,
+              status: m.status,
+              latency: m.latency,
+              correlation: m.correlation,
+              actor: m.actor,
+              error: m.error,
+            };
+          }),
+        );
       }
       if (integ) {
         setIntegration({
@@ -393,17 +432,117 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       }
       if (analytic) setAnalytics(analytic);
       if (over) setOverview(over);
-      setLiveLoaded(true);
+      didInitialFetch.current = true;
     } finally {
+      refreshInFlight.current = false;
       setLoading(false);
+      setSyncing(false);
     }
-  }, [live, hospitalId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live, hospitalId, applyCatalog]);
+
+  const refreshSection = useCallback(
+    async (section: "departments" | "specialties" | "types" | "doctors" | "appointments" | "questionnaires" | "staff" | "ops" | "insights") => {
+      if (!live || !hospitalId) return;
+      if (refreshInFlight.current) return;
+      refreshInFlight.current = true;
+      setSyncing(true);
+      try {
+        const hid = hospitalId;
+        if (section === "departments" || section === "specialties" || section === "types" || section === "doctors") {
+          const [depts, specs, types, docs] = await Promise.all([
+            apiDepartments(hid, { limit: 500 }).catch(() => []),
+            apiSpecialties(hid, { limit: 500 }).catch(() => []),
+            apiTypes(hid, { limit: 500 }).catch(() => []),
+            apiDoctors(hid, { limit: 200 }).catch(() => []),
+          ]);
+          applyCatalog(depts, specs, types, docs, hospital?.name ?? "Hospital");
+        } else if (section === "appointments") {
+          const [appts, docs, specs, types] = await Promise.all([
+            apiAppointments(hid, { limit: 200 }).catch(() => []),
+            apiDoctors(hid, { limit: 200 }).catch(() => []),
+            apiSpecialties(hid, { limit: 500 }).catch(() => []),
+            apiTypes(hid, { limit: 500 }).catch(() => []),
+          ]);
+          const typeName = (id: string) => types.find((t) => t.id === id)?.name ?? "Visit";
+          setLiveAppointments(
+            appts.map((a) => {
+              const doc = docs.find((d) => d.id === a.doctor_id);
+              const spec = specs.find((s) => s.id === doc?.specialty_id)?.name ?? "";
+              return mapAppointment(
+                a,
+                doc?.name ?? a.doctor_id.slice(0, 8),
+                spec,
+                hospital?.name ?? "Hospital",
+                typeName(a.appointment_type_id),
+              );
+            }),
+          );
+        } else if (section === "questionnaires") {
+          const forms = await apiQuestionnaires(hid, { limit: 200 }).catch(() => []);
+          setLiveQuestionnaires(forms.map((f) => mapQuestionnaire(f, null)));
+        } else if (section === "staff") {
+          const staff = await apiStaff(hid, { limit: 200 }).catch(() => []);
+          setLiveStaff(staff.map(mapStaff));
+        } else if (section === "ops") {
+          const [ops, recs, escs, flows] = await Promise.all([
+            apiOperations({ limit: 100 }).catch(() => []),
+            apiReconciliations({ limit: 100 }).catch(() => []),
+            apiEscalations({ limit: 100 }).catch(() => []),
+            apiWorkflows({ limit: 100 }).catch(() => []),
+          ]);
+          setLiveOperations(ops.map(mapOperation));
+          setLiveReconciliations(recs.map(mapReconciliation));
+          setLiveEscalations(escs.map(mapEscalation));
+          setLiveWorkflows(flows.map(mapWorkflow));
+        } else {
+          const [ai, integ, analytic, over] = await Promise.all([
+            apiAIActivity(hid, { limit: 100 }).catch(() => null),
+            apiIntegration(hid).catch(() => null),
+            apiAnalytics(hid).catch(() => null),
+            apiOverview(hid).catch(() => null),
+          ]);
+          if (ai) {
+            setLiveIntegrationRows(ai.executions);
+            setLiveAI(
+              ai.executions.map((e) => {
+                const m = mapAIExecution(e);
+                return {
+                  id: m.id,
+                  time: m.time,
+                  tool: m.tool,
+                  status: m.status,
+                  latency: m.latency,
+                  correlation: m.correlation,
+                  actor: m.actor,
+                  error: m.error,
+                };
+              }),
+            );
+          }
+          if (integ)
+            setIntegration({
+              vendor_mappings: integ.vendor_mappings,
+              open_reconciliations: integ.open_reconciliations,
+              verifications_24h: integ.verifications_24h,
+            });
+          if (analytic) setAnalytics(analytic);
+          if (over) setOverview(over);
+        }
+      } finally {
+        refreshInFlight.current = false;
+        setSyncing(false);
+      }
+    },
+    [live, hospitalId, hospital?.name, applyCatalog],
+  );
 
   useEffect(() => {
-    if (live && !liveLoaded) void refreshAll();
-    if (!live && liveLoaded) setLiveLoaded(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live]);
+    if (live && !didInitialFetch.current && !refreshInFlight.current) void refreshAll();
+    if (!live) {
+      didInitialFetch.current = false;
+    }
+  }, [live, refreshAll]);
 
   // -- auth (backend JWT only) -------------------------------------------------------
 
@@ -464,7 +603,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     setHospital(null);
     setAuthed(false);
     setBackendError(null);
-    setLiveLoaded(false);
+    didInitialFetch.current = false;
+    refreshInFlight.current = false;
+    setSyncing(false);
+    setLoading(false);
     setLiveDepartments([]);
     setLiveSpecialties([]);
     setLiveTypes([]);
@@ -859,10 +1001,12 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       mode,
       live,
       loading,
+      syncing,
       backendError,
       user,
       hospital,
       refreshAll,
+      refreshSection,
       updateHospital,
       resubmitHospital,
       departments,
@@ -931,8 +1075,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       markAllRead,
       pushNotification,
     }),
-    [role, authed, login, logout, mode, live, loading, backendError, user, hospital,
-      refreshAll, updateHospital, resubmitHospital, departments, specialties, types, doctors, appointments, questionnaires, staff,
+    [role, authed, login, logout, mode, live, loading, syncing, backendError, user, hospital,
+      refreshAll, refreshSection, updateHospital, resubmitHospital, departments, specialties, types, doctors, appointments, questionnaires, staff,
       addDepartment, renameDepartment, deleteDepartment, toggleDepartment, addSpecialty, renameSpecialty, deleteSpecialty,
       toggleSpecialty, addType, updateType, deleteType, toggleType, createDoctor, updateDoctor, deleteDoctor,
       setDoctorStatus, inviteDoctorLogin,
