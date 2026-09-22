@@ -45,6 +45,11 @@ class DoctorCardOut(BaseModel):
     hospital_city: str | None = None
     specialty: str | None = None
     distance_km: float | None = None
+    # Concierge enrichment (all optional; only real backend data).
+    experience_years: int | None = None
+    consultation_types: list[str] = []
+    available_durations: list[int] = []
+    why_match: list[str] = []
 
 
 class SlotOut(BaseModel):
@@ -103,6 +108,23 @@ class ChatOut(BaseModel):
     consultation_modes: list[str] = []
     booking_stage: str = "browse"
     pending_booking: PendingBookingOut | None = None
+    # --- Concierge experience contract (all optional, backward compatible).
+    # message/experience/state/data/actions mirror the spec §11; the flat
+    # fields above stay as the legacy rendering path. New frontends prefer
+    # `surface` + typed payloads below.
+    surface: str = "TEXT"
+    title: str | None = None
+    allow_explore_more: bool = False
+    allow_compare: bool = False
+    intent: str | None = None
+    stage: str | None = None
+    care_context: dict | None = None
+    quick_replies: list[str] = []
+    compare: dict | None = None
+    filter_choices: list[dict] = []
+    actions: list[dict] = []
+    upcoming_appointment: dict | None = None
+    questionnaire: dict | None = None
 
 
 @router.post("/chat", response_model=ChatOut)

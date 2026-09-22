@@ -434,17 +434,23 @@ def test_chat_reply_carries_doctor_cards(client, db, tool_factory):
         user_message="Find me a cardiologist",
         complete=complete,
     )
-    assert result["doctors"] == [
-        {
-            "id": setup["doctor"]["id"],
-            "name": "Dr. chatcards",
-            "photo_url": None,
-            "hospital_name": "Hospital chatcards",
-            "hospital_city": None,
-            "specialty": "Cardiology chatcards",
-            "distance_km": None,
-        }
-    ]
+    assert len(result["doctors"]) == 1
+    card = result["doctors"][0]
+    for key, value in {
+        "id": setup["doctor"]["id"],
+        "name": "Dr. chatcards",
+        "photo_url": None,
+        "hospital_name": "Hospital chatcards",
+        "hospital_city": None,
+        "specialty": "Cardiology chatcards",
+        "distance_km": None,
+    }.items():
+        assert card[key] == value, key
+    # Concierge enrichment is additive only (backward compatible).
+    assert isinstance(card.get("experience_years"), int)
+    assert isinstance(card.get("consultation_types"), list)
+    assert isinstance(card.get("available_durations"), list)
+    assert isinstance(card.get("why_match"), list)
     # The HTTP chat contract accepts the enriched payload.
     from app.ai.router import ChatOut
 

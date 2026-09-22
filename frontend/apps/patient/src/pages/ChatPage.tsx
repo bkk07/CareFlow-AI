@@ -124,6 +124,18 @@ export default function ChatPage() {
         daySchedule: reply.day_schedule ?? null,
         bookingStage: reply.booking_stage ?? "browse",
         pendingBooking: reply.pending_booking ?? null,
+        surface: reply.surface ?? "TEXT",
+        title: reply.title ?? null,
+        allowExploreMore: reply.allow_explore_more ?? false,
+        allowCompare: reply.allow_compare ?? false,
+        intent: reply.intent ?? null,
+        stage: reply.stage ?? null,
+        careContext: (reply.care_context ?? null) as ChatMessage["careContext"],
+        quickReplies: reply.quick_replies ?? [],
+        compare: (reply.compare ?? null) as ChatMessage["compare"],
+        filterChoices: reply.filter_choices ?? [],
+        actions: reply.actions ?? [],
+        upcomingAppointment: (reply.upcoming_appointment ?? null) as ChatMessage["upcomingAppointment"],
       }]);
       // Speak the AI text response via browser SpeechSynthesis only.
       // The response text is never sent to an external TTS API.
@@ -139,6 +151,31 @@ export default function ChatPage() {
   }
 
   const isFresh = messages.length <= 1;
+
+  // Persistent care context: latest non-empty summary across turns.
+  const latestCareContext = [...messages].reverse().find(
+    (m) => m.careContext && Object.keys(m.careContext).filter((k) => k !== "_empty").length > 0,
+  )?.careContext as Record<string, string> | undefined;
+
+  function careEntries(ctx: Record<string, string> | undefined): { label: string; value: string }[] {
+    if (!ctx) return [];
+    const out: { label: string; value: string }[] = [];
+    const pick = (key: string, label: string, fmt?: (v: string) => string) => {
+      const v = ctx[key];
+      if (typeof v === "string" && v.trim() && key !== "_empty") out.push({ label, value: fmt ? fmt(v) : v });
+    };
+    pick("concern", "Concern");
+    pick("for_whom", "For", (v) => (v === "self" ? "Myself" : v));
+    pick("specialty", "Care");
+    pick("when", "When");
+    pick("time_preference", "Time");
+    pick("consultation", "Consultation", (v) => v.replace("_", " "));
+    pick("gender_preference", "Doctor", (v) => `${v} doctor`);
+    pick("hospital", "Hospital");
+    pick("doctor_preference", "Doctor");
+    return out;
+  }
+  const panelEntries = careEntries(latestCareContext);
 
   function pickType(id: string, name: string, minutes: number) {
     setChosenType({ name, minutes });
@@ -206,9 +243,10 @@ export default function ChatPage() {
         )}
       </div>
 
-      {/* Messages — full-bleed scroll area, centered column like ChatGPT */}
+      {/* Messages + persistent care-context panel (ChatShell) */}
       <div className="flex-1 overflow-y-auto" aria-live="polite">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 flex gap-6 items-start">
+          <div className="flex-1 min-w-0 space-y-6">
           {savedGeo && !liveGeo && (
             <p className="text-center text-[0.72rem] text-ink-faint">
               Ranking nearby care by your saved location ·{" "}
@@ -239,6 +277,48 @@ export default function ChatPage() {
           ))}
           {thinking && <TypingIndicator name="CareFlow is typing…" />}
           <div ref={bottomRef} />
+          </div>
+          {/* CareContextPanel — persistent, user-visible summary (desktop) */}
+          <aside className="hidden lg:block w-64 shrink-0 sticky top-4" aria-label="Your care request">
+            <div className="bg-white border border-border rounded-card p-4 shadow-subtle">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[0.74rem] font-extrabold tracking-wide text-ink-secondary uppercase">Your care request</p>
+                <button
+                  type="button"
+                  onClick={() => void sendPrompt("I want to edit my preferences")}
+                  className="text-[0.74rem] font-bold text-healthcare hover:underline"
+                >
+                  Edit
+                </button>
+              </div>
+              {panelEntries.length === 0 ? (
+                <p className="text-[0.78rem] text-ink-faint leading-relaxed">
+                  Tell me what you need — I&apos;ll keep track of your preferences here.
+                </p>
+              ) : (
+                <dl className="space-y-1.5">
+                  {panelEntries.map((e) => (
+                    <div key={e.label} className="flex gap-2 text-[0.8rem]">
+                      <dt className="text-ink-faint font-semibold min-w-[84px]">{e.label}</dt>
+                      <dd className="text-navy font-semibold truncate">{e.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+              <div className="flex flex-wrap gap-1.5 mt-3">
+                {["Start over", "Show more", "Compare these"].map((label) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => void sendPrompt(label)}
+                    className="text-[0.72rem] font-bold border border-border rounded-full px-2.5 py-1 text-ink-secondary hover:border-healthcare hover:text-healthcare transition"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </aside>
         </div>
       </div>
 

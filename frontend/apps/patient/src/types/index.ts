@@ -150,7 +150,43 @@ export interface ChatMessage {
     hospital_city: string | null;
     specialty: string | null;
     distance_km?: number | null;
+    experience_years?: number | null;
+    consultation_types?: string[];
+    available_durations?: number[];
+    why_match?: string[];
   }[];
+  /** Concierge experience contract (all optional, backward compatible). */
+  surface?: string;
+  title?: string | null;
+  allowExploreMore?: boolean;
+  allowCompare?: boolean;
+  intent?: string | null;
+  stage?: string | null;
+  careContext?: Record<string, unknown> | null;
+  quickReplies?: string[];
+  compare?: {
+    doctors: {
+      id: string;
+      name: string;
+      specialty: string | null;
+      experience_years: number | null;
+      hospital_name: string;
+      hospital_city: string | null;
+      distance_km: number | null;
+      consultation_types: string[];
+      available_durations: number[];
+    }[];
+    count: number;
+  } | null;
+  filterChoices?: { id: string; label: string; prompt: string }[];
+  actions?: { id: string; label: string; kind: string; doctor_id?: string; appointment_id?: string }[];
+  upcomingAppointment?: {
+    appointment_id: string;
+    doctor_name: string | null;
+    date: string | null;
+    slot_start: string | null;
+    slot_end: string | null;
+  } | null;
   /** Total matches behind the current 5-card page + whether more exist. */
   doctorsTotal?: number;
   hasMoreDoctors?: boolean;

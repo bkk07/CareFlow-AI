@@ -30,6 +30,7 @@ from app.ai.agent.booking_state import (
     set_canonical_slot,
     sync_duration_from_types,
 )
+from app.ai.agent import concierge_state as concierge
 from app.ai.context.ai_context import get_ai_context, save_ai_context
 from app.ai.mcp_client.client import AgentToolClient
 from app.core.deps import RequestContext
@@ -1351,6 +1352,7 @@ def _doctor_cards_by_ids(
     ids: list,
     patient_latitude: float | None = None,
     patient_longitude: float | None = None,
+    context=None,
 ) -> list[dict[str, Any]]:
     """Enriched cards for explicit doctor ids, in the given order."""
     wanted = []
@@ -1399,17 +1401,26 @@ def _doctor_cards_by_ids(
                 )
             except (TypeError, ValueError):
                 dist = None
-        cards.append(
-            {
-                "id": str(d.id),
-                "name": d.name,
-                "photo_url": d.photo_url,
-                "hospital_name": h_name,
-                "hospital_city": h_city,
-                "specialty": s_name,
-                "distance_km": dist,
-            }
-        )
+        card = {
+            "id": str(d.id),
+            "name": d.name,
+            "photo_url": d.photo_url,
+            "hospital_name": h_name,
+            "hospital_city": h_city,
+            "specialty": s_name,
+            "distance_km": dist,
+            # Concierge enrichment from REAL rows only (no ratings:
+            # the Doctor table carries none, so none are invented).
+            "experience_years": int(getattr(d, "experience_years", 0) or 0),
+            "consultation_types": list(getattr(d, "consultation_types", None) or []),
+            "available_durations": list(getattr(d, "available_durations", None) or []),
+        }
+        if context is not None:
+            try:
+                card["why_match"] = concierge.build_why_match(card, context)
+            except (AttributeError, TypeError, ValueError):
+                card["why_match"] = []
+        cards.append(card)
     return cards
 
 
@@ -1440,6 +1451,7 @@ def _offered_doctor_cards(
         page_ids,
         patient_latitude=patient_latitude,
         patient_longitude=patient_longitude,
+        context=context,
     )
 
 
@@ -1546,6 +1558,37 @@ def run_conversation(
     # Snapshot for change detection: widgets must reflect what THIS turn
     # did (picked/changed), never re-blast earlier turns' UI.
     selected_doctor_before = str(getattr(context, "selected_doctor_id", None) or "")
+    # Concierge merge (§1-5): understand everything present in this one
+    # message (specialty, time-of-day, gender preference, for-whom,
+    # concern) and preserve it. Corrections merge — never restart.
+    try:
+        concierge_changed = concierge.update_concierge_context(context, text)
+    except (AttributeError, TypeError, ValueError):
+        concierge_changed = {}
+    # Patient-controlled conversation (§19): "start over" resets the flow
+    # but keeps identity; it never deletes durable preferences.
+    try:
+        _start_over = concierge.detect_start_over(text)
+    except (AttributeError, TypeError):
+        _start_over = False
+    if _start_over:
+        context.selected_doctor_id = None
+        context.selected_doctor_name = None
+        context.selected_date = None
+        context.selected_appointment_type_id = None
+        context.selected_consultation_mode = None
+        context.requested_start = None
+        context.selected_start = None
+        context.selected_end = None
+        context.selected_slot = None
+        context.offered_slots = []
+        context.offered_doctor_page = []
+        context.compare_ids = []
+        context.pending_booking = None
+        context.awaiting_confirmation = False
+        context.flow_open = False
+        if getattr(context, "pending_clarification", None) == "booking_confirmation":
+            context.pending_clarification = None
     # A turn-opening decline ("no", "never mind", "cancel that") drops a
     # stale proposal so a later "yes" cannot accidentally confirm it.
     if (
@@ -1554,6 +1597,18 @@ def run_conversation(
         and not _is_confirmation(text)
     ):
         _clear_booking_proposal(context)
+    # A mid-confirm correction ("morning is better", "video is fine",
+    # "tomorrow instead") changes the proposal's basis — re-propose
+    # instead of booking the stale slot.
+    if context.awaiting_confirmation and not _is_confirmation(text):
+        try:
+            _correction = concierge.detect_change_request(text)
+        except (AttributeError, TypeError):
+            _correction = None
+        if _correction in ("time_range", "date", "consultation_mode", "doctor", "visit_type", "hospital"):
+            _clear_booking_proposal(context)
+        elif concierge_changed.get("time_range"):
+            _clear_booking_proposal(context)
 
     # Deterministic doctor pick ("Dr. Rao", "the second one"): recorded
     # before the model runs so the UI can advance to the date step even
@@ -1660,8 +1715,32 @@ def run_conversation(
     if str(getattr(context, "selected_consultation_mode", None) or "") != mode_before and mode_before:
         invalidate_on_change(context, "consultation_mode")
 
+    # Compare request (§8): resolve 2-3 currently displayed doctors only
+    # against offered ids — never invented. Stored on context so the
+    # envelope renders DOCTOR_COMPARE even if the model only talks.
+    try:
+        _wants_compare = concierge.detect_compare_request(text)
+    except (AttributeError, TypeError):
+        _wants_compare = False
+    if _wants_compare:
+        _page = [str(i) for i in (getattr(context, "offered_doctor_page", None) or [])]
+        if not _page:
+            _page = [
+                str(o.get("id"))
+                for o in (getattr(context, "offered_doctors", None) or [])[:3]
+                if isinstance(o, dict) and o.get("id")
+            ]
+        context.compare_ids = _page[:3]
+    elif not concierge.detect_explore_more(text):
+        # A new search/selection replaces a stale comparison view.
+        if getattr(context, "compare_ids", None):
+            context.compare_ids = []
+
     if is_clinical_request(text):
         context.remember_turn("assistant", CLINICAL_DECLINE)
+        context.intent = "ESCALATE"
+        context.stage = "ESCALATION"
+        context.last_ui_surface = "ESCALATION"
         save_ai_context(context)
         return {
             "conversation_id": cid,
@@ -1671,6 +1750,19 @@ def run_conversation(
             "doctors": [],
             "slots": [],
             "pending_booking": None,
+            "surface": "ESCALATION",
+            "title": None,
+            "allow_explore_more": False,
+            "allow_compare": False,
+            "intent": "ESCALATE",
+            "stage": "ESCALATION",
+            "care_context": concierge.build_care_context(context),
+            "quick_replies": ["Talk to care team", "Find a doctor"],
+            "compare": None,
+            "filter_choices": [],
+            "actions": [{"id": "escalate", "label": "Talk to care team", "kind": "escalate"}],
+            "upcoming_appointment": None,
+            "questionnaire": None,
         }
 
     greet = greeting_kind(text)
@@ -1681,6 +1773,10 @@ def run_conversation(
         # confirm panel stays on screen.
         greeting_text = _greeting_reply(db, ctx, greet)
         context.remember_turn("assistant", greeting_text)
+        if not getattr(context, "intent", None):
+            context.intent = "GENERAL_HELP"
+        context.stage = "GREETING"
+        context.last_ui_surface = "QUICK_REPLIES"
         save_ai_context(context)
         pending_greet = context.pending_booking if context.awaiting_confirmation else None
         return {
@@ -1692,6 +1788,19 @@ def run_conversation(
             "doctors": [],
             "slots": [],
             "pending_booking": pending_greet,
+            "surface": "QUICK_REPLIES" if not pending_greet else "BOOKING_REVIEW",
+            "title": None,
+            "allow_explore_more": False,
+            "allow_compare": False,
+            "intent": getattr(context, "intent", None),
+            "stage": "GREETING",
+            "care_context": concierge.build_care_context(context),
+            "quick_replies": concierge.quick_replies_for("GREETING", context),
+            "compare": None,
+            "filter_choices": [],
+            "actions": [],
+            "upcoming_appointment": None,
+            "questionnaire": None,
         }
 
     # Phase 2 hospital-doctor verification: a named doctor must belong to
@@ -1721,13 +1830,15 @@ def run_conversation(
                 .all()
             )
             alt_ids = [str(d.id) for d in alternates]
-            cards = _doctor_cards_by_ids(db, alt_ids) if alt_ids else []
+            cards = _doctor_cards_by_ids(db, alt_ids, context=context) if alt_ids else []
             reply = (
                 f"The doctor you named isn't at {hname} — I haven't booked "
                 f"anything. Here are doctors who are there; pick one and "
                 f"we'll continue with {context.selected_date or 'your day'}."
             )
             context.remember_turn("assistant", reply)
+            context.stage = "SHOWING_DOCTORS"
+            context.last_ui_surface = "DOCTOR_RESULTS"
             save_ai_context(context)
             return {
                 "conversation_id": cid,
@@ -1750,6 +1861,22 @@ def run_conversation(
                 "selected_end": getattr(context, "selected_end", None),
                 "duration_minutes": getattr(context, "duration_minutes", None),
                 "missing_fields": ["doctor"],
+                "surface": "DOCTOR_RESULTS",
+                "title": "Doctors that match your request",
+                "allow_explore_more": False,
+                "allow_compare": len(cards) > 1,
+                "intent": getattr(context, "intent", None) or "FIND_CARE",
+                "stage": "SHOWING_DOCTORS",
+                "care_context": concierge.build_care_context(context),
+                "quick_replies": concierge.quick_replies_for("SHOWING_DOCTORS", context),
+                "compare": None,
+                "filter_choices": concierge.build_explore_choices(context),
+                "actions": [
+                    {"id": f"choose:{c['id']}", "label": f"Choose {c['name']}", "kind": "choose_doctor", "doctor_id": c["id"]}
+                    for c in cards[:5]
+                ],
+                "upcoming_appointment": None,
+                "questionnaire": None,
             }
 
     client = AgentToolClient(db, ctx)
@@ -1767,6 +1894,50 @@ def run_conversation(
         + ", ".join(readiness["missing"])
         + "]. Ask ONLY the first missing item, nothing else."
     )
+    # Concierge layer (additive guidance — safety gates above still own
+    # truth; this only shapes tone, memory use, and choice presentation).
+    try:
+        _concierge_notes = []
+        _intent_now = str(getattr(context, "intent", None) or "")
+        _spec_now = str(getattr(context, "specialty_preference", None) or "")
+        _tr_now = str(getattr(context, "time_range", None) or "")
+        _gen_now = str(getattr(context, "gender_preference", None) or "")
+        if _intent_now:
+            _concierge_notes.append(f"Concierge intent={_intent_now}.")
+        if _spec_now:
+            _concierge_notes.append(
+                f"Specialty preference={_spec_now}: pass it to search_doctors "
+                "(specialty or query) — never ask for it again."
+            )
+        if _tr_now:
+            _concierge_notes.append(
+                f"Time preference={_tr_now}: prefer those slots when presenting, "
+                "but never hide other availability."
+            )
+        if _gen_now:
+            _concierge_notes.append(
+                "Gender preference=" + _gen_now + ": acknowledge it warmly, keep it "
+                "visible, but NEVER invent genders — doctor profiles carry no "
+                "gender field, so present real results and let them choose."
+            )
+        _concierge_notes.append(
+            "Concierge tone: calm, concise, reassuring, human. Name up to five "
+            "doctors briefly with hospital + city; explain each pick in one "
+            "short line grounded in the tool result (specialty / mode / "
+            "distance / hospital). Never paste ids, tables, or tool names. "
+            "When they seem unsure ('not sure', 'see someone'), ask ONE small "
+            "question with a few friendly choices and never diagnose. "
+            "'Show me more / another' keeps ALL current filters and pages "
+            "forward (offset+5). 'Compare' compares the shown doctors only. "
+            "Corrections ('morning is better', 'video is fine', 'tomorrow "
+            "instead') change ONLY that value. After a confirmed booking, "
+            "celebrate briefly and offer: view appointment, pre-visit "
+            "questions, prepare for visit."
+        )
+        if _concierge_notes:
+            system += "\n" + " ".join(_concierge_notes)
+    except (AttributeError, TypeError, ValueError):
+        pass
     if hid_now:
         system += (
             "\nHospital scope is SET (id=" + hid_now + "): every search_doctors "
@@ -1913,7 +2084,6 @@ def run_conversation(
                 fresh_modes = ["video", "phone", "in_person"]
             context.consultation_modes = list(fresh_modes)
     context.remember_turn("assistant", reply)
-    save_ai_context(context)
     pending = context.pending_booking if context.awaiting_confirmation else None
     last_search = getattr(context, "last_search", None) or {}
     try:
@@ -1943,6 +2113,7 @@ def run_conversation(
                 [chosen_now],
                 patient_latitude=effective_lat,
                 patient_longitude=effective_lng,
+                context=context,
             )
     has_more = (
         "doctors" in fresh_offers
@@ -1977,6 +2148,140 @@ def run_conversation(
         if m in ("video", "phone", "in_person")
     ]
     readiness_out = evaluate_readiness(context)
+    # --- Concierge envelope (§10-12): typed surface + explainability ----
+    # Rank fresh slots by the patient's time-of-day preference (morning/
+    # afternoon/evening) without hiding anything.
+    _raw_slots = (
+        [
+            {"start": s.get("start", ""), "end": s.get("end", "")}
+            for s in (context.offered_slots or [])[:10]
+            if isinstance(s, dict) and s.get("start")
+        ]
+        if "slots" in fresh_offers
+        else []
+    )
+    try:
+        _slots = concierge.filter_slots_by_time_range(
+            _raw_slots, getattr(context, "time_range", None)
+        )
+    except (AttributeError, TypeError, ValueError):
+        _slots = _raw_slots
+    _concierge_stage = concierge.map_booking_stage_to_concierge(stage, context)
+    # A freshly confirmed booking moves to BOOKING_SUCCESS/POST_BOOKING.
+    _just_booked = "create_appointment" in fresh_tools and not pending
+    if _just_booked:
+        _concierge_stage = "BOOKING_SUCCESS"
+    elif escalated:
+        _concierge_stage = "ESCALATION"
+    context.stage = _concierge_stage
+    if not getattr(context, "intent", None):
+        try:
+            context.intent = concierge.detect_intent(text, context)
+        except (AttributeError, TypeError):
+            context.intent = "GENERAL_HELP"
+    _care = concierge.build_care_context(context)
+    _quick = concierge.quick_replies_for(_concierge_stage, context)
+    # "I'm not sure" / ambiguous care: offer gentle specialty choices.
+    try:
+        _unsure = concierge.detect_unsure(text) or concierge.detect_ambiguous_care(text)
+    except (AttributeError, TypeError):
+        _unsure = False
+    if _unsure and not doctors_cards:
+        _quick = ["General health", "Heart / chest", "Skin", "Bones / joints", "Something else"]
+    # Comparison view: real cards only (2-3).
+    _compare = None
+    if getattr(context, "compare_ids", None) and len(getattr(context, "compare_ids", None) or []) >= 2:
+        try:
+            _cmp_cards = _doctor_cards_by_ids(
+                db,
+                list(getattr(context, "compare_ids", None) or [])[:3],
+                patient_latitude=effective_lat,
+                patient_longitude=effective_lng,
+                context=context,
+            )
+            if len(_cmp_cards) >= 2:
+                _compare = concierge.build_compare_table(_cmp_cards)
+        except (AttributeError, TypeError, ValueError):
+            _compare = None
+    # Surface selection: fresh panels win; confirmation wins over all.
+    if pending:
+        _surface = "BOOKING_REVIEW"
+        _title = "Review your booking"
+    elif _just_booked:
+        _surface = "BOOKING_SUCCESS"
+        _title = "Your appointment is confirmed"
+        _quick = ["View appointment", "Complete pre-visit questions", "Prepare for my visit"]
+    elif _compare is not None:
+        _surface = "DOCTOR_COMPARE"
+        _title = "Compare your options"
+    elif "doctors" in fresh_offers and doctors_cards:
+        _surface = "DOCTOR_RESULTS"
+        _title = "Doctors that match your request"
+    elif turn_results.get("get_day_schedule"):
+        _surface = "SLOT_PICKER"
+        _title = "Pick a time that works for you"
+    elif "slots" in fresh_offers and _slots:
+        _surface = "SLOT_PICKER"
+        _title = "Available times"
+    elif fresh_types or stage == "pick_type":
+        _surface = "APPOINTMENT_TYPE"
+        _title = "What kind of visit is this?"
+    elif fresh_modes or stage == "pick_mode":
+        _surface = "CONSULTATION_MODE"
+        _title = "How would you like to meet?"
+    elif stage == "pick_date":
+        _surface = "DAY_PICKER"
+        _title = "Which day suits you?"
+    elif _unsure:
+        _surface = "QUICK_REPLIES"
+        _title = None
+    elif escalated:
+        _surface = "ESCALATION"
+        _title = None
+    else:
+        _surface = "TEXT"
+        _title = None
+    _allow_explore = bool(has_more or (doctors_cards and _surface in ("DOCTOR_RESULTS", "DOCTOR_COMPARE")))
+    _allow_compare = bool(len(doctors_cards) > 1 or (_compare is not None))
+    context.allow_explore_more = _allow_explore
+    context.allow_compare = _allow_compare
+    context.last_ui_surface = _surface
+    try:
+        context.last_tool_result = {
+            "fresh_tools": sorted(fresh_tools),
+            "doctors": len(doctors_cards),
+            "slots": len(_slots),
+        }
+    except (TypeError, ValueError):
+        context.last_tool_result = {"fresh_tools": sorted(fresh_tools)}
+    # Post-booking next actions live inside the chat (§18).
+    _appt_id = getattr(context, "last_appointment_id", None)
+    _upcoming = None
+    if _just_booked and _appt_id:
+        _upcoming = {
+            "appointment_id": str(_appt_id),
+            "doctor_name": getattr(context, "selected_doctor_name", None),
+            "date": getattr(context, "selected_date", None),
+            "slot_start": getattr(context, "selected_start", None),
+            "slot_end": getattr(context, "selected_end", None),
+        }
+    _actions: list[dict[str, Any]] = []
+    if doctors_cards and _surface in ("DOCTOR_RESULTS", "DOCTOR_COMPARE"):
+        for c in doctors_cards[:5]:
+            _actions.append({"id": f"choose:{c['id']}", "label": f"Choose {c['name']}", "kind": "choose_doctor", "doctor_id": c["id"]})
+        if _allow_explore:
+            _actions.append({"id": "explore_more", "label": "Show me more", "kind": "explore_more"})
+        if _allow_compare:
+            _actions.append({"id": "compare", "label": "Compare them", "kind": "compare"})
+    if pending:
+        _actions.append({"id": "confirm_booking", "label": "Yes, book it", "kind": "confirm"})
+        _actions.append({"id": "decline_booking", "label": "Not now", "kind": "decline"})
+    if _just_booked and _appt_id:
+        _actions.append({"id": "view_appointment", "label": "View appointment", "kind": "view_appointment", "appointment_id": str(_appt_id)})
+        _actions.append({"id": "questionnaire", "label": "Complete pre-visit questions", "kind": "questionnaire", "appointment_id": str(_appt_id)})
+        _actions.append({"id": "prepare_visit", "label": "Prepare for my visit", "kind": "prepare_visit"})
+    _filter_choices = concierge.build_explore_choices(context) if _allow_explore else []
+    save_ai_context(context)
     return {
         "conversation_id": cid,
         "reply": reply,
@@ -1995,20 +2300,25 @@ def run_conversation(
         "doctors": doctors_cards,
         "doctors_total": search_total,
         "has_more_doctors": has_more,
-        "slots": (
-            [
-                {"start": s.get("start", ""), "end": s.get("end", "")}
-                for s in (context.offered_slots or [])[:10]
-                if isinstance(s, dict) and s.get("start")
-            ]
-            if "slots" in fresh_offers
-            else []
-        ),
+        "slots": _slots,
         "appointment_types": fresh_types or (stored_types if stage == "pick_type" else []),
         "day_schedule": turn_results.get("get_day_schedule"),
         "consultation_modes": fresh_modes or (stored_modes if stage == "pick_mode" else []),
         "booking_stage": stage,
         "pending_booking": pending,
+        "surface": _surface,
+        "title": _title,
+        "allow_explore_more": _allow_explore,
+        "allow_compare": _allow_compare,
+        "intent": getattr(context, "intent", None),
+        "stage": _concierge_stage,
+        "care_context": _care,
+        "quick_replies": _quick,
+        "compare": _compare,
+        "filter_choices": _filter_choices,
+        "actions": _actions,
+        "upcoming_appointment": _upcoming,
+        "questionnaire": None,
     }
 
 

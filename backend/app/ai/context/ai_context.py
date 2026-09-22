@@ -92,6 +92,48 @@ class AIContext(BaseModel):
     pending_booking: dict[str, Any] | None = None
     awaiting_confirmation: bool = False
     last_appointment_id: str | None = None
+    # --- Concierge layer (additive; all optional so old payloads load) ---
+    # High-level conversational understanding. The LLM never invents
+    # business truth; these fields only track what the patient SAID plus
+    # what tools CONFIRMED, so corrections ("morning is better") merge
+    # instead of restarting the flow.
+    intent: str | None = None
+    goal: str | None = None
+    current_task: str | None = None
+    stage: str | None = None
+    # User-visible care request summary (rendered as CareContextCard).
+    # Concern is free text the patient gave ("knee pain"); for_whom is
+    # "self" | "mother" | ... ; when_text preserves their words
+    # ("tomorrow evening") alongside the resolved selected_date.
+    care_request: dict[str, Any] = Field(default_factory=dict)
+    # Structured search constraints preserved across turns. Specialty,
+    # city, date, time_range (morning/afternoon/evening), consultation
+    # mode, gender preference, hospital scope. The LLM must not re-ask
+    # for anything already present here.
+    search_filters: dict[str, Any] = Field(default_factory=dict)
+    # Time-of-day preference in the patient's own words, resolved
+    # deterministically ("tomorrow evening" -> evening). Used to rank /
+    # filter offered slots; never invented.
+    time_range: str | None = None
+    # Gender preference as STATED ("female"/"male"/None). The Doctor
+    # table carries no gender column, so this is preserved + displayed
+    # but never used to invent filtering — search still returns real
+    # backend results and the reply says so honestly.
+    gender_preference: str | None = None
+    # Specialty as stated ("cardiology"/"cardiologist"/...). Grounded by
+    # search_doctors synonyms; kept here so "keep everything else" works.
+    specialty_preference: str | None = None
+    # Last tool outcome summary + last UI surface emitted, so follow-ups
+    # like "the second one" / "show me another" resolve against what was
+    # actually shown — not against raw history.
+    last_tool_result: dict[str, Any] | None = None
+    last_ui_surface: str | None = None
+    # Doctor ids currently in a comparison view (2-3). Resolved only
+    # against offered doctors; never invented.
+    compare_ids: list[str] = Field(default_factory=list)
+    # Whether the last doctor search still has more pages / refinements.
+    allow_explore_more: bool = False
+    allow_compare: bool = False
     history: list[dict[str, str]] = Field(default_factory=list)
     # Phase 14 telephony: "web" everywhere else; "telephony" unlocks
     # patient-data tools only after the caller proves identity out loud.

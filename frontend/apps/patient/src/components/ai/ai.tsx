@@ -75,11 +75,26 @@ export function ChatBubble({ message, onSend, onSelect, onPickType, onPickMode, 
             <AssistantMarkdown text={message.text} />
           </div>
         )}
+        {message.careContext && !isPatient && (
+          <CareContextCard context={message.careContext} onSend={onSend} />
+        )}
         {message.doctors && message.doctors.length > 0 && (
           <div className="mt-2.5 space-y-2 text-left">
+            {message.title && (
+              <p className="text-[0.8rem] font-bold text-navy">{message.title}</p>
+            )}
             {message.doctors.map((d) => (
               <LiveDoctorCard key={d.id} doctor={d} onSelect={send} />
             ))}
+            {message.allowCompare && message.doctors.length > 1 && (
+              <button
+                type="button"
+                onClick={() => onSend?.("Compare them")}
+                className="w-full text-[0.8rem] font-bold text-navy bg-white border border-border rounded-control px-3 py-2 hover:border-healthcare transition"
+              >
+                Compare these doctors
+              </button>
+            )}
             {message.hasMoreDoctors && (
               <MoreDoctorsButton
                 total={message.doctorsTotal ?? 0}
@@ -88,6 +103,9 @@ export function ChatBubble({ message, onSend, onSelect, onPickType, onPickMode, 
               />
             )}
           </div>
+        )}
+        {message.compare && (message.compare.doctors?.length ?? 0) >= 2 && (
+          <DoctorCompare compare={message.compare} onSelect={send} />
         )}
         {message.slots && message.slots.length > 0 && (
           <SlotChips slots={message.slots} onSend={onSend} onSelect={send} />
@@ -111,6 +129,15 @@ export function ChatBubble({ message, onSend, onSelect, onPickType, onPickMode, 
         )}
         {message.pendingBooking && (
           <ConfirmPanel pending={message.pendingBooking} onSend={onSend} />
+        )}
+        {message.filterChoices && message.filterChoices.length > 0 && (
+          <FilterChoices choices={message.filterChoices} onSend={onSend} />
+        )}
+        {message.upcomingAppointment && (
+          <BookingSuccess upcoming={message.upcomingAppointment} onSend={onSend} />
+        )}
+        {message.quickReplies && message.quickReplies.length > 0 && !isPatient && (
+          <QuickReplies replies={message.quickReplies} onSend={onSend} />
         )}
         <p className="text-[0.7rem] text-ink-faint mt-1">{message.time}</p>
       </div>
@@ -156,6 +183,15 @@ function LiveDoctorCard({
     typeof doctor.distance_km === "number"
       ? ` · ${doctor.distance_km.toFixed(1)} km away`
       : "";
+  const experience =
+    typeof doctor.experience_years === "number" && doctor.experience_years > 0
+      ? ` · ${doctor.experience_years} yrs exp`
+      : "";
+  const modes = (doctor.consultation_types ?? []).filter(Boolean);
+  const modeLabel = modes.length > 0
+    ? ` · ${modes.map((m) => (m === "in_person" ? "In-person" : m === "video" ? "Video" : "Phone")).join(" / ")}`
+    : "";
+  const why = (doctor.why_match ?? []).filter(Boolean).slice(0, 3);
   return (
     <div className="bg-white border border-border rounded-card p-3.5 shadow-subtle flex gap-3">
       <SafeImage
@@ -170,9 +206,22 @@ function LiveDoctorCard({
         <p className="text-[0.78rem] text-ink-secondary">
           {doctor.specialty ?? "Physician"}
           {where ? ` · ${where}` : ""}
+          {experience}
           {distance && <span className="font-bold text-teal-dark">{distance}</span>}
         </p>
-        <div className="flex gap-2 mt-2">
+        {modeLabel && (
+          <p className="text-[0.74rem] text-ink-secondary mt-0.5">{modeLabel.trim().replace(/^·/, "").trim()}</p>
+        )}
+        {why.length > 0 && (
+          <ul className="mt-1.5 space-y-0.5" aria-label={`Why ${doctor.name} matches`}>
+            {why.map((w) => (
+              <li key={w} className="text-[0.74rem] text-teal-dark font-medium">
+                ✓ {w}
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="flex flex-wrap gap-2 mt-2">
           <Button
             size="sm"
             onClick={() =>
@@ -181,16 +230,229 @@ function LiveDoctorCard({
                 : navigate("/book", { state: { doctorId: doctor.id } })
             }
           >
-            Choose
+            Choose doctor
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              onSelect
+                ? onSelect(`Show availability for ${doctor.name}`, { type: "booking_selection", field: "doctor", value: doctor.id })
+                : navigate("/book", { state: { doctorId: doctor.id } })
+            }
+          >
+            View availability
           </Button>
           <Button
             size="sm"
             variant="outline"
             onClick={() => navigate("/book", { state: { doctorId: doctor.id } })}
           >
-            View availability
+            View profile
           </Button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** Patient-visible care request summary — facts only, never reasoning. */
+export function CareContextCard({
+  context,
+  onSend,
+}: {
+  context: Record<string, unknown> | null | undefined;
+  onSend?: (text: string) => void;
+}) {
+  if (!context || !onSend) return null;
+  const entries: { label: string; value: string }[] = [];
+  const get = (k: string) => {
+    const v = context[k];
+    return typeof v === "string" && v.trim() ? v.trim() : null;
+  };
+  const concern = get("concern");
+  const forWhom = get("for_whom");
+  const when = get("when");
+  const timePref = get("time_preference");
+  const consultation = get("consultation");
+  const specialty = get("specialty");
+  const gender = get("gender_preference");
+  const hospital = get("hospital");
+  const doctor = get("doctor_preference");
+  if (concern) entries.push({ label: "Concern", value: concern });
+  if (forWhom) entries.push({ label: "For", value: forWhom === "self" ? "Myself" : forWhom });
+  if (specialty) entries.push({ label: "Care", value: specialty });
+  if (when) entries.push({ label: "When", value: timePref ? `${when} · ${timePref}` : when });
+  else if (timePref) entries.push({ label: "When", value: timePref });
+  if (consultation) entries.push({ label: "Consultation", value: consultation.replace("_", " ") });
+  if (gender) entries.push({ label: "Doctor preference", value: `${gender} doctor` });
+  if (doctor) entries.push({ label: "Doctor", value: doctor });
+  if (hospital) entries.push({ label: "Hospital", value: hospital });
+  if (entries.length === 0) return null;
+  return (
+    <div className="mt-2.5 text-left bg-white border border-border rounded-control p-3" aria-label="Your care request">
+      <div className="flex items-center justify-between mb-1.5">
+        <p className="text-[0.74rem] font-extrabold tracking-wide text-ink-secondary uppercase">Your care request</p>
+        <button
+          type="button"
+          onClick={() => onSend("I want to edit my preferences")}
+          className="text-[0.74rem] font-bold text-healthcare hover:underline"
+        >
+          Edit
+        </button>
+      </div>
+      <dl className="space-y-1">
+        {entries.map((e) => (
+          <div key={e.label} className="flex gap-2 text-[0.8rem]">
+            <dt className="text-ink-faint font-semibold min-w-[92px]">{e.label}</dt>
+            <dd className="text-navy font-semibold truncate">{e.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+/** One-tap patient-friendly choices — never a questionnaire blast. */
+export function QuickReplies({
+  replies,
+  onSend,
+}: {
+  replies: string[];
+  onSend?: (text: string) => void;
+}) {
+  if (!onSend || replies.length === 0) return null;
+  return (
+    <div className="mt-2.5 flex flex-wrap gap-1.5 text-left" aria-label="Suggested replies">
+      {replies.slice(0, 6).map((r) => (
+        <button
+          key={r}
+          type="button"
+          onClick={() => onSend(r)}
+          className="text-[0.8rem] font-bold bg-white border border-healthcare/40 rounded-full px-3 py-1.5 text-navy hover:bg-healthcare-soft hover:border-healthcare transition"
+        >
+          {r}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Intelligent "explore more" — refinements preserving all constraints. */
+export function FilterChoices({
+  choices,
+  onSend,
+}: {
+  choices: NonNullable<ChatMessage["filterChoices"]>;
+  onSend?: (text: string) => void;
+}) {
+  if (!onSend || choices.length === 0) return null;
+  return (
+    <div className="mt-2.5 text-left" aria-label="Explore more options">
+      <p className="text-[0.75rem] font-bold text-ink-secondary mb-1.5">What would you like to change?</p>
+      <div className="flex flex-wrap gap-1.5">
+        {choices.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            onClick={() => onSend(c.prompt)}
+            className="text-[0.78rem] font-bold bg-healthcare-faint border border-healthcare/30 rounded-full px-3 py-1.5 text-navy hover:border-healthcare transition"
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Side-by-side comparison of 2-3 doctors from REAL backend data only. */
+export function DoctorCompare({
+  compare,
+  onSelect,
+}: {
+  compare: NonNullable<ChatMessage["compare"]>;
+  onSelect?: (text: string, selection: BookingSelection) => void;
+}) {
+  const navigate = useNavigate();
+  const docs = (compare.doctors ?? []).slice(0, 3);
+  if (docs.length < 2) return null;
+  const modeName = (m: string) => (m === "in_person" ? "In-person" : m === "video" ? "Video" : "Phone");
+  const rows: { label: string; values: string[] }[] = [
+    { label: "Specialty", values: docs.map((d) => d.specialty ?? "—") },
+    { label: "Experience", values: docs.map((d) => (d.experience_years ? `${d.experience_years} yrs` : "—")) },
+    { label: "Hospital", values: docs.map((d) => d.hospital_name ?? "—") },
+    {
+      label: "Distance",
+      values: docs.map((d) => (typeof d.distance_km === "number" ? `${d.distance_km.toFixed(1)} km` : "—")),
+    },
+    { label: "Modes", values: docs.map((d) => ((d.consultation_types ?? []).map(modeName).join(" / ") || "—")) },
+  ];
+  return (
+    <div className="mt-2.5 text-left bg-white border border-border rounded-control p-3 overflow-x-auto" aria-label="Compare doctors">
+      <p className="text-[0.8rem] font-bold text-navy mb-2">Compare doctors</p>
+      <table className="w-full text-[0.78rem] border-collapse">
+        <thead>
+          <tr>
+            <th className="text-left font-semibold text-ink-faint pb-1.5 pr-2"> </th>
+            {docs.map((d) => (
+              <th key={d.id} className="text-left font-bold text-navy pb-1.5 pr-2 min-w-[110px]">{d.name}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.label} className="border-t border-border/60">
+              <td className="font-semibold text-ink-faint py-1.5 pr-2">{r.label}</td>
+              {r.values.map((v, i) => (
+                <td key={i} className="py-1.5 pr-2 text-ink">{v}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="flex flex-wrap gap-2 mt-2.5">
+        {docs.map((d) => (
+          <Button
+            key={d.id}
+            size="sm"
+            onClick={() =>
+              onSelect
+                ? onSelect(`The second one looks good — ${d.name}`, { type: "booking_selection", field: "doctor", value: d.id })
+                : navigate("/book", { state: { doctorId: d.id } })
+            }
+          >
+            Choose {d.name.replace(/^Dr\.?\s*/i, "Dr. ")}
+          </Button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Post-booking confirmation living inside the chat (§18). */
+export function BookingSuccess({
+  upcoming,
+  onSend,
+}: {
+  upcoming: NonNullable<ChatMessage["upcomingAppointment"]>;
+  onSend?: (text: string) => void;
+}) {
+  const navigate = useNavigate();
+  if (!onSend) return null;
+  return (
+    <div className="mt-2.5 text-left bg-success/10 border border-success/30 rounded-control p-3" aria-label="Appointment confirmed">
+      <p className="text-[0.83rem] font-bold text-navy">Your appointment is confirmed 🎉</p>
+      {upcoming.doctor_name && <p className="text-[0.8rem] text-ink mt-0.5 font-semibold">{upcoming.doctor_name}</p>}
+      <p className="text-[0.78rem] text-ink-secondary">What would you like to do next?</p>
+      <div className="flex flex-wrap gap-2 mt-2">
+        <Button size="sm" onClick={() => navigate("/visits")}>View appointment</Button>
+        <Button size="sm" variant="outline" onClick={() => onSend("I want to complete my pre-visit questions")}>
+          Complete pre-visit questions
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => onSend("Help me prepare for my visit")}>
+          Prepare for my visit
+        </Button>
       </div>
     </div>
   );

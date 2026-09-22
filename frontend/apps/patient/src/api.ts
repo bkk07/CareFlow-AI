@@ -480,6 +480,57 @@ export interface ChatDoctorCard {
   hospital_city: string | null;
   specialty: string | null;
   distance_km: number | null;
+  experience_years?: number | null;
+  consultation_types?: string[];
+  available_durations?: number[];
+  why_match?: string[];
+}
+
+export type ChatSurface =
+  | "TEXT"
+  | "QUICK_REPLIES"
+  | "CARE_CONTEXT"
+  | "DOCTOR_RESULTS"
+  | "DOCTOR_COMPARE"
+  | "FILTER_CHOICES"
+  | "DAY_PICKER"
+  | "SLOT_PICKER"
+  | "APPOINTMENT_TYPE"
+  | "CONSULTATION_MODE"
+  | "BOOKING_REVIEW"
+  | "BOOKING_SUCCESS"
+  | "UPCOMING_APPOINTMENT"
+  | "QUESTIONNAIRE"
+  | "ERROR"
+  | "ESCALATION";
+
+export interface ChatAction {
+  id: string;
+  label: string;
+  kind: string;
+  doctor_id?: string;
+  appointment_id?: string;
+}
+
+export interface ChatCompare {
+  doctors: {
+    id: string;
+    name: string;
+    specialty: string | null;
+    experience_years: number | null;
+    hospital_name: string;
+    hospital_city: string | null;
+    distance_km: number | null;
+    consultation_types: string[];
+    available_durations: number[];
+  }[];
+  count: number;
+}
+
+export interface ChatFilterChoice {
+  id: string;
+  label: string;
+  prompt: string;
 }
 
 export interface ChatSlot {
@@ -547,6 +598,25 @@ export interface ChatReply {
   consultation_modes: string[];
   booking_stage: BookingStage;
   pending_booking: ChatPendingBooking | null;
+  surface?: ChatSurface;
+  title?: string | null;
+  allow_explore_more?: boolean;
+  allow_compare?: boolean;
+  intent?: string | null;
+  stage?: string | null;
+  care_context?: Record<string, unknown> | null;
+  quick_replies?: string[];
+  compare?: ChatCompare | null;
+  filter_choices?: ChatFilterChoice[];
+  actions?: ChatAction[];
+  upcoming_appointment?: {
+    appointment_id: string;
+    doctor_name: string | null;
+    date: string | null;
+    slot_start: string | null;
+    slot_end: string | null;
+  } | null;
+  questionnaire?: Record<string, unknown> | null;
 }
 
 export async function postChat(
