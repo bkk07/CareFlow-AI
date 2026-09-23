@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Building2, CheckCircle2, Phone, Plus, Trash2, Video } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useSchedule } from "../context/ScheduleContext";
-import { Button, CardSkeleton, EmptyState, ErrorState } from "../components/common/ui";
+import { Button, CardSkeleton, EmptyState, ErrorState, LiveBadge, PageHeader } from "../components/common/ui";
 import { Modal } from "../components/common/Modal";
 import type { BlockedSlot, ConsultationMode } from "../types";
 
@@ -120,20 +120,33 @@ export default function AvailabilityPage() {
     { id: "phone", label: "Telephone", desc: "Call patient", icon: Phone },
   ];
 
+  const openDays = rules.filter((r) => r.enabled);
+  const bookingSummary =
+    openDays.length === 0
+      ? "Patients can't book you yet — no working days are open."
+      : `Patients can book you ${openDays.length} day${openDays.length === 1 ? "" : "s"} a week${accepting ? "." : ", but booking is currently paused."}`;
+
   return (
     <div className="space-y-4 max-w-3xl">
-      <div>
-        <h1 className="page-title">Availability</h1>
-        <p className="page-sub mt-1">
-          Working hours, visit length, consultation types, and blocked time — synced with your hospital.
-        </p>
-      </div>
+      <PageHeader
+        title="Availability"
+        sub="Working hours, visit length, consultation types, and blocked time — synced with your hospital."
+      />
 
-      <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">
-        {loading ? "Syncing availability…" : "Live availability from your hospital"}
-      </p>
+      <LiveBadge loading={loading} />
 
-      {error && <ErrorState title="Could not load availability" body={error} onRetry={() => void refresh()} />}
+      {error && <ErrorState title="We couldn't load your availability." body={error} onRetry={() => void refresh()} />}
+
+      {/* When-can-patients-book-me summary */}
+      <section className="card-base p-5" aria-label="Booking summary" style={{ borderLeft: "3px solid #168C8C" }}>
+        <p className="text-[0.72rem] font-bold uppercase tracking-widest text-teal-dark">When can patients book me?</p>
+        <p className="text-[0.9rem] font-bold text-navy mt-1">{bookingSummary}</p>
+        {openDays.length > 0 && (
+          <p className="text-[0.8rem] text-ink-secondary mt-1">
+            {openDays.map((r) => `${r.day.slice(0, 3)} ${r.start}–${r.end}`).join(" · ")}
+          </p>
+        )}
+      </section>
 
       <AnimatePresence>
         {saved && (
@@ -159,9 +172,9 @@ export default function AvailabilityPage() {
       </section>
 
       <section className="card-base p-5" aria-label="Working hours">
-        <h2 className="section-title">Working hours (IST)</h2>
+        <h2 className="section-title">Working hours</h2>
         <p className="text-[0.8rem] text-ink-secondary mt-1">
-          Hours are in India time — patients see these same times.
+          Toggle a day open, then set its window. Patients only see open periods.
         </p>
         {loading && rules.length === 0 && !error ? (
           <div className="mt-3"><CardSkeleton lines={4} /></div>
@@ -171,13 +184,15 @@ export default function AvailabilityPage() {
           <ul className="mt-3 divide-y divide-border">
             {rules.map((r) => (
               <li key={r.id} className="py-2.5 flex items-center gap-3 flex-wrap">
+                <span className={`w-1 self-stretch rounded-full ${r.enabled ? "bg-teal" : "bg-border"}`} aria-hidden />
                 <span className="w-24 font-bold text-[0.88rem] text-ink">{r.day}</span>
                 <Toggle on={r.enabled} onChange={() => void toggleRule(r.id).catch(() => fail("Could not update working hours."))} label={`${r.day} enabled`} />
                 {r.enabled ? (
-                  <span className="flex items-center gap-1.5 text-sm">
+                  <span className="flex items-center gap-1.5 text-sm flex-wrap">
                     <input type="time" value={r.start} onChange={(e) => void updateRule(r.id, { start: e.target.value }).catch(() => fail("Could not update working hours."))} aria-label={`${r.day} start`} className="border border-border rounded-lg px-2 py-1.5 text-sm" />
                     <span className="text-ink-faint">–</span>
                     <input type="time" value={r.end} onChange={(e) => void updateRule(r.id, { end: e.target.value }).catch(() => fail("Could not update working hours."))} aria-label={`${r.day} end`} className="border border-border rounded-lg px-2 py-1.5 text-sm" />
+                    <span className="text-[0.76rem] font-bold text-teal-dark bg-teal-soft rounded-full px-2 py-0.5 ml-1">Available</span>
                   </span>
                 ) : (
                   <span className="text-[0.82rem] text-ink-faint font-semibold">Closed</span>

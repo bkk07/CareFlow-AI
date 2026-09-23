@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ArrowRight, CheckCircle2, Clock, FileText } from "lucide-react";
 import { useSchedule } from "../context/ScheduleContext";
-import { CardSkeleton, EmptyState, ErrorState, StatusBadge } from "../components/common/ui";
+import { CardSkeleton, EmptyState, ErrorState, LiveBadge, PageHeader, StatusBadge } from "../components/common/ui";
 import { Tabs } from "../components/common/Modal";
 
 type Filter = "all" | "completed" | "pending";
@@ -23,16 +23,14 @@ export default function QuestionnairesPage() {
 
   return (
     <div className="space-y-4 max-w-3xl">
-      <div>
-        <h1 className="page-title">Pre-visit questionnaires</h1>
-        <p className="page-sub mt-1">Patient-provided administrative information — no diagnosis or clinical scoring.</p>
-      </div>
+      <PageHeader
+        title="Pre-visit questionnaires"
+        sub="Authorized patient-provided information for your appointments."
+      />
 
-      <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">
-        {loading ? "Syncing responses…" : "Live responses from your appointments"}
-      </p>
+      <LiveBadge loading={loading} />
 
-      {error && <ErrorState title="Could not load questionnaires" body={error} onRetry={() => void refresh()} />}
+      {error && <ErrorState title="We couldn't load questionnaires." body={error} onRetry={() => void refresh()} />}
 
       <div className="card-base px-2">
         <Tabs<Filter>
@@ -47,7 +45,7 @@ export default function QuestionnairesPage() {
           <CardSkeleton lines={3} />
         </div>
       ) : visible.length === 0 ? (
-        <div className="card-base"><EmptyState title="No questionnaires pending" body="New patient responses will appear here before each visit." /></div>
+        <div className="card-base"><EmptyState title="No questionnaires require your attention." body="New patient responses will appear here before each visit." /></div>
       ) : (
         <div className="space-y-3">
           {visible.map((q) => {
@@ -88,7 +86,7 @@ export default function QuestionnairesPage() {
                   </p>
                 )}
                 <Link to={`/appointments/${q.appointmentId}`} className="inline-flex items-center gap-1 text-[0.83rem] font-bold text-healthcare hover:underline mt-3">
-                  Open appointment <ArrowRight size={14} />
+                  Review appointment <ArrowRight size={14} />
                 </Link>
               </article>
             );

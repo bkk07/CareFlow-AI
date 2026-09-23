@@ -1,38 +1,55 @@
 import { useMemo } from "react";
 import { motion } from "framer-motion";
-import { ArrowRight, CalendarCheck, CheckCircle2, ClipboardList, Clock } from "lucide-react";
+import { ArrowRight, CalendarCheck, ClipboardList } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useSchedule } from "../context/ScheduleContext";
 import { AppointmentCard } from "../components/appointments/AppointmentCard";
-import { Avatar, CardSkeleton, ErrorState, StatusBadge } from "../components/common/ui";
+import { Avatar, CardSkeleton, EmptyState, ErrorState, LiveBadge, StatusBadge } from "../components/common/ui";
+
+function isPendingStatus(s: string): boolean {
+  return ["pending", "requested", "sync_pending", "rescheduled"].includes(s);
+}
 
 export default function DashboardPage() {
   const { doctor } = useAuth();
-  const { appointments, questionnaires, loading, error, refresh, accepting } = useSchedule();
-  const today = useMemo(() => appointments.filter((a) => a.dayGroup === "today"), [appointments]);
-  const completed = today.filter((a) => a.status === "completed").length;
-  const next = useMemo(() => today.find((a) => ["confirmed", "pending"].includes(a.status)), [today]);
-  const weekCount = appointments.filter((a) => ["today", "tomorrow", "week"].includes(a.dayGroup)).length;
-  const pendingForms = questionnaires.filter((q) => q.status !== "completed").length;
+  const { appointments, questionnaires, loading, error, refresh, accepting, rules } = useSchedule();
 
-  const cards = [
-    { label: "Today's appointments", value: String(today.length), icon: CalendarCheck, tint: "bg-healthcare-soft text-healthcare" },
-    { label: "Next appointment", value: next ? next.time : "—", icon: Clock, tint: "bg-teal-soft text-teal-dark" },
-    { label: "Completed today", value: String(completed), icon: CheckCircle2, tint: "bg-success-soft text-success" },
-    { label: "Upcoming this week", value: String(weekCount), icon: ClipboardList, tint: "bg-navy-soft text-navy" },
+  const today = useMemo(
+    () => appointments.filter((a) => a.dayGroup === "today").sort((x, y) => x.sortKey.localeCompare(y.sortKey)),
+    [appointments],
+  );
+  const confirmed = today.filter((a) => a.status === "confirmed").length;
+  const pending = today.filter((a) => isPendingStatus(a.status)).length;
+  const completed = today.filter((a) => a.status === "completed").length;
+  const next = useMemo(() => today.find((a) => ["confirmed", "pending", "requested", "rescheduled", "sync_pending"].includes(a.status)), [today]);
+  const pendingToday = useMemo(() => today.filter((a) => isPendingStatus(a.status)).slice(0, 3), [today]);
+  const upcomingNext = useMemo(
+    () => appointments.filter((a) => a.dayGroup !== "today").sort((x, y) => x.sortKey.localeCompare(y.sortKey)).slice(0, 3),
+    [appointments],
+  );
+  const pendingForms = questionnaires.filter((q) => q.status !== "completed");
+  const openDays = rules.filter((r) => r.enabled).length;
+
+  const stats = [
+    { label: "Appointments", value: String(today.length) },
+    { label: "Confirmed", value: String(confirmed) },
+    { label: "Pending", value: String(pending) },
+    { label: "Completed", value: String(completed) },
   ];
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
-  const firstName = doctor.name.replace("Dr. ", "").split(" ")[0];
+  const firstName = doctor.name.replace(/^Dr\.\s*/i, "").split(" ")[0];
+  const dateLabel = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 
   return (
     <div className="space-y-5">
+      {/* 1. Who am I */}
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="page-title">{greeting}{firstName ? `, Dr. ${firstName}` : ""}</h1>
-          <p className="page-sub mt-1">Here&apos;s your schedule and appointment activity for today.</p>
+          <p className="page-sub mt-1">{dateLabel} · Here&apos;s what&apos;s on your schedule today.</p>
         </div>
         <span className={`inline-flex items-center gap-1.5 text-[0.78rem] font-bold rounded-full px-3 py-1.5 border ${accepting ? "bg-success-soft text-success border-success/20" : "bg-slate-100 text-ink-secondary border-border"}`}>
           <span className="w-1.5 h-1.5 rounded-full bg-current" aria-hidden />
@@ -40,11 +57,8 @@ export default function DashboardPage() {
         </span>
       </div>
 
-      <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">
-        {loading ? "Syncing with your live schedule…" : "Live schedule from your hospital"}
-      </p>
-
-      {error && <ErrorState title="Could not load schedule" body={error} onRetry={() => void refresh()} />}
+      <LiveBadge loading={loading} />
+      {error && <ErrorState title="We couldn't load today's schedule." body={error} onRetry={() => void refresh()} />}
 
       {loading && appointments.length === 0 && !error && (
         <div className="space-y-2.5">
@@ -53,74 +67,176 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {!loading || appointments.length > 0 ? (
+      {(!loading || appointments.length > 0) && !error && (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-            {cards.map((c, i) => (
-              <motion.div key={c.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05, duration: 0.28 }} className="card-base p-4">
-                <span className={`w-9 h-9 rounded-xl flex items-center justify-center ${c.tint}`}><c.icon size={17} /></span>
-                <p className="text-[1.35rem] font-extrabold text-navy mt-2 leading-none">{c.value}</p>
-                <p className="text-[0.76rem] font-semibold text-ink-secondary mt-1">{c.label}</p>
-              </motion.div>
-            ))}
-          </div>
+          {/* Compact TODAY summary — real counts only */}
+          <section aria-label="Today at a glance" className="card-base px-5 py-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="text-[0.72rem] font-bold uppercase tracking-widest text-healthcare">Today</p>
+              <span className="text-[0.76rem] text-ink-secondary font-semibold">{dateLabel}</span>
+            </div>
+            <dl className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {stats.map((s) => (
+                <div key={s.label} className="flex items-baseline gap-2">
+                  <dd className="text-[1.4rem] font-extrabold text-navy tabular-nums leading-none">{s.value}</dd>
+                  <dt className="text-[0.78rem] font-semibold text-ink-secondary">{s.label}</dt>
+                </div>
+              ))}
+            </dl>
+          </section>
 
           <div className="grid lg:grid-cols-[1fr_340px] gap-4 items-start">
+            {/* 2. Today's schedule — dominant */}
             <section aria-label="Today's schedule">
               <div className="flex items-center justify-between mb-2.5">
                 <h2 className="section-title">Today&apos;s schedule</h2>
-                <Link to="/today" className="text-[0.82rem] font-bold text-healthcare hover:underline inline-flex items-center gap-1">Full day <ArrowRight size={14} /></Link>
+                <Link to="/today" className="text-[0.82rem] font-bold text-healthcare hover:underline inline-flex items-center gap-1">
+                  Full day <ArrowRight size={14} />
+                </Link>
               </div>
-              <div className="space-y-2.5">
-                {today.slice(0, 5).map((a) => (
-                  <AppointmentCard key={a.id} appointment={a} />
-                ))}
-                {today.length === 0 && (
-                  <p className="text-sm text-ink-secondary card-base p-4">No appointments today — your schedule is clear.</p>
-                )}
-              </div>
+              {today.length === 0 ? (
+                <div className="card-base">
+                  <EmptyState
+                    title="No appointments scheduled."
+                    body="Your day is clear. New bookings will appear here."
+                    action={<Link to="/availability" className="inline-flex items-center justify-center text-[0.83rem] font-bold bg-white border border-border rounded-control px-4 py-2.5 hover:border-healthcare hover:text-healthcare transition">View availability</Link>}
+                  />
+                </div>
+              ) : (
+                <ol className="space-y-2.5" aria-label="Today appointments timeline">
+                  {today.slice(0, 6).map((a, i) => (
+                    <motion.li
+                      key={a.id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.22, delay: Math.min(i * 0.04, 0.2) }}
+                      className="flex gap-3"
+                    >
+                      <span className="hidden sm:block w-16 pt-4 text-[0.75rem] font-bold text-ink-faint tabular-nums shrink-0 text-right">{a.time}</span>
+                      <span className="hidden sm:flex flex-col items-center shrink-0 pt-3" aria-hidden>
+                        <span className={`w-2.5 h-2.5 rounded-full ${a.status === "completed" ? "bg-success" : a.status === "confirmed" ? "bg-healthcare" : a.status === "cancelled" ? "bg-border" : "bg-warning"}`} />
+                        {i < Math.min(today.length, 6) - 1 && <span className="w-px flex-1 bg-border mt-1" />}
+                      </span>
+                      <div className="flex-1 min-w-0"><AppointmentCard appointment={a} /></div>
+                    </motion.li>
+                  ))}
+                </ol>
+              )}
+
+              {/* 4. Pending appointments needing attention */}
+              {pendingToday.length > 0 && (
+                <div className="mt-4">
+                  <h3 className="section-title mb-2">Pending confirmation <span className="text-ink-faint font-semibold text-[0.8rem]">· {pending}</span></h3>
+                  <div className="space-y-2">
+                    {pendingToday.map((a) => (
+                      <Link key={a.id} to={`/appointments/${a.id}`} className="flex items-center gap-3 bg-warning-soft/50 border border-warning/25 rounded-control px-3.5 py-2.5 hover:border-warning transition">
+                        <span className="text-[0.8rem] font-extrabold text-navy tabular-nums shrink-0">{a.time}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[0.85rem] font-bold text-ink truncate">{a.patient.name}</span>
+                          <span className="block text-[0.75rem] text-ink-secondary">{a.type}</span>
+                        </span>
+                        <StatusBadge status={a.status} />
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
             </section>
 
+            {/* Right rail: 3 → 7 in hierarchy order */}
             <div className="space-y-3">
-              {next && (
-                <section className="card-base p-5 border-healthcare/25" aria-label="Next appointment" style={{ borderTop: "3px solid #1769AA" }}>
+              {/* 3. Next appointment */}
+              {next ? (
+                <section className="card-base p-5" aria-label="Next appointment" style={{ borderTop: "3px solid #1769AA" }}>
                   <p className="text-[0.72rem] font-bold uppercase tracking-widest text-healthcare">Next appointment</p>
                   <div className="flex items-center gap-3 mt-2">
                     <Avatar name={next.patient.name} />
-                    <div>
-                      <p className="font-extrabold text-navy">{next.time}</p>
-                      <p className="text-sm font-bold text-ink">{next.patient.name}</p>
+                    <div className="min-w-0">
+                      <p className="font-extrabold text-navy text-[1.05rem] tabular-nums">{next.time}</p>
+                      <p className="text-sm font-bold text-ink truncate">{next.patient.name}</p>
                       <p className="text-[0.8rem] text-ink-secondary">{next.type} · {next.durationMinutes} min</p>
                     </div>
                   </div>
-                  <div className="mt-2"><StatusBadge status={next.questionnaire} /></div>
-                  <div className="flex gap-2 mt-3">
-                    <Link to={`/appointments/${next.id}`} className="flex-1 text-center text-[0.83rem] font-bold bg-navy text-white rounded-control py-2.5 hover:bg-navy-deep transition">View appointment</Link>
-                    <Link to="/questionnaires" className="flex-1 text-center text-[0.83rem] font-bold bg-white border border-border rounded-control py-2.5 hover:border-healthcare hover:text-healthcare transition">View questionnaire</Link>
-                  </div>
+                  <div className="mt-2.5"><StatusBadge status={next.questionnaire} /></div>
+                  <Link to={`/appointments/${next.id}`} className="block text-center text-[0.85rem] font-bold bg-navy text-white rounded-control py-2.5 mt-3 hover:bg-navy-deep transition">
+                    Open appointment
+                  </Link>
+                </section>
+              ) : (
+                <section className="card-base p-5" aria-label="Next appointment">
+                  <p className="text-[0.72rem] font-bold uppercase tracking-widest text-healthcare">Next appointment</p>
+                  <p className="text-[0.88rem] font-semibold text-ink mt-2">No more appointments scheduled today.</p>
                 </section>
               )}
+
+              {/* 5. Questionnaires */}
               <section className="card-base p-5" aria-label="Questionnaires">
-                <h2 className="section-title">Pre-visit forms</h2>
-                <p className="text-[0.8rem] text-ink-secondary mt-0.5">{pendingForms} need attention · {questionnaires.filter((q) => q.status === "completed").length} completed</p>
-                {questionnaires.length === 0 ? (
-                  <p className="text-[0.83rem] text-ink-secondary mt-2">No questionnaires yet — new patient responses will appear here.</p>
-                ) : (
+                <div className="flex items-center justify-between">
+                  <h2 className="section-title">Pre-visit forms</h2>
+                  <ClipboardList size={16} className="text-ink-faint" />
+                </div>
+                <p className="text-[0.8rem] text-ink-secondary mt-0.5">
+                  {pendingForms.length === 0 ? "No questionnaires require your attention." : `${pendingForms.length} need${pendingForms.length === 1 ? "s" : ""} attention`}
+                </p>
+                {questionnaires.length > 0 && (
                   <ul className="mt-3 space-y-2">
                     {questionnaires.slice(0, 3).map((q) => (
                       <li key={q.id} className="flex items-center justify-between gap-2 text-sm border border-border rounded-control px-3 py-2">
-                        <span className="min-w-0"><span className="font-bold text-ink block truncate text-[0.83rem]">{q.patientName}</span><span className="text-[0.75rem] text-ink-secondary">{q.name}</span></span>
+                        <span className="min-w-0">
+                          <span className="font-bold text-ink block truncate text-[0.83rem]">{q.patientName}</span>
+                          <span className="text-[0.75rem] text-ink-secondary">{q.name}</span>
+                        </span>
                         <StatusBadge status={q.status} />
                       </li>
                     ))}
                   </ul>
                 )}
-                <Link to="/questionnaires" className="block text-center text-[0.83rem] font-bold text-healthcare hover:underline mt-3">All questionnaires</Link>
+                <Link to="/questionnaires" className="block text-center text-[0.83rem] font-bold text-healthcare hover:underline mt-3">Review questionnaires</Link>
+              </section>
+
+              {/* 6. Availability status */}
+              <section className="card-base p-5" aria-label="Availability status">
+                <h2 className="section-title">Availability</h2>
+                <p className="text-[0.8rem] text-ink-secondary mt-0.5">
+                  {openDays === 0 ? "No working days open." : `Open ${openDays} day${openDays === 1 ? "" : "s"} a week.`}
+                  {" "}{accepting ? "Booking is on." : "Booking is paused."}
+                </p>
+                <Link to="/availability" className="block text-center text-[0.83rem] font-bold bg-white border border-border rounded-control py-2.5 mt-3 hover:border-healthcare hover:text-healthcare transition">
+                  Manage availability
+                </Link>
+              </section>
+
+              {/* 7. Coming next */}
+              <section aria-label="Coming next">
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="section-title">Coming next</h2>
+                  <Link to="/calendar" className="text-[0.82rem] font-bold text-healthcare hover:underline inline-flex items-center gap-1">
+                    View calendar <ArrowRight size={14} />
+                  </Link>
+                </div>
+                {upcomingNext.length === 0 ? (
+                  <p className="text-sm text-ink-secondary card-base p-4">Your upcoming schedule is clear.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {upcomingNext.map((a) => (
+                      <Link key={a.id} to={`/appointments/${a.id}`} className="flex items-center gap-3 card-base px-3.5 py-2.5 hover:shadow-card transition">
+                        <span className="w-10 h-10 rounded-xl bg-healthcare-soft text-healthcare flex items-center justify-center shrink-0" aria-hidden>
+                          <CalendarCheck size={16} />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[0.85rem] font-bold text-ink truncate">{a.patient.name}</span>
+                          <span className="block text-[0.75rem] text-ink-secondary">{a.dateLabel} · {a.time} · {a.type}</span>
+                        </span>
+                        <StatusBadge status={a.status} />
+                      </Link>
+                    ))}
+                  </div>
+                )}
               </section>
             </div>
           </div>
         </>
-      ) : null}
+      )}
     </div>
   );
 }

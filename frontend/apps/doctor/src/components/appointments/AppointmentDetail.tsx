@@ -39,7 +39,7 @@ export function QuestionnairePanel({ questionnaire }: { questionnaire: Questionn
       <div className="bg-warning-soft border border-warning/25 rounded-control p-4 text-sm">
         <p className="font-bold text-warning flex items-center gap-1.5"><Clock size={15} /> Questionnaire {questionnaire.status.replace("_", " ")}</p>
         <p className="text-ink-secondary mt-1">
-          {questionnaire.answers.length} of ~6 sections answered so far. Patient-provided information will appear here when complete.
+          Patient-provided information will appear here when the form is complete.
         </p>
       </div>
     );
@@ -63,14 +63,22 @@ export function QuestionnairePanel({ questionnaire }: { questionnaire: Questionn
 }
 
 export function AppointmentDetailBody({ appointment, questionnaire }: { appointment: Appointment; questionnaire: Questionnaire | undefined }) {
+  // Only render contact rows the backend actually provides — never placeholders.
+  const contactRows: [string, string][] = [];
+  if (appointment.patient.phone) contactRows.push(["Contact", appointment.patient.phone]);
+  if (appointment.patient.communicationPreference) contactRows.push(["Communication preference", appointment.patient.communicationPreference]);
+  const consultationLine = appointment.department
+    ? `${consultationModeLabel(appointment.mode)} · ${appointment.department}`
+    : consultationModeLabel(appointment.mode);
+
   return (
     <div className="space-y-5">
+      {/* Patient */}
       <div className="flex items-center gap-3.5">
         <Avatar name={appointment.patient.name} size="lg" />
         <div className="min-w-0">
           <h2 className="text-[1.2rem] font-extrabold text-navy leading-tight">{appointment.patient.name}</h2>
-          <p className="text-sm text-ink-secondary">Age {appointment.patient.age} · {appointment.patient.dob}</p>
-          <div className="mt-1.5"><StatusBadge status={appointment.status} /></div>
+          <div className="mt-1.5 flex gap-1.5 flex-wrap"><StatusBadge status={appointment.status} /></div>
         </div>
       </div>
 
@@ -92,29 +100,29 @@ export function AppointmentDetailBody({ appointment, questionnaire }: { appointm
         ))}
         <div className="bg-background border border-border rounded-control px-3.5 py-2.5">
           <p className="text-[0.7rem] font-bold uppercase tracking-wide text-ink-faint">Consultation</p>
-          <p className="font-bold text-ink mt-0.5 text-[0.87rem]">{consultationModeLabel(appointment.mode)} · {appointment.department}</p>
+          <p className="font-bold text-ink mt-0.5 text-[0.87rem]">{consultationLine}</p>
         </div>
-        <div className="bg-background border border-border rounded-control px-3.5 py-2.5">
-          <p className="text-[0.7rem] font-bold uppercase tracking-wide text-ink-faint">Location</p>
-          <p className="font-bold text-ink mt-0.5 text-[0.87rem]">{appointment.hospital}</p>
-        </div>
+        {appointment.hospital && (
+          <div className="bg-background border border-border rounded-control px-3.5 py-2.5">
+            <p className="text-[0.7rem] font-bold uppercase tracking-wide text-ink-faint">Location</p>
+            <p className="font-bold text-ink mt-0.5 text-[0.87rem]">{appointment.hospital}</p>
+          </div>
+        )}
       </section>
 
-      <section>
-        <h3 className="font-bold text-ink text-[0.95rem]">Patient administrative information</h3>
-        <dl className="mt-2 text-sm border border-border rounded-control overflow-hidden">
-          {[
-            ["Contact", appointment.patient.phone],
-            ["Communication preference", appointment.patient.communicationPreference],
-            ["Date of birth", appointment.patient.dob],
-          ].map(([k, v], i) => (
-            <div key={k} className={`flex justify-between gap-3 px-4 py-2.5 ${i % 2 === 0 ? "bg-white" : "bg-background/60"}`}>
-              <dt className="text-ink-secondary">{k}</dt>
-              <dd className="font-semibold text-ink text-right">{v}</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
+      {contactRows.length > 0 && (
+        <section>
+          <h3 className="font-bold text-ink text-[0.95rem]">Patient contact</h3>
+          <dl className="mt-2 text-sm border border-border rounded-control overflow-hidden">
+            {contactRows.map(([k, v], i) => (
+              <div key={k} className={`flex justify-between gap-3 px-4 py-2.5 ${i % 2 === 0 ? "bg-white" : "bg-background/60"}`}>
+                <dt className="text-ink-secondary">{k}</dt>
+                <dd className="font-semibold text-ink text-right">{v}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      )}
 
       <section>
         <div className="flex items-center justify-between">

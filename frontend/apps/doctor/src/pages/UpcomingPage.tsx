@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import { Search, SlidersHorizontal } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useSchedule } from "../context/ScheduleContext";
 import { AppointmentCard } from "../components/appointments/AppointmentCard";
 import CalendarPickButton from "../components/calendar/CalendarPickButton";
 import { Drawer } from "../components/common/Modal";
-import { Button, CardSkeleton, EmptyState, ErrorState } from "../components/common/ui";
+import { Button, CardSkeleton, EmptyState, ErrorState, LiveBadge, PageHeader } from "../components/common/ui";
 import type { Appointment } from "../types";
 
 const GROUPS: { id: Appointment["dayGroup"]; label: string }[] = [
@@ -70,13 +71,11 @@ export default function UpcomingPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="page-title">Upcoming appointments</h1>
-          <p className="page-sub mt-1">Grouped by day. Search by patient name or appointment type.</p>
-        </div>
-        <CalendarPickButton selected={pickedDate ?? new Date()} onPick={setPickedDate} />
-      </div>
+      <PageHeader
+        title="Upcoming appointments"
+        sub="Grouped by day. Search by patient name or appointment type."
+        action={<CalendarPickButton selected={pickedDate ?? new Date()} onPick={setPickedDate} />}
+      />
 
       {pickedDate && (
         <div className="flex items-center gap-2 flex-wrap text-[0.83rem]">
@@ -87,11 +86,9 @@ export default function UpcomingPage() {
         </div>
       )}
 
-      <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">
-        {loading ? "Syncing live schedule…" : "Live schedule from your hospital"}
-      </p>
+      <LiveBadge loading={loading} />
 
-      {error && <ErrorState title="Could not load appointments" body={error} onRetry={() => void refresh()} />}
+      {error && <ErrorState title="We couldn't load upcoming appointments." body={error} onRetry={() => void refresh()} />}
 
       <div className="card-base p-3.5 flex flex-col sm:flex-row gap-2">
         <div className="flex items-center gap-2 flex-1 bg-background border border-border rounded-control px-3">
@@ -142,7 +139,7 @@ export default function UpcomingPage() {
         })
       )}
       {visible.length === 0 && !searching && !loading && !error && (
-        <div className="card-base"><EmptyState title="No upcoming appointments" body="Your upcoming schedule is clear." /></div>
+        <div className="card-base"><EmptyState title="Your upcoming schedule is clear." body="New bookings will appear here." action={<Link to="/calendar" className="inline-flex items-center justify-center text-[0.83rem] font-bold bg-white border border-border rounded-control px-4 py-2.5 hover:border-healthcare hover:text-healthcare transition">View calendar</Link>} /></div>
       )}
 
       <Drawer open={filtersOpen} onClose={() => setFiltersOpen(false)} title="Filters">{filterBody()}</Drawer>

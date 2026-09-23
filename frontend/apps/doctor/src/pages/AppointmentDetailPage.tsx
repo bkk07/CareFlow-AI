@@ -138,7 +138,7 @@ export default function AppointmentDetailPage() {
     return (
       <div className="max-w-2xl mx-auto">
         <Link to="/today" className="inline-flex items-center gap-1.5 text-[0.85rem] font-bold text-ink-secondary hover:text-healthcare mb-3"><ArrowLeft size={16} /> Back</Link>
-        <ErrorState title="Could not load appointment" body="Check your connection and try again." onRetry={() => window.location.reload()} />
+        <ErrorState title="We couldn't load this appointment." body="Check your connection and try again." onRetry={() => window.location.reload()} />
       </div>
     );
   }
@@ -164,18 +164,31 @@ export default function AppointmentDetailPage() {
     appointment.patient = known.patient;
   }
   return (
-    <div className="max-w-2xl mx-auto">
-      <Link to="/today" className="inline-flex items-center gap-1.5 text-[0.85rem] font-bold text-ink-secondary hover:text-healthcare mb-3"><ArrowLeft size={16} /> Back to schedule</Link>
-      {actionError && <p role="alert" className="text-[0.83rem] font-semibold text-danger mb-3">{actionError}</p>}
+    <div className="max-w-2xl mx-auto space-y-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <Link to="/today" className="inline-flex items-center gap-1.5 text-[0.85rem] font-bold text-ink-secondary hover:text-healthcare"><ArrowLeft size={16} /> Back to schedule</Link>
+        <span className="text-[0.76rem] font-semibold text-ink-faint">{appointment.dateLabel} · {appointment.time} – {appointment.endTime}</span>
+      </div>
+      <h1 className="page-title sr-only">Appointment with {appointment.patient.name}</h1>
+      {actionError && <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">{actionError}</p>}
       {(detail.state === "confirmed" || detail.state === "rescheduled") && (
-        <div className="flex gap-2 mb-3">
-          <button disabled={acting} onClick={() => void closeOut("complete")} className="flex-1 text-[0.83rem] font-bold bg-success text-white rounded-control py-2 disabled:opacity-50">Complete visit</button>
-          <button disabled={acting} onClick={() => void closeOut("no-show")} className="flex-1 text-[0.83rem] font-bold bg-white border border-border rounded-control py-2 disabled:opacity-50">Mark no-show</button>
+        <div className="flex gap-2">
+          <button disabled={acting} onClick={() => void closeOut("complete")} className="flex-1 text-[0.83rem] font-bold bg-success text-white rounded-control py-2.5 disabled:opacity-50 hover:brightness-95 transition">Complete visit</button>
+          <button disabled={acting} onClick={() => void closeOut("no-show")} className="flex-1 text-[0.83rem] font-bold bg-white border border-border rounded-control py-2.5 disabled:opacity-50 hover:border-healthcare transition">Mark no-show</button>
         </div>
       )}
-      <div className="card-base p-5 sm:p-6">
+      {/* Sectioned clinical scheduling workspace */}
+      <section className="card-base p-5 sm:p-6" aria-label="Appointment summary">
         <AppointmentDetailBody appointment={appointment} questionnaire={questionnaire} />
-      </div>
+      </section>
+      <section className="card-base p-5" aria-label="Record">
+        <h2 className="section-title">Record</h2>
+        <dl className="mt-2 text-[0.82rem] text-ink-secondary space-y-1">
+          <div className="flex justify-between gap-2"><dt>Status</dt><dd className="font-bold text-ink">{detail.state.replace(/_/g, " ")}</dd></div>
+          <div className="flex justify-between gap-2"><dt>Last updated</dt><dd className="font-semibold">{new Date(detail.updated_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</dd></div>
+          <div className="flex justify-between gap-2"><dt>Timeline events</dt><dd className="font-semibold">{detail.history.length}</dd></div>
+        </dl>
+      </section>
     </div>
   );
 }

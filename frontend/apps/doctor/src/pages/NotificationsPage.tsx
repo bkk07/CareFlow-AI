@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Trash2 } from "lucide-react";
 import { useSchedule } from "../context/ScheduleContext";
-import { CardSkeleton, EmptyState, ErrorState } from "../components/common/ui";
+import { CardSkeleton, EmptyState, ErrorState, PageHeader } from "../components/common/ui";
 import { Tabs } from "../components/common/Modal";
 import type { NotificationCategory } from "../types";
 
@@ -61,19 +61,19 @@ export default function NotificationsPage() {
 
   return (
     <div className="space-y-4 max-w-3xl">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="page-title">Notifications</h1>
-          <p className="page-sub mt-1">Bookings, cancellations, questionnaires, and schedule updates.</p>
-        </div>
-        <button
-          onClick={() => void onMarkAllRead()}
-          disabled={markingAll || notifications.every((n) => !n.unread)}
-          className="text-[0.83rem] font-bold text-healthcare hover:underline disabled:opacity-40"
-        >
-          {markingAll ? "Marking…" : "Mark all read"}
-        </button>
-      </div>
+      <PageHeader
+        title="Notifications"
+        sub="Bookings, cancellations, questionnaires, and schedule updates."
+        action={
+          <button
+            onClick={() => void onMarkAllRead()}
+            disabled={markingAll || notifications.every((n) => !n.unread)}
+            className="text-[0.83rem] font-bold text-healthcare hover:underline disabled:opacity-40"
+          >
+            {markingAll ? "Marking…" : "Mark all read"}
+          </button>
+        }
+      />
 
       <div className="flex items-center gap-2">
         <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">
@@ -82,7 +82,7 @@ export default function NotificationsPage() {
         <button onClick={() => void refresh()} className="text-[0.8rem] font-bold text-healthcare hover:underline">Refresh</button>
       </div>
 
-      {error && <ErrorState title="Could not load notifications" body={error} onRetry={() => void refresh()} />}
+      {error && <ErrorState title="We couldn't load notifications." body={error} onRetry={() => void refresh()} />}
       {actionError && (
         <p role="alert" className="text-[0.83rem] font-semibold text-danger bg-danger-soft border border-danger/20 rounded-control px-3 py-2.5">
           {actionError}
@@ -100,7 +100,7 @@ export default function NotificationsPage() {
       {loading && visible.length === 0 && !error ? (
         <CardSkeleton lines={4} />
       ) : visible.length === 0 ? (
-        <div className="card-base"><EmptyState title="No notifications" body="You're all caught up. New bookings and form completions will appear here." /></div>
+        <div className="card-base"><EmptyState title="You're all caught up." body="New bookings and form completions will appear here." /></div>
       ) : (
         <div className="card-base divide-y divide-border overflow-hidden">
           {visible.map((n) => (

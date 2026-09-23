@@ -106,8 +106,14 @@ export default function ProfilePage() {
           <Avatar name={doctor.name} photo={doctor.photo} size="lg" />
           <div className="flex-1 min-w-0">
             <h1 className="text-[1.35rem] font-extrabold text-navy">{doctor.name || "Doctor"}</h1>
-            <p className="text-sm font-semibold text-healthcare">{doctor.specialty} · {doctor.department}</p>
-            <p className="text-[0.83rem] text-ink-secondary mt-0.5 flex items-center gap-1.5"><Building2 size={13} /> {doctor.hospital}</p>
+            {[doctor.specialty, doctor.department].filter(Boolean).length > 0 ? (
+              <p className="text-sm font-semibold text-healthcare">{[doctor.specialty, doctor.department].filter(Boolean).join(" · ")}</p>
+            ) : (
+              <p className="text-[0.83rem] text-ink-secondary mt-0.5">Specialty and department are managed by your hospital admin.</p>
+            )}
+            {doctor.hospital && (
+              <p className="text-[0.83rem] text-ink-secondary mt-0.5 flex items-center gap-1.5"><Building2 size={13} /> {doctor.hospital}</p>
+            )}
             <div className="flex gap-1.5 mt-2 flex-wrap">
               <StatusBadge status={doctor.status} />
               <span className={`text-[0.72rem] font-bold rounded-full px-2.5 py-1 ${acceptingShown ? "bg-success-soft text-success" : "bg-slate-100 text-ink-secondary"}`}>

@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useSchedule } from "../context/ScheduleContext";
-import { DayView } from "../components/calendar/CalendarViews";
+import { DayView, MonthView, WeekView } from "../components/calendar/CalendarViews";
 import DayStripWithCalendar from "../components/calendar/DayStripWithCalendar";
 import AddEventModal from "../components/calendar/AddEventModal";
-import { EmptyState, ErrorState } from "../components/common/ui";
+import { EmptyState, ErrorState, LiveBadge, PageHeader } from "../components/common/ui";
 import { parseDayKey, sevenDaysFrom, toLocalKey } from "../lib/helpers";
 
 function toInputDate(d: Date): string {
@@ -16,15 +16,17 @@ function hhmm(totalMinutes: number): string {
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 }
 
+type ViewMode = "day" | "week" | "month";
+
 /**
- * Single-day calendar, same as the patient side: a 7-day strip starting from
- * the picked day + a calendar opened by default pointing at today. Pick any
- * day in any month to fetch and show that day's schedule. No week/day/month
- * switcher.
+ * Professional scheduling workspace: Day timeline, Week overview, Month
+ * overview. All views render the same live appointments, blocked time, and
+ * working hours — no invented entries.
  */
 export default function CalendarPage() {
   const [anchorDate, setAnchorDate] = useState(() => new Date());
   const [dayKey, setDayKey] = useState(() => toLocalKey(new Date()));
+  const [view, setView] = useState<ViewMode>("day");
   const [eventModal, setEventModal] = useState({ open: false, date: "", start: "12:00", end: "13:00" });
   const { appointments, blocks, rules, loading, error, refresh } = useSchedule();
 
@@ -63,63 +65,103 @@ export default function CalendarPage() {
     openAddEvent(toInputDate(day), hhmm(startMinutes), hhmm(startMinutes + durationMinutes));
   }
 
+  const emptyCalendar = appointments.length === 0 && blocks.length === 0 && rules.every((r) => !r.enabled);
+
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="page-title">Calendar</h1>
-          <p className="page-sub mt-1">Pick a day to see that day's working hours, appointments, and blocked periods.</p>
-        </div>
-        <Link to="/availability" className="text-[0.83rem] font-bold text-healthcare hover:underline">Edit availability</Link>
-      </div>
+      <PageHeader
+        title="Calendar"
+        sub="Appointments, blocked time, and working hours in one place."
+        action={<Link to="/availability" className="text-[0.83rem] font-bold text-healthcare hover:underline">Edit availability</Link>}
+      />
 
-      <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">
-        {loading ? "Syncing calendar…" : "Live calendar from your hospital"}
-      </p>
+      <LiveBadge loading={loading} />
+      {error && <ErrorState title="We couldn't load your calendar." body={error} onRetry={() => void refresh()} />}
 
-      {error && <ErrorState title="Could not load calendar" body={error} onRetry={() => void refresh()} />}
-
-      <div className="card-base p-5 sm:p-6">
-        <h3 className="font-bold text-ink mb-2 text-[0.95rem]">Choose a day</h3>
-        <DayStripWithCalendar
-          days={days}
-          dayKey={dayKey}
-          anchorDate={anchorDate}
-          onSelect={setDayKey}
-          onPickDate={pickDate}
-          defaultOpen
-        />
-        {!isToday && (
-          <button onClick={goToday} className="text-[0.78rem] font-bold text-healthcare hover:underline mt-1.5">
-            Back to today
+      {/* View switcher */}
+      <div className="card-base p-2 flex gap-1 w-fit" role="tablist" aria-label="Calendar view">
+        {(["day", "week", "month"] as ViewMode[]).map((m) => (
+          <button
+            key={m}
+            role="tab"
+            aria-selected={view === m}
+            onClick={() => setView(m)}
+            className={`px-4 py-2 rounded-lg text-[0.85rem] font-bold transition ${view === m ? "bg-navy text-white" : "text-ink-secondary hover:text-ink hover:bg-background"}`}
+          >
+            {m === "day" ? "Day" : m === "week" ? "Week" : "Month"}
           </button>
-        )}
-
-        <h3 className="font-bold text-ink mt-5 mb-2 text-[0.95rem]">Day schedule</h3>
-        {loading ? (
-          <p className="px-4 py-8 text-center text-sm text-ink-secondary">Syncing schedule…</p>
-        ) : appointments.length === 0 && blocks.length === 0 && rules.every((r) => !r.enabled) ? (
-          <EmptyState title="No calendar entries" body="Appointments and blocked time will appear here once your hospital schedule syncs." />
-        ) : (
-          <DayView
-            appointments={appointments}
-            blocks={blocks}
-            rules={rules}
-            selected={selectedDate}
-            onPrevDay={() => shiftDay(-1)}
-            onNextDay={() => shiftDay(1)}
-            onToday={goToday}
-            onOpenSlot={openDaySlot}
-            onPickDate={pickDate}
-          />
-        )}
+        ))}
       </div>
 
-      <div className="flex flex-wrap gap-3 text-[0.76rem] font-semibold text-ink-secondary">
-        <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-healthcare-soft border border-healthcare" /> Confirmed</span>
-        <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-warning-soft border border-warning" /> Pending</span>
-        <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-success-soft border border-success" /> Completed</span>
-        <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-slate-100 border border-dashed border-border" /> Blocked</span>
+      {view === "day" && (
+        <div className="card-base p-5 sm:p-6">
+          <h3 className="font-bold text-ink mb-2 text-[0.95rem]">Choose a day</h3>
+          <DayStripWithCalendar
+            days={days}
+            dayKey={dayKey}
+            anchorDate={anchorDate}
+            onSelect={setDayKey}
+            onPickDate={pickDate}
+            defaultOpen
+          />
+          {!isToday && (
+            <button onClick={goToday} className="text-[0.78rem] font-bold text-healthcare hover:underline mt-1.5">
+              Back to today
+            </button>
+          )}
+
+          <h3 className="font-bold text-ink mt-5 mb-2 text-[0.95rem]">Day schedule</h3>
+          {loading ? (
+            <p className="px-4 py-8 text-center text-sm text-ink-secondary">Syncing schedule…</p>
+          ) : emptyCalendar ? (
+            <EmptyState title="No calendar entries" body="Appointments and blocked time will appear here once your hospital schedule syncs." />
+          ) : (
+            <DayView
+              appointments={appointments}
+              blocks={blocks}
+              rules={rules}
+              selected={selectedDate}
+              onPrevDay={() => shiftDay(-1)}
+              onNextDay={() => shiftDay(1)}
+              onToday={goToday}
+              onOpenSlot={openDaySlot}
+              onPickDate={pickDate}
+            />
+          )}
+        </div>
+      )}
+
+      {view === "week" && (
+        <div className="space-y-3">
+          {loading ? (
+            <p className="card-base px-4 py-8 text-center text-sm text-ink-secondary">Syncing schedule…</p>
+          ) : emptyCalendar ? (
+            <div className="card-base"><EmptyState title="No calendar entries" body="Appointments and blocked time will appear here once your hospital schedule syncs." /></div>
+          ) : (
+            <WeekView appointments={appointments} blocks={blocks} />
+          )}
+          <button onClick={goToday} className="text-[0.8rem] font-bold text-healthcare hover:underline">Back to today</button>
+        </div>
+      )}
+
+      {view === "month" && (
+        <div className="space-y-3">
+          {loading ? (
+            <p className="card-base px-4 py-8 text-center text-sm text-ink-secondary">Syncing schedule…</p>
+          ) : (
+            <MonthView
+              appointments={appointments}
+              onPickDay={(d) => { pickDate(d); setView("day"); }}
+            />
+          )}
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-3 text-[0.76rem] font-semibold text-ink-secondary" aria-label="Calendar legend">
+        <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-healthcare-soft border border-healthcare" aria-hidden /> Confirmed</span>
+        <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-warning-soft border border-warning" aria-hidden /> Pending</span>
+        <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-success-soft border border-success" aria-hidden /> Completed</span>
+        <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-slate-100 border border-dashed border-border" aria-hidden /> Blocked</span>
       </div>
 
       <AddEventModal

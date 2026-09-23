@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useSchedule } from "../context/ScheduleContext";
 import { AppointmentCard } from "../components/appointments/AppointmentCard";
 import CalendarPickButton from "../components/calendar/CalendarPickButton";
-import { CardSkeleton, EmptyState, ErrorState } from "../components/common/ui";
+import { CardSkeleton, EmptyState, ErrorState, LiveBadge, PageHeader } from "../components/common/ui";
 
 function sameDay(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
@@ -66,13 +66,11 @@ export default function TodayPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="page-title">{isToday ? "Today's schedule" : headerLabel(selectedDate)}</h1>
-          <p className="page-sub mt-1">{dayAppointments.length} appointments · {dayBlocks.length} blocked periods. Times in local time.</p>
-        </div>
-        <CalendarPickButton selected={selectedDate} onPick={setSelectedDate} />
-      </div>
+      <PageHeader
+        title={isToday ? "Today's schedule" : headerLabel(selectedDate)}
+        sub={`${dayAppointments.length} appointment${dayAppointments.length === 1 ? "" : "s"} · ${dayBlocks.length} blocked period${dayBlocks.length === 1 ? "" : "s"} · Times in local time.`}
+        action={<CalendarPickButton selected={selectedDate} onPick={setSelectedDate} />}
+      />
 
       <div className="flex items-center gap-1.5 flex-wrap">
         <button onClick={() => shiftDay(-1)} aria-label="Previous day" className="w-8 h-8 rounded-lg border border-border bg-white hover:border-healthcare flex items-center justify-center font-bold text-ink-secondary">‹</button>
@@ -83,11 +81,9 @@ export default function TodayPage() {
         )}
       </div>
 
-      <p className="text-[0.78rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-2 w-fit">
-        {loading ? "Syncing live schedule…" : "Live schedule from your hospital"}
-      </p>
+      <LiveBadge loading={loading} />
 
-      {error && <ErrorState title="Could not load today's schedule" body={error} onRetry={() => void refresh()} />}
+      {error && <ErrorState title="We couldn't load today's schedule." body={error} onRetry={() => void refresh()} />}
 
       {loading && dayAppointments.length === 0 && !error ? (
         <div className="space-y-2.5">
@@ -95,7 +91,7 @@ export default function TodayPage() {
           <CardSkeleton lines={3} />
         </div>
       ) : dayAppointments.length === 0 ? (
-        <div className="card-base"><EmptyState title={isToday ? "No appointments today" : `No appointments on ${headerLabel(selectedDate)}`} body="Blocked time and new bookings will appear here." /></div>
+        <div className="card-base"><EmptyState title="No appointments scheduled." body={isToday ? "Your day is clear. Blocked time and new bookings will appear here." : `Nothing on ${headerLabel(selectedDate)}. Blocked time and new bookings will appear here.`} action={<Link to="/availability" className="inline-flex items-center justify-center text-[0.83rem] font-bold bg-white border border-border rounded-control px-4 py-2.5 hover:border-healthcare hover:text-healthcare transition">View availability</Link>} /></div>
       ) : (
         <ol className="space-y-2.5" aria-label="Day appointments timeline">
           {dayAppointments.map((a) => (

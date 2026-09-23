@@ -79,6 +79,38 @@ export function Avatar({ name, photo, size = "md" }: { name: string; photo?: str
   );
 }
 
+export function PageHeader({ title, sub, action }: { title: string; sub?: string; action?: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-3 flex-wrap">
+      <div className="min-w-0">
+        <h1 className="page-title">{title}</h1>
+        {sub && <p className="page-sub mt-1">{sub}</p>}
+      </div>
+      {action && <div className="shrink-0 flex items-center gap-2 flex-wrap">{action}</div>}
+    </div>
+  );
+}
+
+export function SectionHeader({ title, sub, action }: { title: string; sub?: string; action?: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-2 mb-2.5">
+      <div className="min-w-0">
+        <h2 className="section-title">{title}</h2>
+        {sub && <p className="text-[0.78rem] text-ink-secondary mt-0.5">{sub}</p>}
+      </div>
+      {action && <div className="shrink-0">{action}</div>}
+    </div>
+  );
+}
+
+export function LiveBadge({ loading }: { loading: boolean }) {
+  return (
+    <p className="text-[0.76rem] font-semibold text-teal-dark bg-teal-soft/60 border border-teal/20 rounded-control px-3 py-1.5 w-fit">
+      {loading ? "Syncing live schedule…" : "Live schedule from your hospital"}
+    </p>
+  );
+}
+
 export function EmptyState({ title, body, action }: { title: string; body: string; action?: React.ReactNode }) {
   return (
     <div className="text-center py-10 px-6">
