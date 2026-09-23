@@ -117,12 +117,15 @@ export interface Hospital {
 export interface DoctorResult {
   id: string;
   name: string;
+  photo_url?: string | null;
   hospital_id: string;
   hospital_name: string;
   hospital_city: string | null;
   hospital_latitude: number | null;
   hospital_longitude: number | null;
   specialty: string | null;
+  experience_years?: number | null;
+  languages?: string[] | null;
   distance_km: number | null;
   available_durations?: number[] | null;
   consultation_types?: string[] | null;

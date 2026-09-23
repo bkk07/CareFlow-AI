@@ -154,6 +154,7 @@ export function mapDoctorResult(d: DoctorResult): Doctor {
     ? [...new Set(d.available_durations.filter((n) => typeof n === "number" && n > 0))].sort((a, b) => a - b)
     : [];
   const where = d.hospital_city ? `${d.hospital_name} · ${d.hospital_city}` : d.hospital_name;
+  const languages = Array.isArray(d.languages) ? d.languages.filter((l) => typeof l === "string" && l.trim()) : [];
   return {
     id: d.id,
     name: d.name,
@@ -161,11 +162,11 @@ export function mapDoctorResult(d: DoctorResult): Doctor {
     specialty: d.specialty ?? "General",
     department: "",
     qualifications: "",
-    experienceYears: 0,
-    languages: ["English"],
+    experienceYears: typeof d.experience_years === "number" && d.experience_years > 0 ? d.experience_years : 0,
+    languages,
     hospitalId: d.hospital_id,
     hospitalName: d.distance_km != null ? `${where} · ${d.distance_km.toFixed(1)} km away` : where,
-    photo: "",
+    photo: d.photo_url ?? "",
     consultationModes,
     availableDurations: durations,
     rating: 0,

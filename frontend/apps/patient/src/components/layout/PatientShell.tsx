@@ -38,16 +38,36 @@ const MOBILE_NAV = [
 export function Logo({ light, to = "/" }: { light?: boolean; to?: string }) {
   return (
     <Link to={to} className="flex items-center gap-2.5 shrink-0" aria-label="CareFlow AI home">
-      <span className="w-9 h-9 rounded-[10px] bg-gradient-to-br from-healthcare to-navy text-white flex items-center justify-center shadow-subtle">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M12 5v14M5 12h14" />
+      {/* Care + Flow + Connection: two care nodes linked by a flowing path,
+          crossed by a subtle care tick — one mark, no clip-art. */}
+      <span className="w-9 h-9 rounded-[11px] bg-gradient-to-br from-healthcare via-[#14608F] to-navy-deep text-white flex items-center justify-center shadow-subtle">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path
+            d="M4 15.5C6.5 15.5 7.5 12 10 12H13.5L15 14.5L16.8 9.5L18.2 12H20"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            opacity="0.95"
+          />
+          <circle cx="4" cy="15.5" r="1.7" fill="currentColor" />
+          <circle cx="20" cy="12" r="1.7" fill="currentColor" />
+          <path d="M12 6.2v5M9.5 8.7h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
         </svg>
       </span>
-      <span className={`font-extrabold tracking-tight leading-none ${light ? "text-white" : "text-navy"}`}>
-        CareFlow <span className="text-healthcare">AI</span>
+      <span className={`font-extrabold tracking-tight leading-none text-[1.06rem] ${light ? "text-white" : "text-navy"}`}>
+        CareFlow <span className="text-teal-dark">AI</span>
       </span>
     </Link>
   );
+}
+
+/** Time-aware greeting using the authenticated patient's first name. */
+export function greetingFor(name: string, now = new Date()): { hello: string; firstName: string } {
+  const h = now.getHours();
+  const hello = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+  const firstName = (name ?? "").trim().split(/\s+/)[0] ?? "";
+  return { hello, firstName };
 }
 
 export function PatientShell({ children }: { children: React.ReactNode }) {
@@ -58,6 +78,7 @@ export function PatientShell({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation();
   // Full-bleed ChatGPT-style chat manages its own height — no footer below it.
   const isChat = pathname === "/chat";
+  const { hello, firstName } = greetingFor(patient.name);
 
   function doLogout() {
     logout();
@@ -67,32 +88,43 @@ export function PatientShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-background">
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex fixed inset-y-0 left-0 w-[248px] flex-col bg-white border-r border-border px-4 py-5 z-30" aria-label="Primary">
-        <Logo to="/home" />
-        <p className="text-[0.78rem] text-ink-secondary mt-1 px-1">Patient portal</p>
-        <nav className="mt-5 space-y-1 flex-1">
+      <aside className="hidden md:flex fixed inset-y-0 left-0 w-[256px] flex-col bg-white border-r border-border px-4 py-6 z-30" aria-label="Primary">
+        <div className="px-1">
+          <Logo to="/home" />
+          <p className="text-[0.72rem] font-bold uppercase tracking-[0.14em] text-ink-faint mt-2.5">
+            Patient portal
+          </p>
+        </div>
+        <nav className="mt-6 space-y-1 flex-1" aria-label="Patient">
           {NAV.map((n) => (
             <NavLink
               key={n.to}
               to={n.to}
               end={n.end}
               className={({ isActive }) =>
-                `relative flex items-center gap-3 px-3.5 py-2.5 rounded-control text-[0.9rem] font-semibold transition ${
-                  isActive ? "text-healthcare bg-healthcare-soft" : "text-ink-secondary hover:text-ink hover:bg-background"
+                `relative flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[0.9rem] font-semibold transition-colors ${
+                  isActive ? "text-navy bg-healthcare-soft" : "text-ink-secondary hover:text-ink hover:bg-background"
                 }`
               }
             >
-              <n.icon size={18} />
-              {n.label}
-              {n.to === "/inbox" && unreadCount > 0 && (
-                <span className="ml-auto text-[0.7rem] font-bold bg-danger text-white rounded-full min-w-[1.25rem] h-5 px-1 flex items-center justify-center">
-                  {unreadCount}
-                </span>
+              {({ isActive }) => (
+                <>
+                  {isActive && (
+                    <span className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-1 rounded-r-full bg-healthcare" aria-hidden />
+                  )}
+                  <n.icon size={18} aria-hidden />
+                  {n.label}
+                  {n.to === "/inbox" && unreadCount > 0 && (
+                    <span className="ml-auto text-[0.7rem] font-bold bg-navy text-white rounded-full min-w-[1.25rem] h-5 px-1 flex items-center justify-center">
+                      {unreadCount}
+                    </span>
+                  )}
+                </>
               )}
             </NavLink>
           ))}
         </nav>
-        <div className="border-t border-border pt-3 space-y-1">
+        <div className="border-t border-border pt-4 mt-2">
           <div className="flex items-center gap-2.5 px-2 py-1">
             <SafeImage src={patient.avatar} alt={patient.name} name={patient.name} className="w-9 h-9 rounded-full border border-border" />
             <div className="min-w-0">
@@ -100,39 +132,53 @@ export function PatientShell({ children }: { children: React.ReactNode }) {
               <p className="text-[0.75rem] text-ink-secondary truncate">{patient.email}</p>
             </div>
           </div>
-          <button onClick={doLogout} className="w-full flex items-center gap-2.5 px-3.5 py-2 rounded-control text-[0.85rem] font-semibold text-ink-secondary hover:text-danger hover:bg-danger-soft transition">
-            <LogOut size={16} /> Sign out
+          <button onClick={doLogout} className="mt-1.5 w-full flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-[0.85rem] font-semibold text-ink-secondary hover:text-danger hover:bg-danger-soft transition-colors">
+            <LogOut size={16} aria-hidden /> Sign out
           </button>
         </div>
       </aside>
 
       {/* Top header */}
-      <header className="md:pl-[248px] sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-border">
-        <div className="max-w-shell mx-auto px-4 sm:px-6 h-[64px] flex items-center gap-3">
-          <div className="md:hidden">
+      <header className="md:pl-[256px] sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-border">
+        <div className="max-w-shell mx-auto px-4 sm:px-6 min-h-[68px] flex items-center gap-3 py-2">
+          <div className="md:hidden shrink-0">
             <Logo to="/home" />
           </div>
-          <div className="hidden md:block min-w-0">
-            <p className="text-[0.8rem] text-ink-secondary leading-none">Good day,</p>
-            <p className="font-bold text-navy leading-tight truncate">{patient.name}</p>
+          {/* Orientation block — visible on every size so the bar never feels empty */}
+          <div className="min-w-0 flex-1 md:flex-none md:ml-0 ml-1">
+            <p className="text-[0.78rem] sm:text-[0.8rem] text-ink-secondary leading-tight truncate">
+              {hello}, <span className="font-bold text-navy">{firstName || patient.name}</span>
+            </p>
+            <p className="text-[0.7rem] text-ink-faint leading-tight mt-0.5 truncate">
+              {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+            </p>
           </div>
-          <div className="flex-1" />
+          <div className="hidden md:block flex-1" />
           <a
             href="tel:911"
-            className="hidden sm:inline-flex items-center gap-1.5 text-[0.8rem] font-bold text-danger bg-danger-soft border border-danger/20 rounded-full px-3 py-1.5 hover:brightness-95"
+            aria-label="Emergency: call emergency services. CareFlow AI does not handle emergencies."
+            title="For medical emergencies, call emergency services — CareFlow AI does not handle emergencies."
+            className="hidden sm:inline-flex items-center gap-1.5 text-[0.8rem] font-bold text-danger bg-transparent border border-danger/30 rounded-full px-3 py-1.5 hover:bg-danger-soft transition-colors"
           >
-            <Siren size={14} /> Emergency
+            <Siren size={14} aria-hidden /> Emergency
+          </a>
+          <a
+            href="tel:911"
+            aria-label="Emergency: call emergency services"
+            className="sm:hidden w-10 h-10 rounded-full border border-danger/30 text-danger flex items-center justify-center shrink-0"
+          >
+            <Siren size={17} aria-hidden />
           </a>
           <div className="relative">
             <button
               onClick={() => setPanelOpen((v) => !v)}
               aria-label={`Notifications, ${unreadCount} unread`}
               aria-expanded={panelOpen}
-              className="relative w-10 h-10 rounded-full border border-border bg-white flex items-center justify-center text-ink-secondary hover:text-healthcare hover:border-healthcare transition"
+              className="relative w-10 h-10 rounded-full border border-border bg-white flex items-center justify-center text-ink-secondary hover:text-healthcare hover:border-healthcare transition-colors"
             >
-              <Bell size={18} />
+              <Bell size={18} aria-hidden />
               {unreadCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[1.15rem] h-[1.15rem] px-1 bg-danger text-white text-[0.65rem] font-bold rounded-full flex items-center justify-center">
+                <span className="absolute -top-0.5 -right-0.5 min-w-[1.15rem] h-[1.15rem] px-1 bg-navy text-white text-[0.65rem] font-bold rounded-full flex items-center justify-center">
                   {unreadCount}
                 </span>
               )}
@@ -172,14 +218,14 @@ export function PatientShell({ children }: { children: React.ReactNode }) {
               )}
             </AnimatePresence>
           </div>
-          <Link to="/profile" aria-label="Profile" className="hidden sm:block">
+          <Link to="/profile" aria-label="Profile" className="shrink-0">
             <SafeImage src={patient.avatar} alt={patient.name} name={patient.name} className="w-10 h-10 rounded-full border border-border" />
           </Link>
         </div>
       </header>
 
       {/* Content */}
-      <div className="md:pl-[248px]">
+      <div className="md:pl-[256px]">
         <main className={isChat ? "px-0 pb-0 md:pb-0" : "shell-container pt-5 sm:pt-7"}>
           {children}
         </main>
@@ -202,7 +248,7 @@ export function PatientShell({ children }: { children: React.ReactNode }) {
               to={n.to}
               end={n.end}
               className={({ isActive }) =>
-                `relative flex flex-col items-center gap-0.5 py-1.5 rounded-xl text-[0.68rem] font-semibold transition ${
+                `relative flex flex-col items-center gap-0.5 py-1.5 rounded-xl text-[0.68rem] font-semibold transition-colors ${
                   isActive ? "text-healthcare" : "text-ink-faint"
                 }`
               }
@@ -210,11 +256,11 @@ export function PatientShell({ children }: { children: React.ReactNode }) {
               {({ isActive }) => (
                 <>
                   <span className={`p-1 rounded-lg ${isActive ? "bg-healthcare-soft" : ""}`}>
-                    <n.icon size={20} />
+                    <n.icon size={20} aria-hidden />
                   </span>
                   {n.label}
                   {n.to === "/inbox" && unreadCount > 0 && (
-                    <span className="absolute top-0.5 right-1/2 translate-x-4 min-w-[1rem] h-4 px-1 bg-danger text-white text-[0.6rem] font-bold rounded-full flex items-center justify-center">
+                    <span className="absolute top-0.5 right-1/2 translate-x-4 min-w-[1rem] h-4 px-1 bg-navy text-white text-[0.6rem] font-bold rounded-full flex items-center justify-center">
                       {unreadCount}
                     </span>
                   )}

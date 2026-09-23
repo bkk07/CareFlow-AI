@@ -31,21 +31,29 @@ export function DoctorProfileModal({
           <h3 className="text-xl font-extrabold text-navy">{doctor.name}</h3>
           <p className="text-healthcare font-semibold text-sm">{doctor.title}</p>
           <p className="text-sm text-ink-secondary mt-1 flex items-center gap-1.5">
-            <MapPin size={14} /> {doctor.hospitalName} · {doctor.department}
+            <MapPin size={14} /> {doctor.hospitalName}{doctor.department ? ` · ${doctor.department}` : ""}
           </p>
-          <p className="text-sm text-ink-secondary mt-1 flex items-center gap-1.5">
-            <Star size={14} className="text-warning fill-warning" /> {doctor.rating} · {doctor.reviewsCount} patient reviews
-          </p>
+          {doctor.reviewsCount > 0 && (
+            <p className="text-sm text-ink-secondary mt-1 flex items-center gap-1.5">
+              <Star size={14} className="text-warning fill-warning" /> {doctor.rating} · {doctor.reviewsCount} patient reviews
+            </p>
+          )}
           <div className="grid sm:grid-cols-3 gap-2 mt-3 text-[0.82rem]">
-            <span className="bg-background border border-border rounded-lg px-2.5 py-2 flex items-center gap-1.5">
-              <Award size={14} className="text-teal" /> {doctor.qualifications}
-            </span>
-            <span className="bg-background border border-border rounded-lg px-2.5 py-2 flex items-center gap-1.5">
-              <Clock size={14} className="text-teal" /> {doctor.experienceYears} yrs experience
-            </span>
-            <span className="bg-background border border-border rounded-lg px-2.5 py-2 flex items-center gap-1.5">
-              <Globe size={14} className="text-teal" /> {doctor.languages.join(", ")}
-            </span>
+            {doctor.qualifications ? (
+              <span className="bg-background border border-border rounded-lg px-2.5 py-2 flex items-center gap-1.5">
+                <Award size={14} className="text-teal" /> {doctor.qualifications}
+              </span>
+            ) : null}
+            {doctor.experienceYears > 0 ? (
+              <span className="bg-background border border-border rounded-lg px-2.5 py-2 flex items-center gap-1.5">
+                <Clock size={14} className="text-teal" /> {doctor.experienceYears} yrs experience
+              </span>
+            ) : null}
+            {doctor.languages.length > 0 ? (
+              <span className="bg-background border border-border rounded-lg px-2.5 py-2 flex items-center gap-1.5">
+                <Globe size={14} className="text-teal" /> {doctor.languages.join(", ")}
+              </span>
+            ) : null}
           </div>
         </div>
       </div>

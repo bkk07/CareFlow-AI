@@ -1,33 +1,32 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" role="img" aria-label="Hospital cover placeholder">
   <defs>
     <linearGradient id="sky2" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2563eb"/>
-      <stop offset="1" stop-color="#1e1b4b"/>
+      <stop offset="0" stop-color="#E8F7F5"/>
+      <stop offset="1" stop-color="#A9D9D3"/>
     </linearGradient>
   </defs>
   <rect width="800" height="400" fill="url(#sky2)"/>
-  <circle cx="140" cy="90" r="40" fill="#fef9c3" opacity="0.9"/>
-  <ellipse cx="590" cy="70" rx="72" ry="22" fill="#ffffff" opacity="0.16"/>
-  <ellipse cx="650" cy="56" rx="50" ry="16" fill="#ffffff" opacity="0.12"/>
-  <rect y="320" width="800" height="80" fill="#14123a"/>
-  <rect x="250" y="90" width="300" height="230" rx="8" fill="#ffffff" opacity="0.94"/>
-  <rect x="270" y="60" width="120" height="40" rx="6" fill="#ffffff" opacity="0.8"/>
-  <g fill="#2563eb" opacity="0.85">
-    <rect x="272" y="122" width="34" height="30" rx="4"/>
-    <rect x="314" y="122" width="34" height="30" rx="4"/>
-    <rect x="356" y="122" width="34" height="30" rx="4"/>
-    <rect x="398" y="122" width="34" height="30" rx="4"/>
-    <rect x="440" y="122" width="34" height="30" rx="4"/>
-    <rect x="482" y="122" width="34" height="30" rx="4"/>
-    <rect x="272" y="162" width="34" height="30" rx="4"/>
-    <rect x="314" y="162" width="34" height="30" rx="4"/>
-    <rect x="440" y="162" width="34" height="30" rx="4"/>
-    <rect x="482" y="162" width="34" height="30" rx="4"/>
-    <rect x="272" y="202" width="34" height="30" rx="4"/>
-    <rect x="482" y="202" width="34" height="30" rx="4"/>
+  <circle cx="150" cy="90" r="40" fill="#ffffff" opacity="0.8"/>
+  <ellipse cx="560" cy="70" rx="70" ry="20" fill="#ffffff" opacity="0.6"/>
+  <rect y="320" width="800" height="80" fill="#CDE8E4"/>
+  <rect x="180" y="140" width="140" height="180" rx="8" fill="#ffffff"/>
+  <rect x="330" y="90" width="170" height="230" rx="8" fill="#ffffff"/>
+  <rect x="510" y="150" width="120" height="170" rx="6" fill="#F2FAF9"/>
+  <g fill="#168C8C" opacity="0.8">
+    <rect x="350" y="110" width="26" height="26" rx="4"/>
+    <rect x="384" y="110" width="26" height="26" rx="4"/>
+    <rect x="418" y="110" width="26" height="26" rx="4"/>
+    <rect x="452" y="110" width="26" height="26" rx="4"/>
+    <rect x="350" y="146" width="26" height="26" rx="4"/>
+    <rect x="384" y="146" width="26" height="26" rx="4"/>
+    <rect x="418" y="146" width="26" height="26" rx="4"/>
+    <rect x="452" y="146" width="26" height="26" rx="4"/>
+    <rect x="200" y="160" width="24" height="24" rx="4"/>
+    <rect x="232" y="160" width="24" height="24" rx="4"/>
+    <rect x="264" y="160" width="24" height="24" rx="4"/>
   </g>
-  <rect x="366" y="202" width="68" height="118" rx="6" fill="#1e1b4b"/>
-  <rect x="388" y="224" width="24" height="24" rx="4" fill="#ffffff"/>
-  <rect x="376" y="214" width="48" height="8" rx="4" fill="#ffffff"/>
-  <rect x="396" y="194" width="8" height="28" fill="#ffffff"/>
+  <rect x="386" y="182" width="58" height="138" rx="6" fill="#0F6E6E"/>
+  <rect x="404" y="200" width="26" height="26" rx="4" fill="#ffffff"/>
+  <rect x="396" y="192" width="44" height="8" rx="4" fill="#168C8C"/>
+  <rect x="414" y="174" width="8" height="26" fill="#168C8C"/>
 </svg>

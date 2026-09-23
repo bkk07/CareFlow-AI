@@ -105,9 +105,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAccessTokenState(restoreAccessToken());
       setIsAuthenticated(true);
       setMode("live");
-    } catch {
+    } catch (e) {
       setAuthError("Sign-in failed. Check your email and password, or create an account.");
-      throw new Error("login-failed");
+      // Rethrow the original error (not a generic one) so callers can map
+      // HTTP status to precise inline messages. Behavior is unchanged:
+      // the call still rejects and authError is still set.
+      throw e;
     }
   }, []);
 

@@ -1,6 +1,23 @@
 import { useState } from "react";
 import { initials } from "../../lib/helpers";
 
+/** Deterministic soft clinical tint per name — every avatar feels
+ *  personal, none imply a real person's face. */
+const AVATAR_TINTS = [
+  "bg-healthcare-soft text-healthcare",
+  "bg-teal-soft text-teal-dark",
+  "bg-navy-soft text-navy",
+  "bg-success-soft text-success",
+  "bg-[#E9EEF6] text-[#3B5B8C]",
+  "bg-[#F3EEDF] text-[#8A6D2B]",
+];
+
+function tintFor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return AVATAR_TINTS[hash % AVATAR_TINTS.length];
+}
+
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "primary" | "secondary" | "outline" | "ghost" | "danger";
   size?: "sm" | "md" | "lg";
@@ -74,7 +91,7 @@ export function SafeImage({
   const shown = stage === "src" ? src : stage === "fallback" ? fallbackSrc : "";
   if (!shown) {
     return (
-      <div className={`flex items-center justify-center bg-healthcare-soft text-healthcare font-extrabold ${className}`} aria-label={alt} role="img">
+      <div className={`flex items-center justify-center font-extrabold ${tintFor(name)} ${className}`} aria-label={alt} role="img">
         {initials(name)}
       </div>
     );

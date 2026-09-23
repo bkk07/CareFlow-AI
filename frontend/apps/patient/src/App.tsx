@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import { AppStateProvider } from "./context/AppStateContext";
 import { PatientShell } from "./components/layout/PatientShell";
 import LoginPage from "./pages/LoginPage";
+import RegisterPage from "./pages/RegisterPage";
 import LandingPage from "./pages/LandingPage";
 import HomePage from "./pages/HomePage";
 import BookPage from "./pages/BookPage";
@@ -37,6 +38,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
       <Route element={<ProtectedLayout />}>
         <Route path="/home" element={<HomePage />} />
         <Route path="/book" element={<BookPage />} />
