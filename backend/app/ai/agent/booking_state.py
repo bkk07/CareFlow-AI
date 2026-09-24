@@ -63,6 +63,94 @@ _MODE_ALIASES = (
     ("in_person", re.compile(r"\bin[\s-]?person\b|\bnormal\b|\bclinic\b|\bface\s?to\s?face\b|\bphysical\b|\bin\s+clinic\b")),
 )
 
+# -- visit type vs consultation mode (§P1) ------------------------------------
+# AppointmentType rows are free-form catalog names. Some rows encode a
+# consultation MODE ("Video consultation") rather than a business purpose
+# ("New consultation"). Presenting those as visit types and then asking
+# the mode again forces the patient to answer one question twice.
+# Classification is name-semantics only and NEVER deletes data: the row
+# stays bookable; it is only hidden from the visit-type question (and,
+# when picked, it auto-derives the mode instead of re-asking it).
+
+#: (implied mode, pattern) — a type name matches at most one mode, first
+#: wins. "Video consultation" -> video; "General consultation" -> None.
+_MODE_LIKE_TYPE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("video", re.compile(
+        r"\bvideo\b|\bvirtual\b|\btele[\s-]?video\b|\bvideo\s?(visit|consult|consultation|call|appointment)\b"
+        r"|\b(visit|consult|consultation|appointment)\s?\(?\s*video\b|\bonline\s?(visit|consult|consultation)\b"
+    )),
+    ("phone", re.compile(
+        r"\bphone\b|\btelephone\b|\btele[\s-]?consult\b|\bvoice\s?call\b"
+        r"|\bphone\s?(visit|consult|consultation|call|appointment)\b"
+        r"|\b(visit|consult|consultation|appointment)\s?\(?\s*phone\b|\baudio\s?(visit|consult)\b"
+    )),
+    ("in_person", re.compile(
+        r"\bin[\s-]?person\b|\bface\s?to\s?face\b|\bclinic\s?(visit|consult|consultation|appointment)\b"
+        r"|\b(visit|consult|consultation|appointment)\s?\(?\s*in[\s-]?person\b|\bphysical\s?(visit|exam)\b"
+        r"|\bwalk[\s-]?in\b"
+    )),
+)
+
+#: Words that prove a name is a real business purpose even when it
+#: mentions a mode-adjacent word ("Video review of lab results" stays a
+#: visit type; the mode word is incidental, not definitional).
+_PURPOSE_ANCHORS = re.compile(
+    r"\bfollow[\s-]?up\b|\bnew\b|\broutine\b|\bcheck[\s-]?up\b|\breview\b|\blab\b"
+    r"|\btest\b|\bresults?\b|\bchronic\b|\bmanagement\b|\bannual\b|\bphysical\b"
+    r"|\bscreening\b|\bvaccin|\bcounseling\b|\btherapy\b|\btreatment\b|\bconsult\b",
+)
+
+
+def implied_mode_from_type_name(name: str) -> str | None:
+    """Mode a visit-type NAME defines ("Video consultation" -> "video").
+
+    Returns None for genuine business purposes ("New consultation",
+    "Follow-up visit", "Lab review", "General consultation"). A name that
+    carries both a purpose anchor and a mode word ("Video follow-up")
+    keeps its purpose: the patient still picks the mode separately.
+    """
+    text = (name or "").strip().lower()
+    if not text:
+        return None
+    for mode, pattern in _MODE_LIKE_TYPE_PATTERNS:
+        if pattern.search(text):
+            # Purpose-anchored names are business purposes first; the
+            # mode word is incidental ("Video follow-up" still needs the
+            # mode question answered... unless the catalog says otherwise).
+            # Only a BARE mode name ("Video consultation", "Phone visit",
+            # "In-person appointment") defines the mode.
+            bare = re.sub(
+                r"\b(consultation|consult|visit|appointment|call|session)\b|[()]",
+                " ",
+                text,
+            )
+            bare = re.sub(r"\s+", " ", bare).strip()
+            if _PURPOSE_ANCHORS.search(bare):
+                return None
+            return mode
+    return None
+
+
+def is_mode_like_type_name(name: str) -> bool:
+    """True when the row's meaning IS a consultation mode (P1 rule)."""
+    return implied_mode_from_type_name(name) is not None
+
+
+def get_valid_visit_types(context: Any) -> list[dict[str, Any]]:
+    """Visit types to PRESENT (never a mode masquerading as a purpose).
+
+    Mode-like rows are hidden from the visit-type question — UNLESS that
+    would leave zero options (a catalog of only mode-like rows is still
+    genuinely bookable, so all rows stay). Data is never deleted; the
+    full listing remains on context.visit_types for grounding/booking.
+    """
+    types = [
+        t for t in (getattr(context, "visit_types", None) or [])
+        if isinstance(t, dict) and t.get("id")
+    ]
+    genuine = [t for t in types if not is_mode_like_type_name(str(t.get("name", "")))]
+    return genuine if genuine else types
+
 
 def ist_today() -> _date:
     """Product today in IST (not UTC)."""
@@ -280,14 +368,63 @@ def detect_type_candidate(text: str) -> str | None:
 
 
 def detect_mode_candidate(text: str) -> str | None:
-    """Canonical mode (video|phone|in_person) from NL aliases or None."""
-    lowered = f" {(text or '').strip().lower()} "
+    """Canonical mode (video|phone|in_person) from NL aliases or None.
+
+    Mode words inside proper names ("Telephone Testerson") never count —
+    they are someone's name, not a how-to-meet answer.
+    """
+    raw = text or ""
+    lowered = f" {raw.strip().lower()} "
+    # Offset mapping back onto the ORIGINAL text (leading space + lstripped
+    # whitespace shift the lowercase-search spans).
+    base = 1 + (len(raw) - len(raw.lstrip()))
     first: tuple[int, str] | None = None
     for mode, pattern in _MODE_ALIASES:
-        hit = pattern.search(lowered)
-        if hit and (first is None or hit.start() < first[0]):
-            first = (hit.start(), mode)
+        for hit in pattern.finditer(lowered):
+            start = base + (hit.start() - 1)
+            if is_proper_noun_mention(raw, start, start + (hit.end() - hit.start())):
+                continue
+            if first is None or hit.start() < first[0]:
+                first = (hit.start(), mode)
+            break
     return first[1] if first else None
+
+
+_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'.]*")
+
+
+def _proper_noun_spans(text: str) -> list[tuple[int, int]]:
+    """Spans of 2+ adjacent capitalized words (likely proper names)."""
+    spans: list[tuple[int, int]] = []
+    run: list[tuple[int, int]] = []
+    for m in _WORD_RE.finditer(text or ""):
+        word = m.group(0)
+        if word and word[0].isupper():
+            run.append((m.start(), m.end()))
+        else:
+            if len(run) >= 2:
+                spans.append((run[0][0], run[-1][1]))
+            run = []
+    if len(run) >= 2:
+        spans.append((run[0][0], run[-1][1]))
+    return spans
+
+
+def is_proper_noun_mention(text: str, start: int, end: int) -> bool:
+    """True when [start, end) sits inside a proper-name span (P8).
+
+    Guards mode extraction against names like "Telephone Testerson":
+    a capitalized mode word glued to another capitalized word is a name,
+    not an answer. Sentence-initial caps ("Video is fine") have no
+    capitalized neighbor and still count.
+    """
+    try:
+        for span_start, span_end in _proper_noun_spans(text):
+            if start >= span_start and end <= span_end:
+                return True
+    except (TypeError, ValueError):
+        pass
+    return False
 
 
 def match_hospital_offer(context: Any, hospitals: list[dict[str, Any]]) -> str | None:
@@ -318,24 +455,30 @@ def match_type_offer(context: Any) -> str | None:
     """Ground type_query against offered visit_types.
 
     Matches the semantic candidate key, then exact name, then first-word
-    stem ("Consult" ~ "Consult (Evening)"). Returns type id or None and
-    syncs duration_minutes + names on success.
+    stem ("Consult" ~ "Consult (Evening)"). Genuine business purposes
+    are tried BEFORE mode-named rows, so "consultation" never latches
+    onto "Video consultation" while "New consultation" exists. Returns
+    type id or None and syncs duration_minutes + names on success.
     """
-    types = [t for t in (getattr(context, "visit_types", None) or []) if isinstance(t, dict) and t.get("id")]
-    if not types:
+    all_types = [t for t in (getattr(context, "visit_types", None) or []) if isinstance(t, dict) and t.get("id")]
+    if not all_types:
         return None
+    genuine = [t for t in all_types if not is_mode_like_type_name(str(t.get("name", "")))]
+    pools = [genuine, all_types] if genuine else [all_types]
     query = (getattr(context, "type_query", None) or "").strip().lower()
     if query:
-        for t in types:
-            name = str(t.get("name", "")).strip().lower()
-            if query == name or query in name:
-                return _accept_type(context, t)
+        for types in pools:
+            for t in types:
+                name = str(t.get("name", "")).strip().lower()
+                if query == name or query in name:
+                    return _accept_type(context, t)
         # Alias key vs name words ("follow-up" ~ "Follow Up Visit").
         q_words = set(re.findall(r"[a-z]{3,}", query))
-        for t in types:
-            name_words = set(re.findall(r"[a-z]{3,}", str(t.get("name", "")).lower()))
-            if q_words & name_words:
-                return _accept_type(context, t)
+        for types in pools:
+            for t in types:
+                name_words = set(re.findall(r"[a-z]{3,}", str(t.get("name", "")).lower()))
+                if q_words & name_words:
+                    return _accept_type(context, t)
     return None
 
 
@@ -474,43 +617,64 @@ def field_status(context: Any) -> dict[str, str]:
 
 
 # -- invalidation -----------------------------------------------------------
+#
+# Dependency chain (P5):
+#   Doctor -> Date -> Visit type -> Consultation mode -> Time slot -> Confirm
+# Changing a field clears everything downstream of it and any pending
+# proposal, but NEVER unrelated upstream fields. A single entry point
+# (update_booking_field) owns every mutation so no path can leave stale
+# dependents behind.
+
+
+def bump_revision(context: Any) -> int:
+    """Monotonic per-conversation edit counter (P4/P9 widget versioning).
+
+    Every booking-field mutation bumps it; each assistant reply carries
+    the revision its widgets were built against. A tap arriving with an
+    older revision is stale and must never mutate state.
+    """
+    rev = int(getattr(context, "state_revision", 0) or 0) + 1
+    try:
+        context.state_revision = rev
+    except (AttributeError, TypeError, ValueError):
+        pass
+    return rev
+
+
+def _drop_proposal(context: Any) -> None:
+    context.pending_booking = None
+    context.awaiting_confirmation = False
+    if getattr(context, "pending_clarification", None) == "booking_confirmation":
+        context.pending_clarification = None
+
+
+def _drop_slot_and_offers(context: Any) -> None:
+    context.offered_slots = []
+    clear_canonical_slot(context)
+    context.requested_start = None
+    _drop_proposal(context)
 
 
 def invalidate_on_change(context: Any, changed: str) -> None:
-    """Explicit invalidation so stale state never books (§18).
+    """Explicit invalidation so stale state never books (§18, P5).
 
-    Doctor/date/type/hospital changes drop dependent availability and
-    the selected slot; hospital change additionally drops the doctor and
-    the visit types fetched for the old hospital.
+    Doctor/date/type/mode/hospital changes drop dependent availability
+    and the selected slot; hospital change additionally drops the doctor
+    and the visit types fetched for the old hospital. A mode change now
+    also clears the selected slot and slot availability: the proposal
+    names a mode, and a fresh availability pass is required — the slot
+    must be re-picked, never booked stale.
     """
     if changed == "doctor":
-        context.offered_slots = []
-        clear_canonical_slot(context)
-        context.pending_booking = None
-        context.awaiting_confirmation = False
+        _drop_slot_and_offers(context)
     elif changed == "date":
-        context.offered_slots = []
-        clear_canonical_slot(context)
-        context.pending_booking = None
-        context.awaiting_confirmation = False
+        _drop_slot_and_offers(context)
     elif changed == "visit_type":
         sync_duration_from_types(context)
-        # End time derives from duration: recompute when possible.
-        if getattr(context, "requested_start", None) and getattr(context, "selected_date", None) and getattr(context, "duration_minutes", None):
-            try:
-                start_iso, end_iso = compute_interval_utc(
-                    str(context.selected_date),
-                    str(context.requested_start),
-                    int(context.duration_minutes),
-                )
-                set_canonical_slot(context, start_iso, end_iso)
-            except (ValueError, TypeError):
-                clear_canonical_slot(context)
-        else:
-            clear_canonical_slot(context)
-        context.offered_slots = []
-        context.pending_booking = None
-        context.awaiting_confirmation = False
+        # Duration changed with the type, so any previously computed
+        # interval is wrong by construction: clear it (never recompute
+        # a stale start into a new range) and require a fresh pick.
+        _drop_slot_and_offers(context)
     elif changed == "hospital":
         context.selected_doctor_id = None
         context.selected_doctor_name = None
@@ -521,18 +685,105 @@ def invalidate_on_change(context: Any, changed: str) -> None:
         context.selected_appointment_type_id = None
         context.type_query = None
         context.duration_minutes = None
-        context.offered_slots = []
-        clear_canonical_slot(context)
-        context.pending_booking = None
-        context.awaiting_confirmation = False
+        context.selected_consultation_mode = None
+        context.consultation_modes = []
+        _drop_slot_and_offers(context)
     elif changed == "consultation_mode":
-        # Mode does NOT feed slot generation in this repo
-        # (check_availability takes no mode; the doctor's offer list is
-        # validated at booking time), so availability and the interval
-        # stand — but a pending proposal names a mode, so it must be
-        # re-proposed, never booked stale.
-        context.pending_booking = None
-        context.awaiting_confirmation = False
+        _drop_slot_and_offers(context)
+    elif changed == "start_time":
+        clear_canonical_slot(context)
+        _drop_proposal(context)
+
+
+def get_valid_consultation_modes(
+    doctor_offer: list[str] | None,
+    type_implied_mode: str | None = None,
+) -> list[str]:
+    """Modes the patient may actually pick (P2 — real data only).
+
+    The doctor's configured `consultation_types` are the ONLY source of
+    mode validity (mirrors `_normalize_consultation_mode` in the
+    appointment service: empty offer = accept anything, so fall back to
+    all three). When the picked visit type's NAME defines a mode
+    ("Video consultation"), that mode is the answer — the mode question
+    is skipped, never asked twice.
+    """
+    valid = [m for m in (doctor_offer or []) if m in ("video", "phone", "in_person")]
+    if not valid:
+        valid = ["video", "phone", "in_person"]
+    if type_implied_mode in ("video", "phone", "in_person"):
+        return [type_implied_mode] if type_implied_mode in valid else list(valid)
+    return list(valid)
+
+
+def update_booking_field(
+    context: Any,
+    field: str,
+    *,
+    doctor_offer: list[str] | None = None,
+    doctor_durations: list[int] | None = None,
+) -> list[str]:
+    """ONE entry point for every booking-field change (P5).
+
+    The caller has already written the new value onto the context; this
+    recomputes dependents, revalidates cross-field compatibility against
+    REAL doctor data, clears the pending proposal, and bumps
+    `state_revision`. Returns the downstream fields that were cleared,
+    so callers (and tests) can see exactly what was invalidated.
+
+    - doctor: re-check picked type duration vs doctor's available
+      durations (clears type when incompatible) and picked mode vs the
+      doctor's offer (clears mode when not offered); always clears slot.
+    - visit_type: a mode-like type ("Video consultation") auto-derives
+      the mode (no duplicate question); always clears slot.
+    - consultation_mode / date: clears slot + availability.
+    """
+    cleared: list[str] = []
+    if field == "doctor":
+        if doctor_durations is not None and getattr(context, "selected_appointment_type_id", None):
+            dur = getattr(context, "duration_minutes", None)
+            if dur is not None and dur not in list(doctor_durations):
+                context.selected_appointment_type_id = None
+                context.visit_type_name = None
+                context.type_query = None
+                context.duration_minutes = None
+                cleared.append("visit_type")
+        if doctor_offer is not None and getattr(context, "selected_consultation_mode", None):
+            if str(context.selected_consultation_mode).lower() not in [
+                str(m).lower() for m in doctor_offer
+            ]:
+                context.selected_consultation_mode = None
+                cleared.append("consultation_mode")
+        invalidate_on_change(context, "doctor")
+        cleared.extend(["slot", "availability", "proposal"])
+    elif field == "visit_type":
+        implied = implied_mode_from_type_name(str(getattr(context, "visit_type_name", None) or ""))
+        if implied is not None:
+            # The type IS the mode answer ("Video consultation" -> video):
+            # record it so the mode step is satisfied without re-asking.
+            context.selected_consultation_mode = implied
+        invalidate_on_change(context, "visit_type")
+        cleared.extend(["slot", "availability", "proposal"])
+    elif field == "consultation_mode":
+        invalidate_on_change(context, "consultation_mode")
+        cleared.extend(["slot", "availability", "proposal"])
+    elif field == "date":
+        invalidate_on_change(context, "date")
+        cleared.extend(["slot", "availability", "proposal"])
+    elif field == "hospital":
+        invalidate_on_change(context, "hospital")
+        cleared.extend(["doctor", "visit_type", "consultation_mode", "slot", "availability", "proposal"])
+    elif field == "start_time":
+        # The caller (re)writes the canonical interval; a new time only
+        # retires the pending proposal (it named the old slot) and bumps
+        # the revision. It never clears the interval just set.
+        _drop_proposal(context)
+        cleared.append("proposal")
+    else:
+        _drop_proposal(context)
+        cleared.append("proposal")
+    bump_revision(context)
+    return cleared
 
 
 # -- readiness --------------------------------------------------------------
@@ -582,6 +833,7 @@ def evaluate_readiness(context: Any) -> dict[str, Any]:
 __all__ = [
     "IST",
     "TRACKED_FIELDS",
+    "bump_revision",
     "compute_interval_utc",
     "clear_canonical_slot",
     "detect_date_iso",
@@ -592,10 +844,16 @@ __all__ = [
     "detect_type_candidate",
     "evaluate_readiness",
     "field_status",
+    "get_valid_consultation_modes",
+    "get_valid_visit_types",
+    "implied_mode_from_type_name",
     "invalidate_on_change",
+    "is_mode_like_type_name",
+    "is_proper_noun_mention",
     "ist_today",
     "match_hospital_offer",
     "match_type_offer",
     "set_canonical_slot",
     "sync_duration_from_types",
+    "update_booking_field",
 ]

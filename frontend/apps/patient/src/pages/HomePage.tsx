@@ -29,6 +29,8 @@ import { greetingFor } from "../components/layout/PatientShell";
 import { DoctorProfileModal } from "../components/doctor/DoctorProfileModal";
 import { AppointmentDetailModal, } from "../components/appointment/AppointmentDetailModal";
 import { AppointmentTimeline } from "../components/appointment/AppointmentCard";
+import { QuestionnaireStrip } from "../components/appointment/AppointmentCard";
+import { useQuestionnaireStatuses } from "../lib/questionnaires";
 import { Button, CardSkeleton, EmptyState, ErrorState, SafeImage, StatusBadge } from "../components/common/ui";
 import type { Appointment, Doctor, Hospital } from "../types";
 
@@ -141,6 +143,11 @@ export default function HomePage() {
   );
   const next: Appointment | null = upcoming[0] ?? null;
   const detailAppt = detailId ? (appointments.find((a) => a.id === detailId) ?? null) : null;
+
+  // Per-visit form status, fetched once per appointment per session and
+  // shared with the strips below — the Visits page owns the full flow.
+  const upcomingIds = useMemo(() => upcoming.map((a) => a.id), [upcoming]);
+  const quMap = useQuestionnaireStatuses(upcomingIds, live);
 
   const actionableBookings = useMemo(
     () => appointments.filter((a) => ["pending", "sync_pending"].includes(a.status)),
@@ -359,6 +366,12 @@ export default function HomePage() {
                   <p className="text-[0.82rem] text-ink-secondary mt-0.5">{consultationModeLabel(next.consultationMode)} · {next.appointmentType}</p>
                 </div>
               </div>
+              {quMap[next.id]?.hasForm && (
+                <QuestionnaireStrip
+                  status={quMap[next.id]}
+                  onOpen={() => navigate("/visits", { state: { questionnaireFor: next.id } })}
+                />
+              )}
               <div className="mt-5 flex flex-col sm:flex-row gap-2">
                 <Button size="sm" onClick={() => setDetailId(next.id)}>
                   View details
@@ -460,6 +473,9 @@ export default function HomePage() {
                               </span>
                               <span className="block text-[0.8rem] text-ink-secondary truncate mt-0.5">
                                 {a.specialty} · {consultationModeLabel(a.consultationMode)}
+                                {quMap[a.id]?.hasForm && !quMap[a.id]?.completed && (
+                                  <> · <span className="font-bold text-healthcare">Form {quMap[a.id].answered}/{quMap[a.id].total}</span></>
+                                )}
                               </span>
                             </span>
                             <span className={`hidden sm:inline-flex items-center gap-1.5 text-[0.76rem] font-bold shrink-0 ${a.status === "cancelled" ? "text-ink-faint" : "text-ink-secondary"}`}>
@@ -753,7 +769,13 @@ export default function HomePage() {
         onClose={() => setProfileDoctor(null)}
         onBook={(d) => navigate("/book", { state: { doctorId: d.id } })}
       />
-      <AppointmentDetailModal appointment={detailAppt} open={!!detailAppt} onClose={() => setDetailId(null)} />
+      <AppointmentDetailModal
+        appointment={detailAppt}
+        open={!!detailAppt}
+        onClose={() => setDetailId(null)}
+        questionnaire={detailAppt ? (quMap[detailAppt.id] ?? null) : null}
+        onQuestionnaire={(a) => navigate("/visits", { state: { questionnaireFor: a.id } })}
+      />
     </div>
   );
 }

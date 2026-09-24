@@ -12,6 +12,7 @@ import {
   type Slot,
 } from "../api";
 import { formatSlotDate, formatSlotTime, mapSlot, coerceQuestionnaireAnswers } from "../lib/backend";
+import { countAnswered, mapApiQuestions, resumeIndexFor } from "../lib/questionnaires";
 import { formatDayKeyLong, sevenDaysFrom, toLocalKey } from "../lib/helpers";
 import { useAppState } from "../context/AppStateContext";
 import { AppointmentCard } from "../components/appointment/AppointmentCard";
@@ -21,50 +22,11 @@ import { SlotPicker } from "../components/appointment/SlotPicker";
 import { QuestionnaireFlow } from "../components/questionnaire/QuestionnaireFlow";
 import { Button, EmptyState } from "../components/common/ui";
 import { Modal, Tabs } from "../components/common/Modal";
-import type { Appointment, QuestionnaireQuestion, TimeSlot } from "../types";
+import type { Appointment, TimeSlot } from "../types";
 
 type Tab = "upcoming" | "past" | "cancelled";
 
 const UPCOMING = ["confirmed", "pending", "rescheduled", "sync_pending"];
-
-function mapApiQuestions(q: ApiQuestionnaire): QuestionnaireQuestion[] {
-  return q.questions
-    .slice()
-    .sort((a, b) => a.order - b.order)
-    .map((item) => ({
-      id: item.id,
-      order: item.order,
-      type: (item.type === "choice" ? "single_choice" : item.type) as QuestionnaireQuestion["type"],
-      prompt: item.prompt,
-      options: item.options ?? undefined,
-      required: item.required,
-    }));
-}
-
-function hasValue(v: unknown): boolean {
-  if (v === undefined || v === null || v === "") return false;
-  if (Array.isArray(v)) return v.length > 0;
-  if (typeof v === "object")
-    return Object.values(v as Record<string, unknown>).some(
-      (x) => x !== undefined && x !== null && x !== "",
-    );
-  return true;
-}
-
-function countAnswered(
-  questions: QuestionnaireQuestion[],
-  answers: Record<string, unknown>,
-): number {
-  return questions.filter((q) => hasValue(answers[q.id])).length;
-}
-
-function resumeIndexFor(
-  questions: QuestionnaireQuestion[],
-  answers: Record<string, unknown>,
-): number {
-  const i = questions.findIndex((q) => q.required && !hasValue(answers[q.id]));
-  return i === -1 ? 0 : i;
-}
 
 interface QuStatus {
   hasForm: boolean;
@@ -93,13 +55,15 @@ export default function VisitsPage() {
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
 
-  // Deep-link intents from Home/cards
+  // Deep-link intents from Home/cards (works on mount and when already here).
+  const locationState = location.state as { rescheduleId?: string; cancelId?: string; questionnaireFor?: string } | null;
   useEffect(() => {
-    const s = location.state as { rescheduleId?: string; cancelId?: string } | null;
+    const s = locationState;
     if (s?.rescheduleId) setRescheduleId(s.rescheduleId);
     if (s?.cancelId) setCancelId(s.cancelId);
+    if (s?.questionnaireFor) setQuestionnaireFor(s.questionnaireFor);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [location.state]);
 
   // Live: load the real pre-visit form + any saved draft when the modal opens.
   useEffect(() => {
@@ -233,8 +197,6 @@ export default function VisitsPage() {
   const rescheduleAppt = rescheduleId ? (appointments.find((a) => a.id === rescheduleId) ?? null) : null;
   const cancelAppt = cancelId ? (appointments.find((a) => a.id === cancelId) ?? null) : null;
   const questionnaireAppt = questionnaireFor ? (appointments.find((a) => a.id === questionnaireFor) ?? null) : null;
-  const upcomingForForms = useMemo(() => appointments.filter((a) => UPCOMING.includes(a.status)), [appointments]);
-
   async function confirmCancel() {
     if (!cancelAppt) return;
     setCancelling(true);
@@ -347,72 +309,13 @@ export default function VisitsPage() {
                 onView={() => setDetailId(a.id)}
                 onReschedule={() => setRescheduleId(a.id)}
                 onCancel={() => setCancelId(a.id)}
+                questionnaire={quStatus[a.id] ?? null}
+                onQuestionnaire={() => setQuestionnaireFor(a.id)}
               />
             ))
           )}
         </motion.div>
       </AnimatePresence>
-
-      {/* Questionnaires — Start / Continue x/y / Completed reflects saved drafts */}
-      <section className="card-base p-5">
-        <h2 className="section-title">Questionnaires</h2>
-        <p className="text-[0.83rem] text-ink-secondary mt-1">Administrative pre-visit forms — never a diagnosis.</p>
-        {upcomingForForms.length === 0 ? (
-          <p className="text-[0.83rem] text-ink-secondary mt-3">Book a visit first — its pre-visit form will appear here.</p>
-        ) : (
-          <div className="mt-3 space-y-2.5">
-            {upcomingForForms
-              .filter((a) => !live || quStatus[a.id]?.hasForm !== false)
-              .map((a) => {
-                const st = quStatus[a.id];
-                const loading = live && (!st || st.loading);
-                const completed = !!st?.completed;
-                const answered = st?.answered ?? 0;
-                const total = st?.total ?? 0;
-                const isDraft = !completed && answered > 0 && total > 0;
-                return (
-                  <div key={a.id} className="border border-border rounded-control p-3.5 flex flex-col sm:flex-row sm:items-center gap-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="font-bold text-[0.9rem] text-ink flex items-center gap-2">
-                        Pre-visit form
-                        {completed && (
-                          <span className="text-[0.72rem] font-bold text-success bg-success-soft rounded-full px-2 py-0.5">
-                            Completed ✓
-                          </span>
-                        )}
-                        {isDraft && (
-                          <span className="text-[0.72rem] font-bold text-warning bg-warning-soft rounded-full px-2 py-0.5">
-                            Draft · {answered}/{total}
-                          </span>
-                        )}
-                      </p>
-                      <p className="text-[0.78rem] text-ink-secondary">
-                        {a.doctorName} · {a.date} at {a.time}
-                      </p>
-                      {completed ? (
-                        <p className="text-[0.76rem] font-semibold text-success mt-0.5">
-                          Submitted — the care team has your answers.
-                        </p>
-                      ) : isDraft ? (
-                        <p className="text-[0.76rem] font-semibold text-ink-secondary mt-0.5">
-                          Draft saved · {answered} of {total} answered — continue where you left off.
-                        </p>
-                      ) : null}
-                    </div>
-                    <Button
-                      variant={completed ? "outline" : isDraft ? "primary" : "outline"}
-                      size="sm"
-                      disabled={loading}
-                      onClick={() => setQuestionnaireFor(a.id)}
-                    >
-                      {loading ? "…" : completed ? "View" : isDraft ? `Continue ${answered}/${total}` : "Start"}
-                    </Button>
-                  </div>
-                );
-              })}
-          </div>
-        )}
-      </section>
 
       <AppointmentDetailModal
         appointment={detail}
@@ -420,6 +323,8 @@ export default function VisitsPage() {
         onClose={() => setDetailId(null)}
         onReschedule={(a) => { setDetailId(null); setRescheduleId(a.id); }}
         onCancel={(a) => { setDetailId(null); setCancelId(a.id); }}
+        questionnaire={detail ? (quStatus[detail.id] ?? null) : null}
+        onQuestionnaire={(a) => { setDetailId(null); setQuestionnaireFor(a.id); }}
       />
 
       <RescheduleModal

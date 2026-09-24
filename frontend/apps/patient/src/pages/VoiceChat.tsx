@@ -6,10 +6,15 @@ import { restoreAccessToken } from "../api";
 import { EASE, Page } from "../motion";
 import { MicIcon } from "../icons";
 
-const API_BASE =
-  (import.meta.env.VITE_API_URL as string | undefined) ??
-  // Production fallback: a build without VITE_API_URL still hits prod.
-  "https://careflow-ai-production.up.railway.app";
+const _viteApiUrl = import.meta.env.VITE_API_URL as string | undefined;
+if (!_viteApiUrl && !import.meta.env.DEV) {
+  throw new Error(
+    "VITE_API_URL is not configured. Set it to the backend base URL (e.g. https://<backend-host>).",
+  );
+}
+// Local development default (matches .env.example). Production builds
+// must provide VITE_API_URL — see the check above.
+const API_BASE = _viteApiUrl ?? "http://localhost:8000";
 
 /** Voice booking surface. Needs mic access + a served backend. */
 export default function VoiceChat() {

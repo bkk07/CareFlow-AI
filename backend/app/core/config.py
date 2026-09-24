@@ -7,8 +7,23 @@ full list of keys with placeholder values.
 
 from functools import lru_cache
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+#: Placeholder JWT secrets that must never reach production. Local
+#: development may keep the default; any other ENVIRONMENT refuses them.
+INSECURE_JWT_SECRET_DEFAULTS = frozenset(
+    {
+        "change-me-in-env-use-a-long-random-string",
+        "change-me-to-a-long-random-string",
+    }
+)
+
+#: Environments where developer conveniences (default secrets, fault
+#: injection, localhost defaults) are allowed. Mirrors the check in
+#: `app/integration/mock_ehr/router.py`. Anything else is production.
+NON_PRODUCTION_ENVIRONMENTS = frozenset({"local", "test", "dev"})
 
 
 class Settings(BaseSettings):
@@ -84,6 +99,25 @@ class Settings(BaseSettings):
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.backend_cors_origins.split(",") if o.strip()]
+
+    @model_validator(mode="after")
+    def _require_production_jwt_secret(self) -> "Settings":
+        """Refuse insecure JWT defaults outside dev environments.
+
+        Local/test/dev keep working with the default secret. Any other
+        ENVIRONMENT (e.g. production/Azure) fails fast at startup unless
+        JWT_SECRET is explicitly set to a non-placeholder value. The
+        secret itself is never logged or printed here.
+        """
+        if self.environment not in NON_PRODUCTION_ENVIRONMENTS:
+            secret = (self.jwt_secret or "").strip()
+            if not secret or secret in INSECURE_JWT_SECRET_DEFAULTS:
+                raise ValueError(
+                    "JWT_SECRET must be set to a strong random value when "
+                    f"ENVIRONMENT={self.environment!r} "
+                    "(refusing insecure default)"
+                )
+        return self
 
 
 @lru_cache

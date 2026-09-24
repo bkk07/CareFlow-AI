@@ -16,6 +16,7 @@ from typing import Any, Callable
 from sqlalchemy.orm import Session
 
 from app.ai.agent.booking_state import (
+    bump_revision,
     compute_interval_utc,
     detect_date_iso as detect_date_iso_ist,
     detect_doctor_candidate,
@@ -24,11 +25,16 @@ from app.ai.agent.booking_state import (
     detect_time_hhmm,
     detect_type_candidate,
     evaluate_readiness,
+    get_valid_consultation_modes,
+    get_valid_visit_types,
+    implied_mode_from_type_name,
     invalidate_on_change,
+    is_mode_like_type_name,
     match_hospital_offer,
     match_type_offer,
     set_canonical_slot,
     sync_duration_from_types,
+    update_booking_field,
 )
 from app.ai.agent import concierge_state as concierge
 from app.ai.context.ai_context import get_ai_context, save_ai_context
@@ -149,17 +155,24 @@ Guided booking flow (follow this order every time):
    "tomorrow", "Oct 6" against today's date above; pass YYYY-MM-DD). The
    app shows the day's timeline with tappable start times. Ask: "What time
    suits you? Tap a time or just tell me."
-4. TYPE + MODE: every visit type has its own duration — never assume 30 minutes.
+4. TYPE THEN MODE (two different questions — never merge them):
+   Visit TYPE is the purpose (new consultation, follow-up, lab review);
+   consultation MODE is how they meet (in-person / video / phone).
    Call list_appointment_types with the chosen doctor's hospital_id (it is
    in the earlier search_doctors result on that doctor) and ask in plain
    words ("Is this a routine check-up or something specific?") — the app
-   shows every type with its minutes in a select bar, plus how-to-meet
-   chips (video / phone call / in-person — only what the chosen doctor
-   offers). Ask both together: "...and would you like video, a phone call,
-   or an in-person visit?" Match their words to the closest type name
-   yourself; never expose ids. A deterministic guard refuses
-   check_availability/create_appointment until the type step is done — if
-   you see visit_type_required, follow it instead of retrying.
+   shows genuine visit types with their minutes in a select bar.
+   Mode-named rows ("Video consultation", "Phone visit") are NEVER shown
+   as visit types; when the patient picks one by name, the mode is
+   recorded automatically and the mode question is SKIPPED, never asked
+   again. Otherwise ask next: "...and would you like video, a phone call,
+   or an in-person visit?" — the chips shown contain ONLY modes the
+   chosen doctor actually offers. Never offer, and never book, any other
+   mode (a code gate refuses it with mode_not_offered). Match their words
+   to the closest type name yourself; never expose ids. A deterministic
+   guard refuses check_availability/create_appointment until the type
+   step is done — if you see visit_type_required, follow it instead of
+   retrying.
 5. TIME: once the patient has PICKED the type (context visit_type_name)
    plus doctor + day + start time, compute end = start + that type's
    duration_minutes — never a guessed number. The start the patient taps
@@ -195,7 +208,23 @@ Canonical booking state (Phase 2 — code owns memory, you own language):
   Never decide readiness yourself, never compute end times yourself
   (end = start + duration_minutes is done in code).
 
-How you present results (the chat UI renders cards itself):
+ Deterministic conversational actions (handled in code — never improvise these):
+ - COMPARE ("compare A and B", "compare the first and third", "compare
+   them"): resolved against the displayed doctors and answered with a
+   real-data table. Acknowledge in ONE line and move to the next missing
+   fact — never re-compare in prose, never invent ratings/fees/experience.
+ - SUMMARY ("tell me everything about this appointment", "what's
+   currently selected"): answered with the structured booking card. Don't
+   re-summarize in prose; point at anything still missing instead.
+ - A time pick ("11 to 11:30", tapping a slot) only SELECTS the slot.
+   Show the updated summary and ask "Would you like me to book it?" —
+   then WAIT for an explicit yes. Never write "booked" unless
+   create_appointment returned a confirmed outcome.
+ - A tap from an older message carries a stale state_revision and is
+   rejected in code with a "from an earlier step" notice. Never re-apply
+   stale picks yourself.
+
+ How you present results (the chat UI renders cards itself):
 - When you recommend doctors, name up to five briefly with hospital + city
   (e.g. "Dr. Fatima Sheikh — Riverside Medical Center, Chennai") and NEVER
   paste a markdown table of doctors; the UI shows doctor cards automatically.
@@ -398,7 +427,16 @@ _DECLINE_RE = re.compile(
 
 
 def _is_declined(text: str) -> bool:
-    return bool(_DECLINE_RE.search((text or "").strip()))
+    # "No, in-person" / "No, video" is a MODE CORRECTION, not a decline:
+    # the patient is answering the mode question, not dropping a proposal.
+    s = (text or "").strip()
+    if re.match(
+        r"^(no|nope|nah)\s*,?\s*(in[\s-]?person|video|phone|call)\b",
+        s,
+        re.IGNORECASE,
+    ):
+        return False
+    return bool(_DECLINE_RE.search(s))
 
 
 def _is_confirmation(text: str) -> bool:
@@ -859,16 +897,32 @@ def _clear_booking_proposal(context) -> None:
         context.pending_clarification = None
 
 
-def _apply_typed_selection(context, db: Session, selection: dict[str, Any]) -> None:
+def _apply_typed_selection(context, db: Session, selection: dict[str, Any]) -> str:
     """Apply a typed frontend selection to canonical state (§12, §19).
 
-    Event: {"type": "booking_selection", "field": ..., "value": ...}.
+    Event: {"type": "booking_selection", "field": ..., "value": ...,
+    "message_id"?, "state_revision"?, "widget_id"?}.
     Fields: hospital (id), doctor (id), appointment_type (id), date
     (YYYY-MM-DD), start_time (UTC ISO start), consultation_mode
     (video|phone|in_person). Unknown ids are ignored (never trusted
-    blindly); valid ones behave exactly like a spoken pick, including
-    invalidation of dependents.
+    blindly).
+
+    Returns "applied" | "stale" | "ignored". A tap built against an
+    older state_revision (P4) returns "stale" WITHOUT mutating anything —
+    the caller renders the stale-step notice instead. Every applied
+    change routes through update_booking_field (P5) so dependents,
+    proposals, and the revision advance together.
     """
+    try:
+        sel_rev = selection.get("state_revision", None)
+    except AttributeError:
+        sel_rev = None
+    if sel_rev is not None:
+        try:
+            if int(sel_rev) < int(getattr(context, "state_revision", 0) or 0):
+                return "stale"
+        except (TypeError, ValueError):
+            pass
     field = str(selection.get("field", "") or "")
     value = selection.get("value", "")
     if field == "hospital" and value:
@@ -883,7 +937,11 @@ def _apply_typed_selection(context, db: Session, selection: dict[str, Any]) -> N
             context.hospital_query = None
             context.flow_open = True
             if prev and prev != str(row.id):
-                invalidate_on_change(context, "hospital")
+                update_booking_field(context, "hospital")
+            else:
+                bump_revision(context)
+            return "applied"
+        return "ignored"
     elif field == "doctor" and value:
         pool = [str(d.get("id")) for d in (context.offered_doctors or []) if isinstance(d, dict)]
         if str(value) in pool or not pool:
@@ -898,7 +956,16 @@ def _apply_typed_selection(context, db: Session, selection: dict[str, Any]) -> N
                 context.doctor_query = None
                 context.flow_open = True
                 if prev and prev != str(row.id):
-                    invalidate_on_change(context, "doctor")
+                    update_booking_field(
+                        context,
+                        "doctor",
+                        doctor_offer=list(getattr(row, "consultation_types", None) or []),
+                        doctor_durations=list(getattr(row, "available_durations", None) or []),
+                    )
+                else:
+                    bump_revision(context)
+                return "applied"
+        return "ignored"
     elif field == "appointment_type" and value:
         for t in (getattr(context, "visit_types", None) or []):
             if isinstance(t, dict) and str(t.get("id")) == str(value):
@@ -908,15 +975,16 @@ def _apply_typed_selection(context, db: Session, selection: dict[str, Any]) -> N
                 context.type_query = None
                 context.flow_open = True
                 sync_duration_from_types(context)
-                if prev and prev != str(t["id"]):
-                    invalidate_on_change(context, "visit_type")
-                break
+                # A mode-like type ("Video consultation") auto-derives the
+                # mode inside update_booking_field — never re-asked (P1).
+                update_booking_field(context, "visit_type")
+                return "applied"
+        return "ignored"
     elif field == "consultation_mode" and str(value).lower() in ("video", "phone", "in_person"):
-        prev = str(getattr(context, "selected_consultation_mode", None) or "")
         context.selected_consultation_mode = str(value).lower()
         context.flow_open = True
-        if prev and prev != str(value).lower():
-            invalidate_on_change(context, "consultation_mode")
+        update_booking_field(context, "consultation_mode")
+        return "applied"
     elif field == "date" and value:
         try:
             _date.fromisoformat(str(value))
@@ -924,22 +992,29 @@ def _apply_typed_selection(context, db: Session, selection: dict[str, Any]) -> N
             context.selected_date = str(value)
             context.flow_open = True
             if prev and prev != str(value):
-                invalidate_on_change(context, "date")
+                update_booking_field(context, "date")
+            else:
+                bump_revision(context)
+            return "applied"
         except ValueError:
-            pass
+            return "ignored"
     elif field == "start_time" and value:
         # Value is a UTC ISO start; end derives from the picked duration.
         dur = getattr(context, "duration_minutes", None)
         try:
             start_dt = datetime.fromisoformat(str(value))
             if start_dt.tzinfo is None:
-                return
+                return "ignored"
             if dur:
                 end_dt = start_dt + timedelta(minutes=int(dur))
                 set_canonical_slot(context, start_dt.isoformat(), end_dt.isoformat())
                 context.flow_open = True
+                update_booking_field(context, "start_time")
+                return "applied"
         except (ValueError, TypeError):
             pass
+        return "ignored"
+    return "ignored"
 
 
 _ORDINALS = {
@@ -1034,12 +1109,13 @@ def detect_doctor_selection(context, text: str) -> str | None:
 def detect_type_selection(context, text: str) -> str | None:
     """Deterministic visit-type pick from a message naming a shown type.
 
-    Matches against the types from the last list_appointment_types result
-    ("Consult", "routine check-up" ~ "Routine Checkup"). Returns the type
-    id or None. Only records the pick; the model still asks/confirms out
-    loud and computes end = start + duration.
+    Matches against the PRESENTED types only (get_valid_visit_types: a
+    mode-named row like "Video consultation" is not a visit type, so
+    saying "video" never picks it as one — the mode detector owns that
+    word). Falls back to the full listing only when the catalog holds
+    nothing but mode-like rows. Returns the type id or None.
     """
-    types = [t for t in (context.visit_types or []) if isinstance(t, dict) and t.get("id")]
+    types = [t for t in get_valid_visit_types(context) if isinstance(t, dict) and t.get("id")]
     if not types:
         return None
     lowered = f" {(text or '').strip().lower()} "
@@ -1155,6 +1231,49 @@ def booking_completeness(context, name: str, args: dict) -> dict | None:
     return None
 
 
+def _mode_offer_gate(db: Session, context, name: str, args: dict) -> dict | None:
+    """Deterministic mode-vs-doctor validity (P2).
+
+    The picked consultation mode must be offered by the selected doctor
+    (mirrors the appointment service's `_normalize_consultation_mode`).
+    The mode selector only ever shows valid modes, so this fires only
+    when the model invents a combination — caught here, in code, instead
+    of surfacing as a 422 several turns later.
+    """
+    if name != "create_appointment" or not isinstance(args, dict):
+        return None
+    picked = str(
+        args.get("consultation_mode", "")
+        or getattr(context, "selected_consultation_mode", "")
+        or ""
+    ).strip().lower()
+    did = str(
+        getattr(context, "selected_doctor_id", None) or args.get("doctor_id", "") or ""
+    ).strip()
+    if not picked or not did:
+        return None
+    try:
+        row = db.get(Doctor, uuid.UUID(did))
+    except (ValueError, AttributeError, TypeError):
+        return None
+    if row is None:
+        return None
+    offered = [str(m).strip().lower() for m in (getattr(row, "consultation_types", None) or [])]
+    if offered and picked not in offered:
+        names = {"video": "video", "phone": "phone", "in_person": "in-person"}
+        return {
+            "ok": False,
+            "error": (
+                "mode_not_offered: the patient picked "
+                f"{names.get(picked, picked)} but {getattr(row, 'name', 'this doctor')} "
+                f"offers only {', '.join(names.get(m, m) for m in offered)}. Do NOT "
+                "call create_appointment with this combination. Present ONLY the "
+                "offered modes and let the patient pick again."
+            ),
+        }
+    return None
+
+
 _WEEKDAYS = {
     "monday": 0, "mon": 0,
     "tuesday": 1, "tue": 1, "tues": 1,
@@ -1254,16 +1373,29 @@ _CONSULTATION_MODES = (
 def detect_consultation_mode(text: str) -> str | None:
     """Deterministic how-to-meet pick ("video", "a call", "normal/in-person").
 
-    Earliest mention wins ("video or phone" -> video). Returns
-    video | phone | in_person or None. Only records the pick; the model
-    still confirms out loud and passes consultation_mode on booking.
+    Earliest mention wins ("video or phone" -> video). A mode word inside
+    a proper name ("Telephone Testerson") never counts — it is someone's
+    name, not an answer. Returns video | phone | in_person or None. Only
+    records the pick; the model still confirms out loud and passes
+    consultation_mode on booking.
     """
-    lowered = f" {(text or '').strip().lower()} "
+    from app.ai.agent.booking_state import is_proper_noun_mention as _is_proper
+
+    raw = text or ""
+    lowered = f" {raw.strip().lower()} "
+    base = 1 + (len(raw) - len(raw.lstrip()))
     first: tuple[int, str] | None = None
     for mode, pattern in _CONSULTATION_MODES:
-        hit = pattern.search(lowered)
-        if hit and (first is None or hit.start() < first[0]):
-            first = (hit.start(), mode)
+        for hit in pattern.finditer(lowered):
+            start = base + (hit.start() - 1)
+            try:
+                if _is_proper(raw, start, start + (hit.end() - hit.start())):
+                    continue
+            except (TypeError, ValueError):
+                pass
+            if first is None or hit.start() < first[0]:
+                first = (hit.start(), mode)
+            break
     return first[1] if first else None
 
 
@@ -1518,6 +1650,224 @@ def _patient_profile_block(
     return "\n".join(lines)
 
 
+def _effective_patient_point(db: Session, ctx: RequestContext, latitude, longitude):
+    """Live GPS else saved home point (patient role only), validated."""
+    live_lat = latitude if isinstance(latitude, (int, float)) else None
+    live_lng = longitude if isinstance(longitude, (int, float)) else None
+    if live_lat is not None and not (-90 <= float(live_lat) <= 90):
+        live_lat = None
+    if live_lng is not None and not (-180 <= float(live_lng) <= 180):
+        live_lng = None
+    if live_lat is None or live_lng is None:
+        live_lat, live_lng = None, None
+    if ctx.role != Role.patient:
+        return None, None
+    profile = (
+        db.query(PatientProfile)
+        .filter(PatientProfile.patient_user_id == ctx.user_id)
+        .first()
+    )
+    if live_lat is not None:
+        return float(live_lat), float(live_lng)
+    saved_lat = getattr(profile, "latitude", None) if profile else None
+    saved_lng = getattr(profile, "longitude", None) if profile else None
+    if (
+        isinstance(saved_lat, (int, float))
+        and isinstance(saved_lng, (int, float))
+        and -90 <= float(saved_lat) <= 90
+        and -180 <= float(saved_lng) <= 180
+    ):
+        return float(saved_lat), float(saved_lng)
+    return None, None
+
+
+def _reopen_stage(context, field: str) -> None:
+    """'Go back to <stage>' (P8): clear that field and everything below
+    it, keep everything above. Never restarts the whole flow."""
+    if field == "doctor":
+        context.selected_doctor_id = None
+        context.selected_doctor_name = None
+        context.doctor_query = None
+        context.compare_ids = []
+        update_booking_field(context, "doctor")
+    elif field == "date":
+        context.selected_date = None
+        update_booking_field(context, "date")
+    elif field == "visit_type":
+        context.selected_appointment_type_id = None
+        context.visit_type_name = None
+        context.type_query = None
+        context.duration_minutes = None
+        update_booking_field(context, "visit_type")
+    elif field == "consultation_mode":
+        context.selected_consultation_mode = None
+        update_booking_field(context, "consultation_mode")
+
+
+def _summary_prose(summary: dict[str, Any]) -> str:
+    """Short human mirror of build_booking_summary (P6/P7)."""
+    mode_label = {
+        "video": "Video",
+        "phone": "Phone",
+        "in_person": "In-person",
+    }.get(str(summary.get("consultation_mode") or ""), None)
+    vt = summary.get("visit_type") or {}
+    slot = summary.get("slot") or {}
+    lines = ["Here's everything I have for this appointment:"]
+    doc = (summary.get("doctor") or {}).get("name")
+    hosp = (summary.get("hospital") or {}).get("name")
+    lines.append(f"Doctor: {doc or '— not chosen yet'}")
+    if hosp:
+        lines.append(f"Hospital: {hosp}")
+    lines.append(f"Date: {summary.get('date') or '— not chosen yet'}")
+    vt_name = vt.get("name")
+    dur = vt.get("duration_minutes")
+    lines.append(
+        f"Visit type: {vt_name + (f' · {dur} min' if dur else '') if vt_name else '— not chosen yet'}"
+    )
+    lines.append(f"Consultation mode: {mode_label or '— not chosen yet'}")
+    if slot.get("start") and slot.get("end"):
+        try:
+            from app.mcp_server.tools import _time as _time_fmt
+
+            label = (
+                f"{_time_fmt.ist_day_label(slot['start'])}, "
+                f"{_time_fmt.ist_time_label(slot['start'])}–{_time_fmt.ist_time_label(slot['end'])}"
+            )
+        except (ImportError, AttributeError, TypeError, ValueError):
+            label = f"{slot['start']} – {slot['end']}"
+        lines.append(f"Time: {label}")
+    else:
+        lines.append("Time: — not chosen yet")
+    lines.append(f"Status: {summary.get('status', 'Not ready to book')}")
+    missing = summary.get("missing") or []
+    if missing and summary.get("status") == "Not ready to book":
+        lines.append(f"Still needed: {', '.join(missing)}.")
+    return "\n".join(lines)
+
+
+def _structured_turn_response(
+    db: Session,
+    context,
+    cid: str,
+    *,
+    reply: str,
+    surface: str,
+    title: str | None = None,
+    intent: str | None = None,
+    stage: str | None = None,
+    doctors: list | None = None,
+    slots: list | None = None,
+    appointment_types: list | None = None,
+    day_schedule: dict | None = None,
+    consultation_modes: list | None = None,
+    compare: dict | None = None,
+    quick_replies: list | None = None,
+    filter_choices: list | None = None,
+    actions: list | None = None,
+    base_rev: int | None = None,
+    include_summary: bool = True,
+    iterations: int = 0,
+    escalated: bool = False,
+    stopped: bool = False,
+) -> dict[str, Any]:
+    """Deterministic reply envelope (compare/summary/stale paths — P3/P6).
+
+    Same ChatOut shape as the LLM path, minus the model call: bumps
+    state_revision when this turn made no other mutation, stamps a fresh
+    message_id, persists, and returns. Turn-scoped `intent` is reported,
+    never stored (the sticky booking intent underneath survives).
+    """
+    if base_rev is not None:
+        try:
+            if int(getattr(context, "state_revision", 0) or 0) <= int(base_rev):
+                bump_revision(context)
+        except (TypeError, ValueError):
+            bump_revision(context)
+    else:
+        bump_revision(context)
+    message_id = uuid.uuid4().hex[:12]
+    try:
+        context.last_message_id = message_id
+    except (AttributeError, TypeError, ValueError):
+        pass
+    readiness = evaluate_readiness(context)
+    stage_final = stage or concierge.map_booking_stage_to_concierge(
+        booking_stage(context, set()), context
+    )
+    context.stage = stage_final
+    try:
+        summary = concierge.build_booking_summary(context) if include_summary else None
+    except (AttributeError, TypeError, ValueError):
+        summary = None
+    if summary is not None and not (
+        context.flow_open
+        or getattr(context, "selected_doctor_id", None)
+        or getattr(context, "selected_date", None)
+        or getattr(context, "selected_appointment_type_id", None)
+        or getattr(context, "selected_consultation_mode", None)
+        or getattr(context, "selected_start", None)
+    ):
+        summary = None
+    try:
+        care = concierge.build_care_context(context)
+    except (AttributeError, TypeError, ValueError):
+        care = {}
+    try:
+        quick = list(quick_replies) if quick_replies is not None else concierge.quick_replies_for(stage_final, context)
+    except (AttributeError, TypeError, ValueError):
+        quick = []
+    try:
+        last_search = getattr(context, "last_search", None) or {}
+        search_total = int(last_search.get("total", 0))
+    except (TypeError, ValueError):
+        search_total = 0
+    pending = context.pending_booking if context.awaiting_confirmation else None
+    context.remember_turn("assistant", reply)
+    save_ai_context(context)
+    return {
+        "conversation_id": cid,
+        "reply": reply,
+        "iterations": iterations,
+        "escalated": escalated,
+        "stopped": stopped,
+        "message_id": message_id,
+        "state_revision": int(getattr(context, "state_revision", 0) or 0),
+        "hospital": {
+            "id": getattr(context, "selected_hospital_id", None),
+            "name": getattr(context, "selected_hospital_name", None),
+        },
+        "selected_date": getattr(context, "selected_date", None),
+        "selected_start": getattr(context, "selected_start", None),
+        "selected_end": getattr(context, "selected_end", None),
+        "duration_minutes": getattr(context, "duration_minutes", None),
+        "missing_fields": readiness["missing"],
+        "doctors": doctors or [],
+        "doctors_total": search_total,
+        "has_more_doctors": False,
+        "slots": slots or [],
+        "appointment_types": appointment_types or [],
+        "day_schedule": day_schedule,
+        "consultation_modes": consultation_modes or [],
+        "booking_stage": booking_stage(context, set()),
+        "pending_booking": pending,
+        "booking_summary": summary,
+        "surface": surface,
+        "title": title,
+        "allow_explore_more": False,
+        "allow_compare": bool(compare is not None),
+        "intent": intent or getattr(context, "intent", None),
+        "stage": stage_final,
+        "care_context": care,
+        "quick_replies": quick,
+        "compare": compare,
+        "filter_choices": filter_choices or [],
+        "actions": actions or [],
+        "upcoming_appointment": None,
+        "questionnaire": None,
+    }
+
+
 def run_conversation(
     *,
     db: Session,
@@ -1550,11 +1900,48 @@ def run_conversation(
     context = get_ai_context(cid)
     context.user_id = str(ctx.user_id)
     context.remember_turn("user", text)
+    # Revision this turn started from: taps built against an older one
+    # are stale widgets and must never mutate (P4).
+    base_rev = int(getattr(context, "state_revision", 0) or 0)
+    # Turn-scoped conversational actions (P3/P6), resolved BEFORE any
+    # fuzzy pick or tool call: compare/summary never mutate booking
+    # state and never reach the LLM as free prose.
+    try:
+        turn_action = concierge.detect_intent(text, context)
+    except (AttributeError, TypeError, ValueError):
+        turn_action = "GENERAL_HELP"
+    _is_compare_turn = turn_action == "COMPARE_DOCTORS"
+    _is_summary_turn = turn_action == "SHOW_BOOKING_SUMMARY"
     # Phase 2 typed selection (§12): a tap and a spoken phrase update the
     # SAME canonical state. Selections are authoritative (no fuzzy parse):
     # hospital/doctor/appointment_type/consultation_mode/date/start_time.
+    selection_status = "none"
     if isinstance(selection, dict) and selection.get("type") == "booking_selection":
-        _apply_typed_selection(context, db, selection)
+        try:
+            selection_status = _apply_typed_selection(context, db, selection)
+        except (AttributeError, TypeError, ValueError):
+            selection_status = "ignored"
+    if selection_status == "stale":
+        # P4: an old widget fired after the conversation moved on. Nothing
+        # was mutated — say so plainly and show the CURRENT state (the
+        # booking_summary payload opens edit mode with [Change] actions).
+        stale_reply = (
+            "That selection is from an earlier step, so I left your current "
+            "booking unchanged. Here's where things stand right now — use "
+            "the Change buttons below to edit anything."
+        )
+        context.remember_turn("assistant", stale_reply)
+        return _structured_turn_response(
+            db,
+            context,
+            cid,
+            reply=stale_reply,
+            surface="BOOKING_REVIEW",
+            title="Current appointment",
+            intent=getattr(context, "intent", None),
+            base_rev=base_rev,
+            quick_replies=["Change something", "Start over"],
+        )
     # Snapshot for change detection: widgets must reflect what THIS turn
     # did (picked/changed), never re-blast earlier turns' UI.
     selected_doctor_before = str(getattr(context, "selected_doctor_id", None) or "")
@@ -1589,6 +1976,34 @@ def run_conversation(
         context.flow_open = False
         if getattr(context, "pending_clarification", None) == "booking_confirmation":
             context.pending_clarification = None
+        bump_revision(context)
+    # Explicit edit commands (P8): "change doctor", "go back to <stage>".
+    # These reopen a stage — clearing that field and everything below it
+    # while keeping everything above — instead of restarting the flow.
+    try:
+        _edit_cmd = concierge.detect_change_request(text)
+    except (AttributeError, TypeError, ValueError):
+        _edit_cmd = None
+    if _edit_cmd == "keep":
+        pass  # "keep everything else the same": explicit no-op.
+    elif _edit_cmd == "doctor":
+        if getattr(context, "selected_doctor_id", None):
+            context.selected_doctor_id = None
+            context.selected_doctor_name = None
+            context.doctor_query = None
+            context.compare_ids = []
+            update_booking_field(context, "doctor")
+        context.flow_open = True
+    elif _edit_cmd == "hospital":
+        if getattr(context, "selected_hospital_id", None):
+            context.selected_hospital_id = None
+            context.selected_hospital_name = None
+            context.hospital_query = None
+            update_booking_field(context, "hospital")
+        context.flow_open = True
+    elif isinstance(_edit_cmd, str) and _edit_cmd.startswith("goback_"):
+        _reopen_stage(context, _edit_cmd[len("goback_"):])
+        context.flow_open = True
     # A turn-opening decline ("no", "never mind", "cancel that") drops a
     # stale proposal so a later "yes" cannot accidentally confirm it.
     if (
@@ -1603,9 +2018,11 @@ def run_conversation(
     if context.awaiting_confirmation and not _is_confirmation(text):
         try:
             _correction = concierge.detect_change_request(text)
-        except (AttributeError, TypeError):
+        except (AttributeError, TypeError, ValueError):
             _correction = None
-        if _correction in ("time_range", "date", "consultation_mode", "doctor", "visit_type", "hospital"):
+        if _correction in ("time_range", "date", "consultation_mode", "doctor", "visit_type", "hospital", "start_time") or (
+            isinstance(_correction, str) and _correction.startswith("goback_")
+        ):
             _clear_booking_proposal(context)
         elif concierge_changed.get("time_range"):
             _clear_booking_proposal(context)
@@ -1625,17 +2042,33 @@ def run_conversation(
     type_before = str(getattr(context, "selected_appointment_type_id", None) or "")
     hospital_before = str(getattr(context, "selected_hospital_id", None) or "")
     mode_before = str(getattr(context, "selected_consultation_mode", None) or "")
-    if not context.awaiting_confirmation:
-        picked = detect_doctor_selection(context, text)
+    requested_before = str(getattr(context, "requested_start", None) or "")
+    # Summary turns are READ-ONLY (P6/P9): the summary command must never
+    # mutate booking state through fuzzy matching. Compare turns suppress
+    # only the doctor pick — naming doctors for comparison must not
+    # hijack the booking into a selection (P3). Explicit edit commands
+    # ("change doctor", "go back to …") suppress fuzzy picks too: the
+    # command already stated the intent, and matching its own words
+    # ("change DOCTOR" ~ offered "Dr. Chgdoc") would re-pick what was
+    # just cleared. Date/time parsing still runs — "make it tomorrow"
+    # and "change it to 11:00" carry their new value in words.
+    _explicit_edit = (_edit_cmd in ("doctor", "hospital")) or (
+        isinstance(_edit_cmd, str) and _edit_cmd.startswith("goback_")
+    )
+    _fuzzy_allowed = (
+        not context.awaiting_confirmation
+        and not _is_summary_turn
+        and not _explicit_edit
+    )
+    if _fuzzy_allowed:
+        if not _is_compare_turn:
+            picked = detect_doctor_selection(context, text)
+        else:
+            picked = None
         if picked:
             prev_selected = str(getattr(context, "selected_doctor_id", None) or "")
             context.selected_doctor_id = picked
             context.flow_open = True
-            if prev_selected and prev_selected != str(picked):
-                # New doctor replaces the old choice: previously loaded
-                # availability no longer applies, so drop it. The model
-                # re-checks from the date step for the new doctor.
-                context.offered_slots = []
             for d in context.offered_doctors or []:
                 if isinstance(d, dict) and str(d.get("id")) == picked:
                     context.selected_doctor_name = str(d.get("name", "")) or None
@@ -1678,7 +2111,8 @@ def run_conversation(
     # A confirmation ("Yes, book it for Monday") affirms the recorded day;
     # it must never shift it (shifting would invalidate the very offers the
     # confirmation needs). Only fill an empty date from confirmations.
-    if not (_is_confirmation(text) and getattr(context, "selected_date", None)):
+    # Summary turns never shift the day either (read-only).
+    if not (_is_confirmation(text) and getattr(context, "selected_date", None)) and not _is_summary_turn:
         day = detect_date_iso_ist(text)
         if day:
             context.selected_date = day
@@ -1703,37 +2137,43 @@ def run_conversation(
             set_canonical_slot(context, start_iso, end_iso)
         except (ValueError, TypeError):
             pass
-    # Explicit invalidation on what THIS turn changed.
+    # Explicit invalidation on what THIS turn changed (P5): every
+    # change routes through the single update_booking_field entry point
+    # so dependents, proposals, and the revision advance together.
     if str(getattr(context, "selected_hospital_id", None) or "") != hospital_before and hospital_before:
-        invalidate_on_change(context, "hospital")
+        update_booking_field(context, "hospital")
     if str(getattr(context, "selected_doctor_id", None) or "") != doctor_before and doctor_before:
-        invalidate_on_change(context, "doctor")
+        _new_offer: list[str] | None = None
+        _new_durations: list[int] | None = None
+        try:
+            _doc_row = db.get(Doctor, uuid.UUID(str(getattr(context, "selected_doctor_id", None))))
+        except (ValueError, AttributeError, TypeError):
+            _doc_row = None
+        if _doc_row is not None:
+            _new_offer = list(getattr(_doc_row, "consultation_types", None) or [])
+            _new_durations = list(getattr(_doc_row, "available_durations", None) or [])
+        update_booking_field(
+            context, "doctor", doctor_offer=_new_offer, doctor_durations=_new_durations
+        )
     if str(getattr(context, "selected_date", None) or "") != date_before and date_before:
-        invalidate_on_change(context, "date")
+        update_booking_field(context, "date")
     if str(getattr(context, "selected_appointment_type_id", None) or "") != type_before and type_before:
-        invalidate_on_change(context, "visit_type")
+        update_booking_field(context, "visit_type")
     if str(getattr(context, "selected_consultation_mode", None) or "") != mode_before and mode_before:
-        invalidate_on_change(context, "consultation_mode")
-
-    # Compare request (§8): resolve 2-3 currently displayed doctors only
-    # against offered ids — never invented. Stored on context so the
-    # envelope renders DOCTOR_COMPARE even if the model only talks.
-    try:
-        _wants_compare = concierge.detect_compare_request(text)
-    except (AttributeError, TypeError):
-        _wants_compare = False
-    if _wants_compare:
-        _page = [str(i) for i in (getattr(context, "offered_doctor_page", None) or [])]
-        if not _page:
-            _page = [
-                str(o.get("id"))
-                for o in (getattr(context, "offered_doctors", None) or [])[:3]
-                if isinstance(o, dict) and o.get("id")
-            ]
-        context.compare_ids = _page[:3]
-    elif not concierge.detect_explore_more(text):
-        # A new search/selection replaces a stale comparison view.
-        if getattr(context, "compare_ids", None):
+        update_booking_field(context, "consultation_mode")
+    if str(getattr(context, "requested_start", None) or "") != requested_before and requested_before:
+        # A new requested time retires the proposal that named the old
+        # slot; the canonical interval is rebuilt just below.
+        _clear_booking_proposal(context)
+        bump_revision(context)
+    # A stale comparison view dies on any new search/selection — but a
+    # compare turn itself refreshes it (handled deterministically below).
+    if not _is_compare_turn:
+        try:
+            _exploring = concierge.detect_explore_more(text)
+        except (AttributeError, TypeError, ValueError):
+            _exploring = False
+        if not _exploring and getattr(context, "compare_ids", None):
             context.compare_ids = []
 
     if is_clinical_request(text):
@@ -1878,6 +2318,102 @@ def run_conversation(
                 "upcoming_appointment": None,
                 "questionnaire": None,
             }
+
+    # Deterministic conversational actions (P3/P6): answered from
+    # structured state with real data — the LLM never improvises these.
+    _eff_lat, _eff_lng = _effective_patient_point(db, ctx, latitude, longitude)
+    if _is_compare_turn:
+        _cmp_ids = concierge.resolve_compare_ids(context, text)
+        context.compare_ids = _cmp_ids
+        if len(_cmp_ids) >= 2:
+            _cmp_cards = _doctor_cards_by_ids(
+                db,
+                _cmp_ids[:3],
+                patient_latitude=_eff_lat,
+                patient_longitude=_eff_lng,
+                context=context,
+            )
+            if len(_cmp_cards) >= 2:
+                _cmp_table = concierge.build_compare_table(_cmp_cards)
+                _cmp_names = " and ".join(c["name"] for c in _cmp_cards)
+                _cmp_reply = (
+                    f"Here's a quick comparison of {_cmp_names} — "
+                    "every field below comes from our live directory, nothing guessed. "
+                    "Which one would you like to go with?"
+                )
+                context.remember_turn("assistant", _cmp_reply)
+                return _structured_turn_response(
+                    db,
+                    context,
+                    cid,
+                    reply=_cmp_reply,
+                    surface="DOCTOR_COMPARE",
+                    title="Compare your options",
+                    intent="COMPARE_DOCTORS",
+                    stage="COMPARING_DOCTORS",
+                    compare=_cmp_table,
+                    quick_replies=["Check availability", "Show me more doctors"],
+                    actions=[
+                        {
+                            "id": f"choose:{c['id']}",
+                            "label": f"Choose {c['name']}",
+                            "kind": "choose_doctor",
+                            "doctor_id": c["id"],
+                        }
+                        for c in _cmp_cards
+                    ],
+                    base_rev=base_rev,
+                )
+        # Fewer than two comparable doctors on screen: say so plainly
+        # and offer a way forward instead of improvising a comparison.
+        _cmp_fallback = (
+            "I can compare doctors side by side — right now I only have "
+            "one option on screen. Want me to find more doctors to compare, "
+            "or is there a specific doctor you'd like me to include?"
+        )
+        context.remember_turn("assistant", _cmp_fallback)
+        return _structured_turn_response(
+            db,
+            context,
+            cid,
+            reply=_cmp_fallback,
+            surface="TEXT",
+            intent="COMPARE_DOCTORS",
+            stage="SHOWING_DOCTORS",
+            quick_replies=["Show me more doctors", "Start over"],
+            actions=[
+                {"id": "explore_more", "label": "Show me more", "kind": "explore_more"}
+            ],
+            base_rev=base_rev,
+        )
+    if _is_summary_turn:
+        _summary = concierge.build_booking_summary(context)
+        _sum_reply = _summary_prose(_summary)
+        _sum_actions = [
+            {"id": c["id"], "label": c["label"], "kind": "change", "prompt": c["prompt"]}
+            for c in (_summary.get("changes") or [])
+        ]
+        if _summary.get("can_confirm"):
+            _sum_actions.append(
+                {"id": "confirm_booking", "label": "Confirm booking", "kind": "confirm"}
+            )
+            _sum_quick = ["Confirm booking", "Change something"]
+        else:
+            _sum_quick = ["Change something", "Start over"]
+        context.remember_turn("assistant", _sum_reply)
+        return _structured_turn_response(
+            db,
+            context,
+            cid,
+            reply=_sum_reply,
+            surface="BOOKING_REVIEW",
+            title="Appointment summary",
+            intent="SHOW_BOOKING_SUMMARY",
+            stage="REVIEWING_BOOKING",
+            quick_replies=_sum_quick,
+            actions=_sum_actions,
+            base_rev=base_rev,
+        )
 
     client = AgentToolClient(db, ctx)
     complete_fn = complete or groq_complete
@@ -2024,6 +2560,10 @@ def run_conversation(
                         context, text, call.get("name", ""), args
                     )
                 if outcome is None:
+                    outcome = _mode_offer_gate(
+                        db, context, call.get("name", ""), args
+                    )
+                if outcome is None:
                     outcome = client.call(call.get("name", ""), args)
                     _remember_booking_selection(
                         context, call.get("name", ""), args, outcome
@@ -2064,25 +2604,39 @@ def run_conversation(
     if reply is None:
         reply = STOPPED if stopped else LOOP_EXHAUSTED
         messages.append({"role": "assistant", "content": reply})
-    # How-to-meet options persist for later pick_mode turns (re-shown only
-    # then — never blasted every turn).
+    # Valid how-to-meet options (P1/P2): the chosen doctor's REAL offer,
+    # intersected with what the picked visit type implies. A mode-like
+    # type ("Video consultation") ANSWERS the mode question itself — the
+    # mode is recorded, never re-asked. Anything else shows ONLY valid
+    # modes; an invented combination dies in _mode_offer_gate instead of
+    # failing as a 422 several turns later.
+    _type_implied_mode = implied_mode_from_type_name(
+        str(getattr(context, "visit_type_name", None) or "")
+    )
+    _doc_offer_modes: list[str] | None = None
+    _chosen_doc = getattr(context, "selected_doctor_id", None)
+    if _chosen_doc:
+        try:
+            _doc_row_modes = db.get(Doctor, uuid.UUID(str(_chosen_doc)))
+        except (ValueError, AttributeError, TypeError):
+            _doc_row_modes = None
+        if _doc_row_modes is not None:
+            _doc_offer_modes = list(getattr(_doc_row_modes, "consultation_types", None) or [])
+    _valid_modes = get_valid_consultation_modes(_doc_offer_modes, _type_implied_mode)
+    if (
+        _type_implied_mode
+        and _type_implied_mode in _valid_modes
+        and not getattr(context, "selected_consultation_mode", None)
+    ):
+        context.selected_consultation_mode = _type_implied_mode
+        context.flow_open = True
     fresh_modes: list[str] = []
     if "list_appointment_types" in fresh_tools:
-        chosen_doc = getattr(context, "selected_doctor_id", None)
-        if chosen_doc:
-            try:
-                doc_row = db.get(Doctor, uuid.UUID(str(chosen_doc)))
-            except (ValueError, AttributeError, TypeError):
-                doc_row = None
-            offered_modes = (
-                list(getattr(doc_row, "consultation_types", None) or [])
-                if doc_row is not None
-                else []
-            )
-            fresh_modes = [m for m in offered_modes if m in ("video", "phone", "in_person")]
-            if not fresh_modes:
-                fresh_modes = ["video", "phone", "in_person"]
-            context.consultation_modes = list(fresh_modes)
+        context.consultation_modes = list(_valid_modes)
+        # Chips only when the mode is genuinely undecided — never the
+        # duplicate question after a mode-defining type (P1).
+        if not getattr(context, "selected_consultation_mode", None):
+            fresh_modes = list(_valid_modes)
     context.remember_turn("assistant", reply)
     pending = context.pending_booking if context.awaiting_confirmation else None
     last_search = getattr(context, "last_search", None) or {}
@@ -2147,6 +2701,19 @@ def run_conversation(
         m for m in (getattr(context, "consultation_modes", None) or [])
         if m in ("video", "phone", "in_person")
     ]
+    # Presented visit types (P1): mode-named rows are hidden from the
+    # visit-type question — unless the catalog holds nothing else (still
+    # genuinely bookable). Grounding/booking still use the full listing.
+    def _presentable_types(
+        rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        genuine = [
+            t for t in rows if not is_mode_like_type_name(str(t.get("name", "")))
+        ]
+        return genuine or rows
+
+    fresh_types = _presentable_types(fresh_types)
+    stored_types = _presentable_types(stored_types)
     readiness_out = evaluate_readiness(context)
     # --- Concierge envelope (§10-12): typed surface + explainability ----
     # Rank fresh slots by the patient's time-of-day preference (morning/
@@ -2166,6 +2733,11 @@ def run_conversation(
         )
     except (AttributeError, TypeError, ValueError):
         _slots = _raw_slots
+    _day_schedule = turn_results.get("get_day_schedule")
+    if _day_schedule:
+        # P10: ONE authoritative time selector per turn. The day timeline
+        # subsumes the slot chips — showing both invites double picks.
+        _slots = []
     _concierge_stage = concierge.map_booking_stage_to_concierge(stage, context)
     # A freshly confirmed booking moves to BOOKING_SUCCESS/POST_BOOKING.
     _just_booked = "create_appointment" in fresh_tools and not pending
@@ -2188,6 +2760,15 @@ def run_conversation(
         _unsure = False
     if _unsure and not doctors_cards:
         _quick = ["General health", "Heart / chest", "Skin", "Bones / joints", "Something else"]
+    # P7: a picked slot is a SELECTION, not a confirmation. Once every
+    # other field is ready, offer the explicit choice — never auto-book.
+    if (
+        _concierge_stage == "SELECTING_TIME"
+        and readiness_out["ready"]
+        and not pending
+        and not _just_booked
+    ):
+        _quick = ["Confirm booking", "Change something"]
     # Comparison view: real cards only (2-3).
     _compare = None
     if getattr(context, "compare_ids", None) and len(getattr(context, "compare_ids", None) or []) >= 2:
@@ -2281,6 +2862,35 @@ def run_conversation(
         _actions.append({"id": "questionnaire", "label": "Complete pre-visit questions", "kind": "questionnaire", "appointment_id": str(_appt_id)})
         _actions.append({"id": "prepare_visit", "label": "Prepare for my visit", "kind": "prepare_visit"})
     _filter_choices = concierge.build_explore_choices(context) if _allow_explore else []
+    # Booking summary rides every open-flow turn (P6/P7): the UI renders
+    # the structured card with [Change] actions next to the widgets, so a
+    # slot pick visibly becomes "selected, awaiting confirmation".
+    try:
+        _summary_out = concierge.build_booking_summary(context)
+    except (AttributeError, TypeError, ValueError):
+        _summary_out = None
+    if _summary_out is not None and not (
+        getattr(context, "flow_open", False)
+        or getattr(context, "selected_doctor_id", None)
+        or getattr(context, "selected_date", None)
+        or getattr(context, "selected_appointment_type_id", None)
+        or getattr(context, "selected_consultation_mode", None)
+        or getattr(context, "selected_start", None)
+    ):
+        _summary_out = None
+    # Widget versioning (P4/P9): stamp the revision these widgets were
+    # built against plus a fresh message id. Taps citing an older
+    # revision are rejected in _apply_typed_selection.
+    try:
+        if int(getattr(context, "state_revision", 0) or 0) <= int(base_rev):
+            bump_revision(context)
+    except (TypeError, ValueError):
+        bump_revision(context)
+    _message_id = uuid.uuid4().hex[:12]
+    try:
+        context.last_message_id = _message_id
+    except (AttributeError, TypeError, ValueError):
+        pass
     save_ai_context(context)
     return {
         "conversation_id": cid,
@@ -2288,6 +2898,8 @@ def run_conversation(
         "iterations": iterations,
         "escalated": escalated,
         "stopped": stopped,
+        "message_id": _message_id,
+        "state_revision": int(getattr(context, "state_revision", 0) or 0),
         "hospital": {
             "id": getattr(context, "selected_hospital_id", None),
             "name": getattr(context, "selected_hospital_name", None),
@@ -2306,6 +2918,7 @@ def run_conversation(
         "consultation_modes": fresh_modes or (stored_modes if stage == "pick_mode" else []),
         "booking_stage": stage,
         "pending_booking": pending,
+        "booking_summary": _summary_out,
         "surface": _surface,
         "title": _title,
         "allow_explore_more": _allow_explore,

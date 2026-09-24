@@ -127,12 +127,13 @@ def test_type_change_recalculates_duration_and_end():
     # 09:30 IST == 04:00 UTC; storage is UTC, labels render IST.
     assert start == "2026-09-21T04:00:00+00:00"
     assert end == "2026-09-21T04:30:00+00:00"
-    # Visit-type change: 45-min type recomputes the end deterministically.
+    # Visit-type change: duration re-derives, but the old interval is
+    # cleared (P5) — a 30-min slot must never silently become 45-min.
     ctx.selected_appointment_type_id = "t2"
     bs.invalidate_on_change(ctx, "visit_type")
     assert ctx.duration_minutes == 45
-    # 09:30 + 45 min = 10:15 IST == 04:45 UTC.
-    assert ctx.selected_end == "2026-09-21T04:45:00+00:00"
+    assert ctx.selected_slot is None and ctx.selected_start is None
+    assert ctx.offered_slots == []
 
 
 # -- 8. NL consultation-mode aliases -------------------------------------------
@@ -266,10 +267,14 @@ def test_hospital_change_resets_flow():
     assert ctx.offered_slots == []
 
 
-def test_mode_change_keeps_availability_but_drops_proposal():
+def test_mode_change_clears_slot_and_availability():
+    # P5: changing the consultation mode retires the selected slot and
+    # requires a fresh availability pass — the proposal named the old
+    # mode/slot, so it must be re-proposed, never booked stale.
     ctx = _full_context()
     bs.invalidate_on_change(ctx, "consultation_mode")
-    assert ctx.offered_slots != []
+    assert ctx.offered_slots == []
+    assert ctx.selected_slot is None and ctx.selected_start is None
     assert ctx.pending_booking is None and ctx.awaiting_confirmation is False
 
 

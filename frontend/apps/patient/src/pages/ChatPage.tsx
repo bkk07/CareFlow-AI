@@ -1,15 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Mic, Navigation, Send, Square, X } from "lucide-react";
+import { History, Mic, Navigation, Plus, Send, Trash2, X } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { postChat } from "../api";
-import type { BookingSelection } from "../api";
+import type { BookingSelection, ChatActionRequest } from "../api";
 import { useAuth } from "../context/AuthContext";
 import { ChatBubble, TypingIndicator } from "../components/ai/ai";
 import { readPosition } from "../lib/helpers";
-import { useSpeechSynthesis } from "../voice/useSpeechSynthesis";
+import {
+  ACTIVE_CONV_KEY,
+  deleteChat,
+  getActiveConversationId,
+  listChats,
+  loadChatMessages,
+  saveChatMessages,
+  type StoredChat,
+} from "../lib/chatHistory";
 import type { ChatMessage } from "../types";
-
-const CONV_KEY = "careflow_patient_conversation";
 
 const AI_EXAMPLE_PROMPTS = [
   "I need a cardiologist this week",
@@ -31,14 +37,28 @@ export default function ChatPage() {
   const navigate = useNavigate();
   const { patient, contact } = useAuth();
   const welcome = useMemo(() => greetingFor(patient.name || contact?.full_name || ""), [patient.name, contact?.full_name]);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "welcome",
-      from: "ai",
-      text: welcome,
-      time: "Now",
-    },
-  ]);
+  // Active backend conversation id (null until the first reply mints one).
+  const [conversationId, setConversationId] = useState<string | null>(() => getActiveConversationId());
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    const active = getActiveConversationId();
+    if (active) {
+      const stored = loadChatMessages(active);
+      if (stored) return stored;
+    }
+    return [{ id: "welcome", from: "ai", text: greetingFor(""), time: "Now" }];
+  });
+  // Once the profile loads, personalize the untouched welcome message.
+  useEffect(() => {
+    setMessages((prev) => {
+      if (prev.length === 1 && prev[0].id === "welcome") {
+        return [{ ...prev[0], text: welcome }];
+      }
+      return prev;
+    });
+  }, [welcome]);
+  const [history, setHistory] = useState<StoredChat[]>(() => listChats());
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [staleNotice, setStaleNotice] = useState(false);
   const [draft, setDraft] = useState("");
   const [thinking, setThinking] = useState(false);
   const [liveGeo, setLiveGeo] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -49,17 +69,10 @@ export default function ChatPage() {
   // (only at the date step), driven by each message's bookingStage.
   const [chosenType, setChosenType] = useState<{ name: string; minutes: number } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  // Browser-native TTS for AI text replies: no external TTS API is called.
-  const { isSupported: speechSupported, speaking: isSpeaking, speak, stop: stopSpeaking } = useSpeechSynthesis();
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, thinking]);
-
-  // Stop speech when leaving chat.
-  useEffect(() => {
-    return () => stopSpeaking();
-  }, [stopSpeaking]);
 
   useEffect(() => {
     const prompt = (location.state as { prompt?: string } | null)?.prompt;
@@ -88,23 +101,67 @@ export default function ChatPage() {
     }
   }
 
+  // Persist the active transcript so reloads keep the thread.
+  useEffect(() => {
+    if (conversationId && messages.length > 0) {
+      saveChatMessages(conversationId, messages);
+      setHistory(listChats());
+    }
+  }, [messages, conversationId]);
+
+  function newChat() {
+    setThinking(false);
+    setDraft("");
+    setConversationId(null);
+    try {
+      localStorage.removeItem(ACTIVE_CONV_KEY);
+    } catch {
+      /* private mode */
+    }
+    setMessages([{ id: "welcome", from: "ai", text: welcome, time: "Now" }]);
+    setHistory(listChats());
+    setHistoryOpen(false);
+  }
+
+  function openChat(id: string) {
+    const stored = loadChatMessages(id);
+    if (!stored) return;
+    setThinking(false);
+    setConversationId(id);
+    try {
+      localStorage.setItem(ACTIVE_CONV_KEY, id);
+    } catch {
+      /* private mode */
+    }
+    setMessages(stored);
+    setHistoryOpen(false);
+    requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: "auto" }));
+  }
+
+  function removeChat(id: string) {
+    deleteChat(id);
+    if (id === conversationId) {
+      newChat();
+    } else {
+      setHistory(listChats());
+    }
+  }
+
   async function sendPrompt(text: string, selection?: BookingSelection | null) {
     const clean = text.trim();
     if (!clean || thinking) return;
-    // A new prompt interrupts any in-flight speech (no overlap).
-    stopSpeaking();
     setMessages((prev) => [...prev, { id: `p-${Date.now()}`, from: "patient", text: clean, time: "Now" }]);
     setDraft("");
     setThinking(true);
     try {
-      const conversationId = localStorage.getItem(CONV_KEY);
       // Live GPS wins for this message; otherwise the backend falls back
       // to the saved home location on your profile automatically.
       // A typed selection rides along so taps update the same canonical
       // state a spoken phrase would — the text stays for the transcript.
       const reply = await postChat(clean, conversationId, liveGeo, selection ?? null);
+      setConversationId(reply.conversation_id);
       try {
-        localStorage.setItem(CONV_KEY, reply.conversation_id);
+        localStorage.setItem(ACTIVE_CONV_KEY, reply.conversation_id);
       } catch {
         /* private mode */
       }
@@ -115,6 +172,8 @@ export default function ChatPage() {
         from: "ai",
         text: fullReply,
         time: "Now",
+        messageId: reply.message_id ?? null,
+        stateRevision: reply.state_revision ?? null,
         doctors: reply.doctors ?? [],
         doctorsTotal: reply.doctors_total ?? 0,
         hasMoreDoctors: reply.has_more_doctors ?? false,
@@ -124,6 +183,7 @@ export default function ChatPage() {
         daySchedule: reply.day_schedule ?? null,
         bookingStage: reply.booking_stage ?? "browse",
         pendingBooking: reply.pending_booking ?? null,
+        bookingSummary: (reply.booking_summary ?? null) as ChatMessage["bookingSummary"],
         surface: reply.surface ?? "TEXT",
         title: reply.title ?? null,
         allowExploreMore: reply.allow_explore_more ?? false,
@@ -137,9 +197,6 @@ export default function ChatPage() {
         actions: reply.actions ?? [],
         upcomingAppointment: (reply.upcoming_appointment ?? null) as ChatMessage["upcomingAppointment"],
       }]);
-      // Speak the AI text response via browser SpeechSynthesis only.
-      // The response text is never sent to an external TTS API.
-      speak(fullReply);
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -152,47 +209,55 @@ export default function ChatPage() {
 
   const isFresh = messages.length <= 1;
 
-  // Persistent care context: latest non-empty summary across turns.
-  const latestCareContext = [...messages].reverse().find(
-    (m) => m.careContext && Object.keys(m.careContext).filter((k) => k !== "_empty").length > 0,
-  )?.careContext as Record<string, string> | undefined;
+  /** Central chat-action dispatcher (P4/P10): every interactive widget
+   *  tap arrives here with full widget identity. Before applying:
+   *  1. verify the message is still the latest assistant message,
+   *  2. verify its stateRevision is current,
+   *  3. verify nothing is thinking (avoid overlapping turns).
+   *  Stale taps are REFUSED with a user-friendly notice — never applied
+   *  silently. Returns true when the action was dispatched. */
+  const staleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  function careEntries(ctx: Record<string, string> | undefined): { label: string; value: string }[] {
-    if (!ctx) return [];
-    const out: { label: string; value: string }[] = [];
-    const pick = (key: string, label: string, fmt?: (v: string) => string) => {
-      const v = ctx[key];
-      if (typeof v === "string" && v.trim() && key !== "_empty") out.push({ label, value: fmt ? fmt(v) : v });
-    };
-    pick("concern", "Concern");
-    pick("for_whom", "For", (v) => (v === "self" ? "Myself" : v));
-    pick("specialty", "Care");
-    pick("when", "When");
-    pick("time_preference", "Time");
-    pick("consultation", "Consultation", (v) => v.replace("_", " "));
-    pick("gender_preference", "Doctor", (v) => `${v} doctor`);
-    pick("hospital", "Hospital");
-    pick("doctor_preference", "Doctor");
-    return out;
-  }
-  const panelEntries = careEntries(latestCareContext);
-
-  function pickType(id: string, name: string, minutes: number) {
-    setChosenType({ name, minutes });
-    void sendPrompt(name, { type: "booking_selection", field: "appointment_type", value: id });
+  function flashStaleNotice() {
+    setStaleNotice(true);
+    if (staleTimer.current) clearTimeout(staleTimer.current);
+    staleTimer.current = setTimeout(() => setStaleNotice(false), 4500);
   }
 
-  function pickMode(mode: string, label: string) {
-    void sendPrompt(label, { type: "booking_selection", field: "consultation_mode", value: mode });
-  }
-
-  function sendSelection(text: string, selection: BookingSelection) {
-    if (selection.field === "appointment_type") {
-      const m = messages.flatMap((msg) => msg.appointmentTypes ?? []).find((t) => t.id === selection.value);
-      if (m) setChosenType({ name: m.name, minutes: m.duration_minutes });
+  function handleChatAction(req: ChatActionRequest): boolean {
+    const latestAi = [...messages].reverse().find((m) => m.from === "ai" && !m.id.startsWith("e-"));
+    if (!latestAi || (latestAi.messageId && req.messageId !== latestAi.messageId)) {
+      flashStaleNotice();
+      return false;
     }
-    void sendPrompt(text, selection);
+    if (
+      req.stateRevision != null &&
+      latestAi.stateRevision != null &&
+      req.stateRevision < latestAi.stateRevision
+    ) {
+      flashStaleNotice();
+      return false;
+    }
+    if (thinking) return false;
+    let selection: BookingSelection | null = null;
+    if (req.selection) {
+      selection = {
+        ...req.selection,
+        message_id: req.messageId,
+        state_revision: req.stateRevision ?? null,
+        widget_id: req.widgetId,
+      };
+      if (selection.field === "appointment_type") {
+        const m = messages.flatMap((msg) => msg.appointmentTypes ?? []).find((t) => t.id === selection!.value);
+        if (m) setChosenType({ name: m.name, minutes: m.duration_minutes });
+      }
+    }
+    void sendPrompt(req.text, selection);
+    return true;
   }
+
+  // Latest content-bearing assistant message owns the active widgets.
+  const activeAiId = [...messages].reverse().find((m) => m.from === "ai" && !m.id.startsWith("e-"))?.id;
 
   return (
     <div className="flex flex-col h-[calc(100dvh-64px)]">
@@ -207,6 +272,23 @@ export default function ChatPage() {
             <p className="font-bold text-navy text-[0.9rem] leading-tight truncate">CareFlow</p>
             <p className="text-ink-faint text-[0.72rem] leading-tight">Online · remembers your profile &amp; location</p>
           </div>
+          <button
+            onClick={() => setHistoryOpen((v) => !v)}
+            title="Chat history"
+            aria-label="Chat history"
+            aria-pressed={historyOpen}
+            className="w-8 h-8 rounded-full flex items-center justify-center text-ink-secondary hover:text-healthcare hover:bg-background transition shrink-0"
+          >
+            <History size={16} />
+          </button>
+          <button
+            onClick={newChat}
+            title="Start a new chat"
+            aria-label="Start a new chat"
+            className="inline-flex items-center gap-1 text-[0.72rem] font-bold text-navy bg-background border border-border rounded-full px-2.5 py-1.5 hover:border-healthcare hover:text-healthcare transition shrink-0"
+          >
+            <Plus size={13} /> New chat
+          </button>
           {liveGeo ? (
             <span className="inline-flex items-center gap-1.5 text-[0.72rem] font-bold text-teal-dark bg-teal-soft/70 border border-teal/25 rounded-full pl-2.5 pr-1.5 py-1">
               📍 {liveGeo.latitude.toFixed(2)}, {liveGeo.longitude.toFixed(2)}
@@ -244,7 +326,70 @@ export default function ChatPage() {
       </div>
 
       {/* Messages + persistent care-context panel (ChatShell) */}
-      <div className="flex-1 overflow-y-auto" aria-live="polite">
+      <div className="flex-1 overflow-y-auto relative" aria-live="polite">
+        {/* Conversation history sidebar */}
+        {historyOpen && (
+          <div
+            className="absolute inset-y-0 left-0 z-20 w-72 max-w-[85%] bg-white border-r border-border shadow-card flex flex-col"
+            role="dialog"
+            aria-label="Chat history"
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <p className="font-bold text-navy text-[0.88rem]">Chat history</p>
+              <button
+                onClick={() => setHistoryOpen(false)}
+                aria-label="Close chat history"
+                className="w-7 h-7 rounded-full flex items-center justify-center text-ink-faint hover:text-healthcare hover:bg-background transition"
+              >
+                <X size={15} />
+              </button>
+            </div>
+            <div className="p-3 border-b border-border">
+              <button
+                onClick={newChat}
+                className="w-full inline-flex items-center justify-center gap-1.5 text-[0.82rem] font-bold bg-navy text-white rounded-control px-3 py-2 hover:bg-healthcare transition"
+              >
+                <Plus size={14} /> New chat
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              {history.length === 0 && (
+                <p className="text-[0.8rem] text-ink-faint px-3 py-4 text-center">
+                  No saved chats yet — your conversations will appear here.
+                </p>
+              )}
+              {history.map((c) => (
+                <div
+                  key={c.id}
+                  className={`group flex items-center gap-1 rounded-control px-2 py-2 transition ${
+                    c.id === conversationId ? "bg-healthcare-faint border border-healthcare/30" : "hover:bg-background border border-transparent"
+                  }`}
+                >
+                  <button
+                    onClick={() => openChat(c.id)}
+                    className="flex-1 min-w-0 text-left"
+                    title={c.title}
+                  >
+                    <span className="block text-[0.82rem] font-semibold text-navy truncate">{c.title}</span>
+                    <span className="block text-[0.7rem] text-ink-faint">
+                      {new Date(c.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      {" · "}
+                      {new Date(c.updatedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => removeChat(c.id)}
+                    title="Delete this chat"
+                    aria-label={`Delete chat: ${c.title}`}
+                    className="w-7 h-7 rounded-full hidden group-hover:flex items-center justify-center text-ink-faint hover:text-danger hover:bg-background transition shrink-0"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 flex gap-6 items-start">
           <div className="flex-1 min-w-0 space-y-6">
           {savedGeo && !liveGeo && (
@@ -264,61 +409,33 @@ export default function ChatPage() {
               for exact nearby results.
             </p>
           )}
+          {staleNotice && (
+            <p role="alert" className="text-center text-[0.76rem] font-semibold text-navy bg-healthcare-faint border border-healthcare/30 rounded-control px-3 py-2">
+              That selection is from an earlier step — it wasn&apos;t changed. Please use the latest message below.
+            </p>
+          )}
           {messages.map((m) => (
             <ChatBubble
               key={m.id}
               message={m}
+              active={m.from !== "ai" || m.id === activeAiId}
+              onAction={(widgetId, action, text, selection) =>
+                handleChatAction({
+                  messageId: m.messageId ?? m.id,
+                  widgetId,
+                  action,
+                  text,
+                  selection: selection ?? null,
+                  stateRevision: m.stateRevision ?? null,
+                })
+              }
               onSend={(text) => void sendPrompt(text)}
-              onSelect={(text, selection) => sendSelection(text, selection)}
-              onPickType={(id, name, minutes) => pickType(id, name, minutes)}
-              onPickMode={(mode, label) => pickMode(mode, label)}
               daySlotMinutes={chosenType?.minutes ?? null}
             />
           ))}
           {thinking && <TypingIndicator name="CareFlow is typing…" />}
           <div ref={bottomRef} />
           </div>
-          {/* CareContextPanel — persistent, user-visible summary (desktop) */}
-          <aside className="hidden lg:block w-64 shrink-0 sticky top-4" aria-label="Your care request">
-            <div className="bg-white border border-border rounded-card p-4 shadow-subtle">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-[0.74rem] font-extrabold tracking-wide text-ink-secondary uppercase">Your care request</p>
-                <button
-                  type="button"
-                  onClick={() => void sendPrompt("I want to edit my preferences")}
-                  className="text-[0.74rem] font-bold text-healthcare hover:underline"
-                >
-                  Edit
-                </button>
-              </div>
-              {panelEntries.length === 0 ? (
-                <p className="text-[0.78rem] text-ink-faint leading-relaxed">
-                  Tell me what you need — I&apos;ll keep track of your preferences here.
-                </p>
-              ) : (
-                <dl className="space-y-1.5">
-                  {panelEntries.map((e) => (
-                    <div key={e.label} className="flex gap-2 text-[0.8rem]">
-                      <dt className="text-ink-faint font-semibold min-w-[84px]">{e.label}</dt>
-                      <dd className="text-navy font-semibold truncate">{e.value}</dd>
-                    </div>
-                  ))}
-                </dl>
-              )}
-              <div className="flex flex-wrap gap-1.5 mt-3">
-                {["Start over", "Show more", "Compare these"].map((label) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => void sendPrompt(label)}
-                    className="text-[0.72rem] font-bold border border-border rounded-full px-2.5 py-1 text-ink-secondary hover:border-healthcare hover:text-healthcare transition"
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </aside>
         </div>
       </div>
 
@@ -336,18 +453,6 @@ export default function ChatPage() {
                   {p}
                 </button>
               ))}
-            </div>
-          )}
-          {speechSupported && isSpeaking && (
-            <div className="flex justify-center pb-2">
-              <button
-                type="button"
-                onClick={stopSpeaking}
-                aria-label="Stop voice"
-                className="inline-flex items-center gap-1.5 text-[0.76rem] font-bold border border-border bg-white rounded-full px-3 py-1.5 text-ink-secondary hover:border-healthcare hover:text-healthcare transition"
-              >
-                <Square size={13} /> Stop voice
-              </button>
             </div>
           )}
           <form

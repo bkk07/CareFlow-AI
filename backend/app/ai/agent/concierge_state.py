@@ -46,6 +46,8 @@ STAGES = (
 INTENTS = (
     "FIND_CARE",
     "BOOK_APPOINTMENT",
+    "COMPARE_DOCTORS",
+    "SHOW_BOOKING_SUMMARY",
     "MANAGE_APPOINTMENT",
     "RESCHEDULE",
     "CANCEL",
@@ -53,6 +55,11 @@ INTENTS = (
     "GENERAL_HELP",
     "ESCALATE",
 )
+
+#: Turn-scoped conversational actions: handled deterministically inside
+#: the turn and never stored as the sticky context.intent (the underlying
+#: FIND_CARE/BOOK_APPOINTMENT flow stays intact across them).
+TURN_ACTIONS = ("COMPARE_DOCTORS", "SHOW_BOOKING_SUMMARY")
 
 # -- UI surfaces (frontend contract; backend never sends impl details) ------
 SURFACES = (
@@ -128,11 +135,37 @@ _CONCERN_HINTS = re.compile(
 )
 
 
+def detect_summary_request(text: str) -> bool:
+    """Explicit booking-summary command (P6): never improvised prose."""
+    s = (text or "").strip().lower()
+    if not s:
+        return False
+    return bool(
+        re.search(
+            r"\bsummar\w*\b"
+            r"|\beverything about\b.{0,20}\b(appointment|booking|visit)\b"
+            r"|\ball the things\b"
+            r"|\bwhat[’']?s (currently|already) selected\b"
+            r"|\bwhat is (currently|already) selected\b"
+            r"|\bcurrent(ly)? selected\b|\bcurrent selection\b"
+            r"|\bwhat (have|do) you (have|know|got)\b"
+            r"|\bstatus of\b.{0,20}\b(appointment|booking|visit)\b"
+            r"|\bshow\b.{0,20}\b(appointment|booking) (summary|details)\b"
+            r"|\b(appointment|booking) (summary|details)\b",
+            s,
+        )
+    )
+
+
 def detect_intent(text: str, context: Any = None) -> str:
     """Best-effort intent from a single message (context refines it)."""
     s = (text or "").strip().lower()
     if not s:
         return "GENERAL_HELP"
+    if detect_compare_request(text):
+        return "COMPARE_DOCTORS"
+    if detect_summary_request(text):
+        return "SHOW_BOOKING_SUMMARY"
     if re.search(r"\breschedul\w*|\bmove (it|my|the)|\bchange (the )?(time|date|day|slot)\b", s):
         return "RESCHEDULE"
     if re.search(r"\bcancel(?! that| it| this\b.{0,10}$)|cancell?ation\b", s) and re.search(
@@ -236,10 +269,150 @@ def detect_explore_more(text: str) -> bool:
         re.search(
             r"\b(show me more|show more|more (doctors|options|choices)|"
             r"other doctors|another doctor|show me another|next( page| ones)?|"
-            r"explore more)\b",
+            r"explore more|someone else|different doctor|other options?)\b",
             s,
         )
     )
+
+
+_ORDINAL_INDEX = {
+    "first": 0, "1st": 0,
+    "second": 1, "2nd": 1,
+    "third": 2, "3rd": 2,
+    "fourth": 3, "4th": 3,
+    "fifth": 4, "5th": 4,
+}
+
+
+def _displayed_doctor_pool(context: Any) -> list[dict[str, Any]]:
+    """Doctors the patient is looking at right now (current page first)."""
+    page_ids = [str(i) for i in (getattr(context, "offered_doctor_page", None) or [])]
+    offered = [
+        d for d in (getattr(context, "offered_doctors", None) or [])
+        if isinstance(d, dict) and d.get("id")
+    ]
+    if page_ids:
+        by_id = {str(d.get("id")): d for d in offered}
+        pool = [by_id[i] for i in page_ids if i in by_id]
+        if pool:
+            return pool
+    return offered[:5]
+
+
+def _norm_doc_name(value: str) -> str:
+    text = (value or "").strip().lower()
+    text = re.sub(r"^dr\.?\s+", "", text)
+    return re.sub(r"\s+", " ", text)
+
+
+def resolve_compare_ids(context: Any, text: str) -> list[str]:
+    """Which displayed doctors to compare (P3 — deterministic, id-only).
+
+    Resolves named references ("compare Bandaru Kiran and Dr E2E") and
+    positional references ("the first and third doctors") against the
+    CURRENTLY displayed doctors. Falls back to the whole displayed page
+    (up to 3) for a bare "compare them". Never invents ids.
+    """
+    pool = _displayed_doctor_pool(context)
+    if not pool:
+        return []
+    lowered = f" {(text or '').strip().lower()} "
+    picked: list[str] = []
+
+    # Positional references first ("first and third", "1st, 2nd").
+    for word, idx in sorted(_ORDINAL_INDEX.items(), key=lambda kv: -len(kv[0])):
+        if re.search(rf"\b{re.escape(word)}\b", lowered) and 0 <= idx < len(pool):
+            did = str(pool[idx].get("id"))
+            if did and did not in picked:
+                picked.append(did)
+
+    # Named references, longest names first ("Bandaru Kiran" beats "Kiran").
+    for d in sorted(pool, key=lambda d: len(_norm_doc_name(str(d.get("name", "")))), reverse=True):
+        name = _norm_doc_name(str(d.get("name", "")))
+        if len(name) >= 3 and name in lowered:
+            did = str(d.get("id"))
+            if did not in picked:
+                picked.append(did)
+    # Distinctive single tokens owned by exactly one displayed doctor.
+    if len(picked) < 2:
+        owners: dict[str, str] = {}
+        ambiguous: set[str] = set()
+        for d in pool:
+            for token in _norm_doc_name(str(d.get("name", ""))).split():
+                if len(token) < 4:
+                    continue
+                if token in owners:
+                    ambiguous.add(token)
+                owners[token] = str(d.get("id"))
+        for word in sorted(set(re.findall(r"[a-z]{4,}", lowered))):
+            if word in owners and word not in ambiguous and owners[word] not in picked:
+                picked.append(owners[word])
+
+    if not picked:
+        # Bare "compare them": the whole displayed set, up to 3.
+        picked = [str(d.get("id")) for d in pool[:3]]
+    return picked[:3]
+
+
+def build_booking_summary(context: Any) -> dict[str, Any]:
+    """Structured pending-booking snapshot (P6 — facts only, never prose).
+
+    Reads canonical AIContext fields only (P9: state is the source of
+    truth; the LLM never reconstructs this from transcript). Missing
+    fields are reported explicitly so the UI can show "not ready" plus
+    targeted [Change] actions instead of a casual sentence.
+    """
+    pending = dict(getattr(context, "pending_booking", None) or {})
+    slot_start = getattr(context, "selected_start", None) or pending.get("slot_start")
+    slot_end = getattr(context, "selected_end", None) or pending.get("slot_end")
+    missing: list[str] = []
+    if not getattr(context, "selected_doctor_id", None):
+        missing.append("doctor")
+    if not getattr(context, "selected_date", None):
+        missing.append("date")
+    if not getattr(context, "selected_appointment_type_id", None):
+        missing.append("visit_type")
+    if not getattr(context, "selected_consultation_mode", None):
+        missing.append("consultation_mode")
+    if not slot_start or not slot_end:
+        missing.append("time")
+    if getattr(context, "awaiting_confirmation", False):
+        status = "Awaiting your confirmation"
+    elif getattr(context, "last_appointment_id", None) and not missing:
+        status = "Booked"
+    elif missing:
+        status = "Not ready to book"
+    else:
+        status = "Ready to book"
+    changes = [
+        {"id": "change_doctor", "label": "Change doctor", "prompt": "Change doctor, keeping everything else the same."},
+        {"id": "change_date", "label": "Change date", "prompt": "Change the date, keeping everything else the same."},
+        {"id": "change_visit_type", "label": "Change visit type", "prompt": "Change the visit type, keeping everything else the same."},
+        {"id": "change_mode", "label": "Change mode", "prompt": "Change the consultation mode, keeping everything else the same."},
+        {"id": "change_time", "label": "Change time", "prompt": "Change the time, keeping everything else the same."},
+    ]
+    return {
+        "doctor": {
+            "id": getattr(context, "selected_doctor_id", None),
+            "name": getattr(context, "selected_doctor_name", None),
+        },
+        "hospital": {
+            "id": getattr(context, "selected_hospital_id", None),
+            "name": getattr(context, "selected_hospital_name", None),
+        },
+        "date": getattr(context, "selected_date", None),
+        "visit_type": {
+            "id": getattr(context, "selected_appointment_type_id", None),
+            "name": getattr(context, "visit_type_name", None),
+            "duration_minutes": getattr(context, "duration_minutes", None),
+        },
+        "consultation_mode": getattr(context, "selected_consultation_mode", None),
+        "slot": {"start": slot_start, "end": slot_end},
+        "status": status,
+        "missing": missing,
+        "can_confirm": not missing,
+        "changes": changes,
+    }
 
 
 def detect_show_another(text: str) -> bool:
@@ -264,34 +437,71 @@ def detect_edit_preferences(text: str) -> bool:
     )
 
 
+_WEEKDAY_WORDS = (
+    r"monday|tuesday|wednesday|thursday|friday|saturday|sunday"
+    r"|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun"
+)
+
+_GOBACK_STAGE = (
+    ("doctor", re.compile(r"\bdoctor\b|\bhospital\b")),
+    ("date", re.compile(r"\bdate\b|\bday\b|\btime\b|\bslot\b|\bschedule\b")),
+    ("visit_type", re.compile(r"\bvisit\b|\btype\b|\bpurpose\b")),
+    ("consultation_mode", re.compile(r"\bmode\b|\bvideo\b|\bphone\b|\bin[\s-]?person\b")),
+)
+
+
 def detect_change_request(text: str) -> str | None:
-    """'change doctor/time/hospital/mode/type/date' -> which field, else None."""
+    """Field-level edit commands (P8) -> canonical target, else None.
+
+    Covers: "change X", "make it tomorrow", "change it to 11:00",
+    "tomorrow instead", "morning is better", "video is fine",
+    "keep everything else the same" (-> "keep": explicit no-op),
+    "go back to <stage>" (-> "goback_<field>").
+    """
     s = (text or "").strip().lower()
+    if re.search(r"\bkeep everything else\b|\bkeep\b.{0,15}\bthe same\b", s):
+        return "keep"
+    m = re.search(r"\bgo back to\b.{0,30}", s)
+    if m:
+        tail = m.group(0)
+        for field, pattern in _GOBACK_STAGE:
+            if pattern.search(tail):
+                return f"goback_{field}"
+        return "goback_doctor"
     m = re.search(
         r"\bchange\b.{0,20}\b(doctor|time|slot|hospital|mode|video|in[\s-]?person|phone|type|visit|date|day)\b",
         s,
     )
-    if not m:
-        # "tomorrow instead", "morning is better", "video is fine"
-        if re.search(r"\binstead\b|\bbetter\b|\bis fine\b|\bworks\b", s):
-            if re.search(r"\bmorning\b|\bafternoon\b|\bevening\b", s):
-                return "time_range"
-            if re.search(r"\bvideo\b|\bphone\b|\bin[\s-]?person\b", s):
-                return "consultation_mode"
-            if re.search(r"\btomorrow\b|\btoday\b|\bmonday\b|\btuesday\b|\bwednesday\b"
-                         r"|\bthursday\b|\bfriday\b|\bsaturday\b|\bsunday\b", s):
-                return "date"
-        return None
-    word = m.group(1)
-    if word in ("time", "slot"):
-        return "time_range"
-    if word in ("video", "phone") or "person" in word or word == "mode":
-        return "consultation_mode"
-    if word in ("type", "visit"):
-        return "visit_type"
-    if word in ("date", "day"):
-        return "date"
-    return word  # doctor | hospital
+    if m:
+        word = m.group(1)
+        if word in ("time", "slot"):
+            return "time_range"
+        if word in ("video", "phone") or "person" in word or word == "mode":
+            return "consultation_mode"
+        if word in ("type", "visit"):
+            return "visit_type"
+        if word in ("date", "day"):
+            return "date"
+        return word  # doctor | hospital
+    # "make it tomorrow" / "change it to 11:00" (no literal "change X").
+    if re.search(r"\bmake it\b|\bmove it to\b|\bchange it to\b", s):
+        if re.search(rf"\b(tomorrow|today|day after tomorrow|{_WEEKDAY_WORDS})\b", s):
+            return "date"
+        if re.search(r"\bmorning\b|\bafternoon\b|\bevening\b|\bnight\b", s):
+            return "time_range"
+        if re.search(r"\bvideo\b|\bphone\b|\bin[\s-]?person\b", s):
+            return "consultation_mode"
+        if re.search(r"\b\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)?\b", s):
+            return "start_time"
+    # "tomorrow instead", "morning is better", "video is fine"
+    if re.search(r"\binstead\b|\bbetter\b|\bis fine\b|\bworks\b", s):
+        if re.search(r"\bmorning\b|\bafternoon\b|\bevening\b", s):
+            return "time_range"
+        if re.search(r"\bvideo\b|\bphone\b|\bin[\s-]?person\b", s):
+            return "consultation_mode"
+        if re.search(rf"\b(tomorrow|today|{_WEEKDAY_WORDS})\b", s):
+            return "date"
+    return None
 
 
 def detect_unsure(text: str) -> bool:
@@ -329,7 +539,11 @@ def update_concierge_context(context: Any, text: str) -> dict[str, Any]:
         return changed
 
     intent = detect_intent(s, context)
-    if intent != getattr(context, "intent", None):
+    if intent in TURN_ACTIONS:
+        # Turn-scoped actions (compare/summary) are reported, not stored:
+        # the sticky FIND_CARE/BOOK_APPOINTMENT flow underneath survives.
+        changed["intent"] = intent
+    elif intent != getattr(context, "intent", None):
         # Escalate/cancel/reschedule intents always win; FIND_CARE must
         # not clobber an in-flight booking intent mid-flow.
         current = str(getattr(context, "intent", None) or "")
@@ -599,6 +813,9 @@ __all__ = [
     "detect_unsure",
     "filter_slots_by_time_range",
     "map_booking_stage_to_concierge",
+    "build_booking_summary",
+    "detect_summary_request",
     "quick_replies_for",
+    "resolve_compare_ids",
     "update_concierge_context",
 ]

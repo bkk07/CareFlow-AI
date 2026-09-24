@@ -222,6 +222,23 @@ export interface ChatMessage {
     appointment_id: string | null;
     consultation_mode?: string | null;
   } | null;
+  /** Backend message id scoping this message's widgets (P4 versioning). */
+  messageId?: string | null;
+  /** Booking-state revision this message's widgets were built against. */
+  stateRevision?: number | null;
+  /** Structured pending-booking snapshot with [Change] actions (P6). */
+  bookingSummary?: {
+    doctor: { id: string | null; name: string | null };
+    hospital: { id: string | null; name: string | null };
+    date: string | null;
+    visit_type: { id: string | null; name: string | null; duration_minutes: number | null };
+    consultation_mode: string | null;
+    slot: { start: string | null; end: string | null };
+    status: string;
+    missing: string[];
+    can_confirm: boolean;
+    changes: { id: string; label: string; prompt: string }[];
+  } | null;
 }
 
 export interface PatientProfile {

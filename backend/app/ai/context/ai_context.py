@@ -92,6 +92,14 @@ class AIContext(BaseModel):
     pending_booking: dict[str, Any] | None = None
     awaiting_confirmation: bool = False
     last_appointment_id: str | None = None
+    # --- Booking-state versioning (P4/P9) ---------------------------------
+    # Monotonic edit counter, bumped by update_booking_field() on every
+    # booking mutation. Each assistant reply carries the revision its
+    # widgets were built against (see ChatOut.message_id/state_revision);
+    # a tap arriving with an older revision is stale and never mutates.
+    state_revision: int = 0
+    # Message id of the last assistant reply (widgets are scoped to it).
+    last_message_id: str | None = None
     # --- Concierge layer (additive; all optional so old payloads load) ---
     # High-level conversational understanding. The LLM never invents
     # business truth; these fields only track what the patient SAID plus

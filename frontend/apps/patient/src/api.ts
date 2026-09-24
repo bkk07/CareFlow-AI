@@ -1,9 +1,14 @@
 import axios from "axios";
 
-const baseURL =
-  (import.meta.env.VITE_API_URL as string | undefined) ??
-  // Production fallback: a build without VITE_API_URL still hits prod.
-  "https://careflow-ai-production.up.railway.app";
+const _viteApiUrl = import.meta.env.VITE_API_URL as string | undefined;
+if (!_viteApiUrl && !import.meta.env.DEV) {
+  throw new Error(
+    "VITE_API_URL is not configured. Set it to the backend base URL (e.g. https://<backend-host>).",
+  );
+}
+// Local development default (matches .env.example). Production builds
+// must provide VITE_API_URL — see the check above.
+const baseURL = _viteApiUrl ?? "http://localhost:8000";
 
 export const api = axios.create({ baseURL });
 
@@ -566,13 +571,50 @@ export interface ChatDaySchedule {
 
 export type BookingStage = "browse" | "pick_date" | "pick_type" | "pick_mode" | "pick_time" | "confirm";
 
-/** Typed tap (§12): updates the same canonical state a spoken phrase
+/** Typed tap (§12, P4): updates the same canonical state a spoken phrase
  * would. Field: hospital | doctor | appointment_type | date |
- * start_time | consultation_mode. */
+ * start_time | consultation_mode.
+ * Widget identity: message_id + state_revision pin the tap to the exact
+ * reply whose widget produced it. A tap citing an older revision is stale
+ * and the backend rejects it WITHOUT mutating booking state. */
 export interface BookingSelection {
   type: "booking_selection";
   field: string;
   value: string;
+  message_id?: string | null;
+  state_revision?: number | null;
+  widget_id?: string | null;
+}
+
+/** Central chat-action envelope (P4/P10): every interactive widget
+ * dispatches through handleChatAction, never through ad-hoc global
+ * mutations. */
+export interface ChatActionRequest {
+  messageId: string;
+  widgetId: string;
+  action: string;
+  text: string;
+  selection?: BookingSelection | null;
+  stateRevision?: number | null;
+}
+
+export interface BookingSummaryChange {
+  id: string;
+  label: string;
+  prompt: string;
+}
+
+export interface ChatBookingSummary {
+  doctor: { id: string | null; name: string | null };
+  hospital: { id: string | null; name: string | null };
+  date: string | null;
+  visit_type: { id: string | null; name: string | null; duration_minutes: number | null };
+  consultation_mode: string | null;
+  slot: { start: string | null; end: string | null };
+  status: string;
+  missing: string[];
+  can_confirm: boolean;
+  changes: BookingSummaryChange[];
 }
 
 export interface ChatHospital {
@@ -601,6 +643,9 @@ export interface ChatReply {
   consultation_modes: string[];
   booking_stage: BookingStage;
   pending_booking: ChatPendingBooking | null;
+  booking_summary?: ChatBookingSummary | null;
+  message_id?: string | null;
+  state_revision?: number;
   surface?: ChatSurface;
   title?: string | null;
   allow_explore_more?: boolean;

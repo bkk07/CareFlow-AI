@@ -17,14 +17,22 @@ _chatter = require_role(Role.patient, Role.hospital_admin)
 
 
 class BookingSelectionIn(BaseModel):
-    """Typed frontend tap (§12): {"type": "booking_selection",
+    """Typed frontend tap (§12, P4): {"type": "booking_selection",
     "field": hospital|doctor|appointment_type|date|start_time|
     consultation_mode, "value": ...}. Updates the same canonical state a
-    spoken phrase would — never re-parsed as free text."""
+    spoken phrase would — never re-parsed as free text.
+
+    Widget identity (all optional so older frontends keep working):
+    message_id + state_revision pin the tap to the exact reply whose
+    widget produced it. A tap citing an older revision is stale and is
+    rejected WITHOUT mutating booking state."""
 
     type: str = "booking_selection"
     field: str
     value: str
+    message_id: str | None = None
+    state_revision: int | None = None
+    widget_id: str | None = None
 
 
 class ChatIn(BaseModel):
@@ -85,12 +93,32 @@ class HospitalOut(BaseModel):
     name: str | None = None
 
 
+class BookingSummaryOut(BaseModel):
+    """Structured pending-booking snapshot (P6): facts only, never prose."""
+
+    doctor: dict | None = None
+    hospital: dict | None = None
+    date: str | None = None
+    visit_type: dict | None = None
+    consultation_mode: str | None = None
+    slot: dict | None = None
+    status: str = "Not ready to book"
+    missing: list[str] = []
+    can_confirm: bool = False
+    changes: list[dict] = []
+
+
 class ChatOut(BaseModel):
     conversation_id: str
     reply: str
     iterations: int
     escalated: bool
     stopped: bool = False
+    # Widget versioning (P4/P9): every interactive widget in this reply
+    # belongs to message_id @ state_revision. Taps citing anything older
+    # are stale and rejected without mutating state.
+    message_id: str | None = None
+    state_revision: int = 0
     # Phase 2 canonical snapshot (§19): structured values, never inferred
     # from prose. All optional so older frontends keep working.
     hospital: HospitalOut | None = None
@@ -108,6 +136,7 @@ class ChatOut(BaseModel):
     consultation_modes: list[str] = []
     booking_stage: str = "browse"
     pending_booking: PendingBookingOut | None = None
+    booking_summary: BookingSummaryOut | None = None
     # --- Concierge experience contract (all optional, backward compatible).
     # message/experience/state/data/actions mirror the spec §11; the flat
     # fields above stay as the legacy rendering path. New frontends prefer

@@ -5,8 +5,9 @@ import { consultationModeLabel } from "../../lib/helpers";
 import { doctorImage } from "../../lib/images";
 import { Button, SafeImage, StatusBadge } from "../common/ui";
 import { Modal } from "../common/Modal";
-import { AppointmentTimeline } from "./AppointmentCard";
+import { AppointmentTimeline, QuestionnaireStrip } from "./AppointmentCard";
 import { useEffect, useState } from "react";
+import type { QuestionnaireStatus } from "../../lib/questionnaires";
 
 export function AppointmentDetailModal({
   appointment,
@@ -14,12 +15,16 @@ export function AppointmentDetailModal({
   onClose,
   onReschedule,
   onCancel,
+  questionnaire,
+  onQuestionnaire,
 }: {
   appointment: Appointment | null;
   open: boolean;
   onClose: () => void;
   onReschedule?: (a: Appointment) => void;
   onCancel?: (a: Appointment) => void;
+  questionnaire?: QuestionnaireStatus | null;
+  onQuestionnaire?: (a: Appointment) => void;
 }) {
   if (!appointment) return null;
   const live = ["confirmed", "pending", "rescheduled", "sync_pending"].includes(appointment.status);
@@ -64,6 +69,10 @@ export function AppointmentDetailModal({
         <h4 className="font-bold text-ink text-sm">Progress</h4>
         <AppointmentTimeline stage={appointment.verificationStage} />
       </div>
+
+      {questionnaire?.hasForm && onQuestionnaire && (
+        <QuestionnaireStrip status={questionnaire} onOpen={() => onQuestionnaire(appointment)} />
+      )}
 
       <div className="flex flex-wrap gap-2 mt-4">
         {live && onReschedule && <Button variant="outline" size="sm" onClick={() => onReschedule(appointment)}>Reschedule</Button>}

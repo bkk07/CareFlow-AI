@@ -7,11 +7,23 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
-import type { ChatMessage } from "../../types";
+import type { ChatMessage, Doctor } from "../../types";
 import type { BookingSelection } from "../../api";
-import { formatSlotDate, formatSlotTime } from "../../lib/backend";
+import { searchDoctors } from "../../api";
+
+/** Central widget dispatch (P4/P10): interactive widgets never mutate
+ *  booking state directly — every tap routes through the page-level
+ *  handleChatAction with full widget identity. */
+export type WidgetDispatch = (
+  widgetId: string,
+  action: string,
+  text: string,
+  selection?: BookingSelection | null,
+) => void;
+import { formatSlotDate, formatSlotTime, mapDoctorResult } from "../../lib/backend";
 import { doctorImage } from "../../lib/images";
 import { Button, SafeImage } from "../common/ui";
+import { DoctorProfileModal } from "../doctor/DoctorProfileModal";
 
 /** AI replies are markdown (+ LaTeX math); patient messages stay plain text. */
 function AssistantMarkdown({ text }: { text: string }) {
@@ -33,8 +45,16 @@ function AssistantMarkdown({ text }: { text: string }) {
   );
 }
 
-export function ChatBubble({ message, onSend, onSelect, onPickType, onPickMode, daySlotMinutes }: {
+export function ChatBubble({ message, active, onAction, onSend, onSelect, onPickType, onPickMode, daySlotMinutes }: {
   message: ChatMessage;
+  /** False for every historical message: its widgets render completed and
+   *  disabled, so an old tap can never silently mutate current state (P4).
+   *  Only the latest assistant message owns the authoritative selector. */
+  active?: boolean;
+  /** Central dispatcher (P4/P10). When provided, ALL widget taps route
+   *  through it with widget identity; legacy onSend/onSelect still work
+   *  as a fallback. */
+  onAction?: WidgetDispatch;
   onSend?: (text: string) => void;
   /** Typed tap: text for the transcript + selection for canonical state. */
   onSelect?: (text: string, selection: BookingSelection) => void;
@@ -45,11 +65,29 @@ export function ChatBubble({ message, onSend, onSelect, onPickType, onPickMode, 
   /** Chosen visit length — day slots that can't fit it render taken. */
   daySlotMinutes?: number | null;
 }) {
+  const isActive = active !== false;
+  const sendFor = (widgetId: string, action: string) => (text: string, selection?: BookingSelection) => {
+    if (onAction) onAction(widgetId, action, text, selection ?? null);
+    else if (selection && onSelect) onSelect(text, selection);
+    else onSend?.(text);
+  };
   const send = (text: string, selection?: BookingSelection) => {
     if (selection && onSelect) onSelect(text, selection);
     else onSend?.(text);
   };
   const isPatient = message.from === "patient";
+  const hasWidgets = Boolean(
+    (message.doctors && message.doctors.length > 0) ||
+    (message.compare && (message.compare.doctors?.length ?? 0) >= 2) ||
+    (message.slots && message.slots.length > 0) ||
+    (message.appointmentTypes && message.appointmentTypes.length > 0) ||
+    (message.consultationModes && message.consultationModes.length > 0) ||
+    message.daySchedule ||
+    message.bookingStage === "pick_date" ||
+    message.pendingBooking ||
+    message.bookingSummary ||
+    (message.filterChoices && message.filterChoices.length > 0)
+  );
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -78,19 +116,30 @@ export function ChatBubble({ message, onSend, onSelect, onPickType, onPickMode, 
         {message.careContext && !isPatient && (
           <CareContextCard context={message.careContext} onSend={onSend} />
         )}
+        {!isActive && !isPatient && hasWidgets && (
+          <p className="mt-2 text-[0.7rem] font-semibold text-ink-faint" aria-label="Completed step">
+            From an earlier step — completed
+          </p>
+        )}
         {message.doctors && message.doctors.length > 0 && (
           <div className="mt-2.5 space-y-2 text-left">
             {message.title && (
               <p className="text-[0.8rem] font-bold text-navy">{message.title}</p>
             )}
             {message.doctors.map((d) => (
-              <LiveDoctorCard key={d.id} doctor={d} onSelect={send} />
+              <LiveDoctorCard
+                key={d.id}
+                doctor={d}
+                disabled={!isActive}
+                onSelect={onAction ? sendFor(`doctor:${d.id}`, "select-doctor") : send}
+              />
             ))}
             {message.allowCompare && message.doctors.length > 1 && (
               <button
                 type="button"
-                onClick={() => onSend?.("Compare them")}
-                className="w-full text-[0.8rem] font-bold text-navy bg-white border border-border rounded-control px-3 py-2 hover:border-healthcare transition"
+                disabled={!isActive}
+                onClick={() => (onAction ? onAction("compare-all", "reply", "Compare them") : onSend?.("Compare them"))}
+                className="w-full text-[0.8rem] font-bold text-navy bg-white border border-border rounded-control px-3 py-2 hover:border-healthcare transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Compare these doctors
               </button>
@@ -99,45 +148,97 @@ export function ChatBubble({ message, onSend, onSelect, onPickType, onPickMode, 
               <MoreDoctorsButton
                 total={message.doctorsTotal ?? 0}
                 shown={message.doctors.length}
-                onSend={onSend}
+                disabled={!isActive}
+                onSend={onAction ? (text) => onAction("more-doctors", "reply", text) : onSend}
               />
             )}
           </div>
         )}
         {message.compare && (message.compare.doctors?.length ?? 0) >= 2 && (
-          <DoctorCompare compare={message.compare} onSelect={send} />
+          <DoctorCompare
+            compare={message.compare}
+            disabled={!isActive}
+            onSelect={onAction ? (text, selection) => onAction(`compare:${selection.value}`, "select-doctor", text, selection) : send}
+          />
         )}
         {message.slots && message.slots.length > 0 && (
-          <SlotChips slots={message.slots} onSend={onSend} onSelect={send} />
+          <SlotChips
+            slots={message.slots}
+            disabled={!isActive}
+            onSend={onSend}
+            onSelect={onAction ? sendFor("slot-chips", "select-slot") : send}
+          />
         )}
         {message.appointmentTypes && message.appointmentTypes.length > 0 && (
-          <TypeSelect types={message.appointmentTypes} onPick={onPickType} onSend={onSend} onSelect={send} />
+          <TypeSelect
+            types={message.appointmentTypes}
+            disabled={!isActive}
+            onPick={onPickType}
+            onSend={onSend}
+            onSelect={onAction ? sendFor("visit-type", "select-type") : send}
+          />
         )}
         {message.consultationModes && message.consultationModes.length > 0 && (
-          <ModeChips modes={message.consultationModes} onPick={onPickMode} onSend={onSend} onSelect={send} />
+          <ModeChips
+            modes={message.consultationModes}
+            disabled={!isActive}
+            onPick={onPickMode}
+            onSend={onSend}
+            onSelect={onAction ? sendFor("consult-mode", "select-mode") : send}
+          />
         )}
         {message.daySchedule && (
           <DaySlots
             schedule={message.daySchedule}
             durationMinutes={daySlotMinutes ?? 30}
+            disabled={!isActive}
             onSend={onSend}
-            onSelect={send}
+            onSelect={onAction ? sendFor("day-slots", "select-slot") : send}
           />
         )}
         {message.bookingStage === "pick_date" && (
-          <DateStrip onSend={onSend} onSelect={send} />
+          <DateStrip
+            disabled={!isActive}
+            onSend={onSend}
+            onSelect={onAction ? sendFor("date-strip", "select-date") : send}
+          />
+        )}
+        {message.bookingSummary && !isPatient && (
+          <BookingSummary
+            summary={message.bookingSummary}
+            disabled={!isActive}
+            onAction={
+              onAction
+                ? (widgetId, action, text) => onAction(widgetId, action, text)
+                : onSend
+                  ? (_widgetId, _action, text) => onSend(text)
+                  : undefined
+            }
+          />
         )}
         {message.pendingBooking && (
-          <ConfirmPanel pending={message.pendingBooking} onSend={onSend} />
+          <ConfirmPanel
+            pending={message.pendingBooking}
+            disabled={!isActive}
+            onSend={onAction ? (text) => onAction("confirm-panel", text.startsWith("No") ? "decline" : "confirm", text) : onSend}
+          />
         )}
         {message.filterChoices && message.filterChoices.length > 0 && (
-          <FilterChoices choices={message.filterChoices} onSend={onSend} />
+          <FilterChoices
+            choices={message.filterChoices}
+            disabled={!isActive}
+            onSend={onAction ? (text) => onAction(`filter:${text}`, "reply", text) : onSend}
+          />
         )}
         {message.upcomingAppointment && (
           <BookingSuccess upcoming={message.upcomingAppointment} onSend={onSend} />
         )}
         {message.quickReplies && message.quickReplies.length > 0 && !isPatient && (
-          <QuickReplies replies={message.quickReplies} onSend={onSend} />
+          <QuickReplies
+            replies={message.quickReplies}
+            disabled={!isActive}
+            onSend={onAction ? (text) => onAction(`quick:${text}`, "reply", text) : onSend}
+          />
         )}
         <p className="text-[0.7rem] text-ink-faint mt-1">{message.time}</p>
       </div>
@@ -171,9 +272,12 @@ export function TypingIndicator({ name = "Assistant is typing" }: { name?: strin
 function LiveDoctorCard({
   doctor,
   onSelect,
+  disabled,
 }: {
   doctor: NonNullable<ChatMessage["doctors"]>[number];
   onSelect?: (text: string, selection: BookingSelection) => void;
+  /** Stale (earlier-step) cards keep View actions but Choose is locked. */
+  disabled?: boolean;
 }) {
   const navigate = useNavigate();
   const where = [doctor.hospital_name, doctor.hospital_city]
@@ -192,6 +296,59 @@ function LiveDoctorCard({
     ? ` · ${modes.map((m) => (m === "in_person" ? "In-person" : m === "video" ? "Video" : "Phone")).join(" / ")}`
     : "";
   const why = (doctor.why_match ?? []).filter(Boolean).slice(0, 3);
+  // In-chat profile: resolved from live backend data on demand (the card
+  // itself only carries the chat payload). Falls back to the card's own
+  // real fields when the lookup fails, so the button never dead-ends.
+  const [profile, setProfile] = useState<Doctor | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+
+  function fallbackDoctor(): Doctor {
+    const modes = (doctor.consultation_types ?? []).filter(
+      (m): m is Doctor["consultationModes"][number] =>
+        m === "in_person" || m === "video" || m === "phone",
+    );
+    return {
+      id: doctor.id,
+      name: doctor.name,
+      title: doctor.specialty ?? "Physician",
+      specialty: doctor.specialty ?? "General",
+      department: "",
+      qualifications: "",
+      experienceYears: doctor.experience_years ?? 0,
+      languages: ["English"],
+      hospitalId: "",
+      hospitalName: [doctor.hospital_name, doctor.hospital_city].filter(Boolean).join(" · "),
+      photo: doctor.photo_url ?? "",
+      consultationModes: modes.length > 0 ? modes : ["in_person", "video"],
+      availableDurations: doctor.available_durations ?? [],
+      rating: 0,
+      reviewsCount: 0,
+      nextAvailable: "Check availability",
+      about: `${doctor.name}${doctor.specialty ? ` · ${doctor.specialty}` : ""} at ${doctor.hospital_name}.`,
+      areasOfPractice: doctor.specialty ? [doctor.specialty] : [],
+      distanceKm: doctor.distance_km ?? null,
+    };
+  }
+
+  function goToBooking() {
+    // Pass the name as the search query too: /book only auto-selects the
+    // doctor when it appears in its (paged) search results, and a bare id
+    // outside the top-20 silently landed on the search step.
+    navigate("/book", { state: { doctorId: doctor.id, query: doctor.name } });
+  }
+
+  async function openProfile() {
+    setProfile(fallbackDoctor());
+    setProfileOpen(true);
+    try {
+      const hits = await searchDoctors({ query: doctor.name, limit: 10 });
+      const hit = hits.find((h) => h.id === doctor.id) ?? hits[0];
+      if (hit) setProfile(mapDoctorResult(hit));
+    } catch {
+      /* fallback from the card stands */
+    }
+  }
+
   return (
     <div className="bg-white border border-border rounded-card p-3.5 shadow-subtle flex gap-3">
       <SafeImage
@@ -224,34 +381,29 @@ function LiveDoctorCard({
         <div className="flex flex-wrap gap-2 mt-2">
           <Button
             size="sm"
+            disabled={disabled}
             onClick={() =>
               onSelect
                 ? onSelect(`${doctor.name}`, { type: "booking_selection", field: "doctor", value: doctor.id })
-                : navigate("/book", { state: { doctorId: doctor.id } })
+                : goToBooking()
             }
           >
             Choose doctor
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() =>
-              onSelect
-                ? onSelect(`Show availability for ${doctor.name}`, { type: "booking_selection", field: "doctor", value: doctor.id })
-                : navigate("/book", { state: { doctorId: doctor.id } })
-            }
-          >
+          <Button size="sm" variant="outline" onClick={goToBooking}>
             View availability
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => navigate("/book", { state: { doctorId: doctor.id } })}
-          >
+          <Button size="sm" variant="outline" onClick={() => void openProfile()}>
             View profile
           </Button>
         </div>
       </div>
+      <DoctorProfileModal
+        doctor={profile}
+        open={profileOpen}
+        onClose={() => setProfileOpen(false)}
+        onBook={() => goToBooking()}
+      />
     </div>
   );
 }
@@ -317,9 +469,11 @@ export function CareContextCard({
 export function QuickReplies({
   replies,
   onSend,
+  disabled,
 }: {
   replies: string[];
   onSend?: (text: string) => void;
+  disabled?: boolean;
 }) {
   if (!onSend || replies.length === 0) return null;
   return (
@@ -328,8 +482,9 @@ export function QuickReplies({
         <button
           key={r}
           type="button"
+          disabled={disabled}
           onClick={() => onSend(r)}
-          className="text-[0.8rem] font-bold bg-white border border-healthcare/40 rounded-full px-3 py-1.5 text-navy hover:bg-healthcare-soft hover:border-healthcare transition"
+          className="text-[0.8rem] font-bold bg-white border border-healthcare/40 rounded-full px-3 py-1.5 text-navy hover:bg-healthcare-soft hover:border-healthcare transition disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {r}
         </button>
@@ -342,9 +497,11 @@ export function QuickReplies({
 export function FilterChoices({
   choices,
   onSend,
+  disabled,
 }: {
   choices: NonNullable<ChatMessage["filterChoices"]>;
   onSend?: (text: string) => void;
+  disabled?: boolean;
 }) {
   if (!onSend || choices.length === 0) return null;
   return (
@@ -355,8 +512,9 @@ export function FilterChoices({
           <button
             key={c.id}
             type="button"
+            disabled={disabled}
             onClick={() => onSend(c.prompt)}
-            className="text-[0.78rem] font-bold bg-healthcare-faint border border-healthcare/30 rounded-full px-3 py-1.5 text-navy hover:border-healthcare transition"
+            className="text-[0.78rem] font-bold bg-healthcare-faint border border-healthcare/30 rounded-full px-3 py-1.5 text-navy hover:border-healthcare transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {c.label}
           </button>
@@ -370,9 +528,11 @@ export function FilterChoices({
 export function DoctorCompare({
   compare,
   onSelect,
+  disabled,
 }: {
   compare: NonNullable<ChatMessage["compare"]>;
   onSelect?: (text: string, selection: BookingSelection) => void;
+  disabled?: boolean;
 }) {
   const navigate = useNavigate();
   const docs = (compare.doctors ?? []).slice(0, 3);
@@ -416,9 +576,10 @@ export function DoctorCompare({
           <Button
             key={d.id}
             size="sm"
+            disabled={disabled}
             onClick={() =>
               onSelect
-                ? onSelect(`The second one looks good — ${d.name}`, { type: "booking_selection", field: "doctor", value: d.id })
+                ? onSelect(`${d.name} looks good`, { type: "booking_selection", field: "doctor", value: d.id })
                 : navigate("/book", { state: { doctorId: d.id } })
             }
           >
@@ -462,16 +623,20 @@ function slotLabel(start: string, end: string): string {
   return `${formatSlotDate(start)} · ${formatSlotTime(start)} – ${formatSlotTime(end)}`;
 }
 
-/** Tappable offered slots. Tapping only sends a confirmation message —
- *  nothing books until the assistant confirms on the next turn. */
+/** Tappable offered slots (P7): tapping SELECTS the time — the "Yes,
+ *  book" wording is gone on purpose, because a leading "Yes" used to
+ *  trip the confirmation detector and book immediately. Nothing books
+ *  until the patient explicitly confirms the summary. */
 export function SlotChips({
   slots,
   onSend,
   onSelect,
+  disabled,
 }: {
   slots: NonNullable<ChatMessage["slots"]>;
   onSend?: (text: string) => void;
   onSelect?: (text: string, selection: BookingSelection) => void;
+  disabled?: boolean;
 }) {
   if ((!onSend && !onSelect) || slots.length === 0) return null;
   const send = (text: string, selection: BookingSelection) => {
@@ -490,8 +655,9 @@ export function SlotChips({
             <button
               key={s.start}
               type="button"
-              onClick={() => send(`Yes, book ${label}`, { type: "booking_selection", field: "start_time", value: s.start })}
-              className="inline-flex items-center gap-1.5 text-[0.8rem] font-bold bg-white border border-healthcare/40 rounded-full px-3 py-1.5 text-navy hover:bg-healthcare-soft hover:border-healthcare transition"
+              disabled={disabled}
+              onClick={() => send(`${label} works for me`, { type: "booking_selection", field: "start_time", value: s.start })}
+              className="inline-flex items-center gap-1.5 text-[0.8rem] font-bold bg-white border border-healthcare/40 rounded-full px-3 py-1.5 text-navy hover:bg-healthcare-soft hover:border-healthcare transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <CalendarCheck size={14} className="text-healthcare" />
               {label}
@@ -507,9 +673,11 @@ export function SlotChips({
 export function ConfirmPanel({
   pending,
   onSend,
+  disabled,
 }: {
   pending: NonNullable<ChatMessage["pendingBooking"]>;
   onSend?: (text: string) => void;
+  disabled?: boolean;
 }) {
   if (!onSend) return null;
   const slot =
@@ -540,12 +708,104 @@ export function ConfirmPanel({
         <p className="text-[0.78rem] font-semibold text-teal-dark mt-0.5">· {modeLabel}</p>
       )}
       <div className="flex gap-2 mt-2">
-        <Button size="sm" onClick={() => onSend(copy.confirm)}>
+        <Button size="sm" disabled={disabled} onClick={() => onSend(copy.confirm)}>
           {copy.confirmLabel}
         </Button>
-        <Button size="sm" variant="outline" onClick={() => onSend("No, that's not quite it")}>
+        <Button size="sm" variant="outline" disabled={disabled} onClick={() => onSend("No, that's not quite it")}>
           {copy.cancelLabel}
         </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Structured appointment summary (P6/P7): the canonical booking state
+ *  rendered as facts with explicit [Change] actions — never prose. A slot
+ *  pick lands here as "selected, awaiting confirmation"; only the Confirm
+ *  button proposes the booking write. */
+export function BookingSummary({
+  summary,
+  onAction,
+  disabled,
+}: {
+  summary: NonNullable<ChatMessage["bookingSummary"]>;
+  onAction?: (widgetId: string, action: string, text: string) => void;
+  disabled?: boolean;
+}) {
+  if (!onAction) return null;
+  const modeLabel =
+    summary.consultation_mode === "video"
+      ? "Video"
+      : summary.consultation_mode === "phone"
+        ? "Phone"
+        : summary.consultation_mode === "in_person"
+          ? "In-person"
+          : null;
+  const vtName = summary.visit_type?.name;
+  const vtDur = summary.visit_type?.duration_minutes;
+  const rows: { label: string; value: string | null }[] = [
+    { label: "Doctor", value: summary.doctor?.name ?? null },
+    { label: "Hospital", value: summary.hospital?.name ?? null },
+    { label: "Date", value: summary.date },
+    {
+      label: "Visit type",
+      value: vtName ? (vtDur ? `${vtName} · ${vtDur} min` : vtName) : null,
+    },
+    { label: "Consultation mode", value: modeLabel },
+    {
+      label: "Time",
+      value:
+        summary.slot?.start && summary.slot?.end
+          ? `${formatSlotDate(summary.slot.start)} · ${formatSlotTime(summary.slot.start)} – ${formatSlotTime(summary.slot.end)}`
+          : null,
+    },
+  ];
+  return (
+    <div className="mt-2.5 text-left bg-white border border-border rounded-control p-3" aria-label="Appointment summary">
+      <p className="text-[0.74rem] font-extrabold tracking-wide text-ink-secondary uppercase mb-1.5">
+        Appointment summary
+      </p>
+      <dl className="space-y-1">
+        {rows.map((r) => (
+          <div key={r.label} className="flex gap-2 text-[0.8rem]">
+            <dt className="text-ink-faint font-semibold min-w-[118px]">{r.label}</dt>
+            <dd className={`font-semibold truncate ${r.value ? "text-navy" : "text-ink-faint"}`}>
+              {r.value ?? "— not chosen yet"}
+            </dd>
+          </div>
+        ))}
+        <div className="flex gap-2 text-[0.8rem]">
+          <dt className="text-ink-faint font-semibold min-w-[118px]">Status</dt>
+          <dd className="font-bold text-navy truncate">{summary.status}</dd>
+        </div>
+      </dl>
+      {summary.missing.length > 0 && (
+        <p className="text-[0.76rem] text-ink-secondary mt-1.5">
+          Still needed: {summary.missing.join(", ")}.
+        </p>
+      )}
+      <div className="flex flex-wrap gap-1.5 mt-2.5">
+        {summary.changes.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            disabled={disabled}
+            onClick={() => onAction(`summary:${c.id}`, "reply", c.prompt)}
+            className="text-[0.76rem] font-bold bg-white border border-border rounded-full px-2.5 py-1 text-ink-secondary hover:border-healthcare hover:text-healthcare transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {c.label}
+          </button>
+        ))}
+        {summary.can_confirm && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onAction("summary:confirm", "confirm", "Confirm booking")}
+            className="text-[0.76rem] font-bold bg-navy text-white rounded-full px-3 py-1 hover:bg-healthcare transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Confirm booking
+          </button>
+        )}
       </div>
     </div>
   );
@@ -555,17 +815,20 @@ export function ConfirmPanel({
 export function MoreDoctorsButton({
   total,
   onSend,
+  disabled,
 }: {
   total: number;
   shown: number;
   onSend?: (text: string) => void;
+  disabled?: boolean;
 }) {
   if (!onSend) return null;
   return (
     <button
       type="button"
+      disabled={disabled}
       onClick={() => onSend("Show me more doctors")}
-      className="w-full text-[0.82rem] font-bold text-healthcare bg-healthcare-faint border border-healthcare/30 rounded-control px-3 py-2 hover:underline transition"
+      className="w-full text-[0.82rem] font-bold text-healthcare bg-healthcare-faint border border-healthcare/30 rounded-control px-3 py-2 hover:underline transition disabled:opacity-50 disabled:cursor-not-allowed"
     >
       Show more doctors{total > 0 ? ` · ${total} options in total` : ""}
     </button>
@@ -579,11 +842,13 @@ export function TypeSelect({
   onPick,
   onSend,
   onSelect,
+  disabled,
 }: {
   types: NonNullable<ChatMessage["appointmentTypes"]>;
   onPick?: (id: string, name: string, minutes: number) => void;
   onSend?: (text: string) => void;
   onSelect?: (text: string, selection: BookingSelection) => void;
+  disabled?: boolean;
 }) {
   if ((!onPick && !onSend && !onSelect) || types.length === 0) return null;
   return (
@@ -597,6 +862,7 @@ export function TypeSelect({
       <select
         id={`visit-type-${types[0].id}`}
         defaultValue=""
+        disabled={disabled}
         onChange={(e) => {
           const t = types.find((x) => x.id === e.target.value);
           if (!t) return;
@@ -617,17 +883,20 @@ export function TypeSelect({
   );
 }
 
-/** How-to-meet chips (video / phone call / in-person), like normal booking. */
+/** How-to-meet chips (video / phone call / in-person) — only the valid
+ *  modes the backend computed for this doctor + visit type (P2). */
 export function ModeChips({
   modes,
   onPick,
   onSend,
   onSelect,
+  disabled,
 }: {
   modes: string[];
   onPick?: (mode: string, label: string) => void;
   onSend?: (text: string) => void;
   onSelect?: (text: string, selection: BookingSelection) => void;
+  disabled?: boolean;
 }) {
   if ((!onPick && !onSend && !onSelect) || modes.length === 0) return null;
   const OPTIONS = [
@@ -646,12 +915,13 @@ export function ModeChips({
           <button
             key={mode}
             type="button"
+            disabled={disabled}
             onClick={() => {
               if (onSelect) onSelect(label, { type: "booking_selection", field: "consultation_mode", value: mode });
               else if (onPick) onPick(mode, label);
               else onSend?.(label);
             }}
-            className="inline-flex items-center gap-1.5 text-[0.8rem] font-bold bg-white border border-healthcare/40 rounded-full px-3 py-1.5 text-navy hover:bg-healthcare-soft hover:border-healthcare transition"
+            className="inline-flex items-center gap-1.5 text-[0.8rem] font-bold bg-white border border-healthcare/40 rounded-full px-3 py-1.5 text-navy hover:bg-healthcare-soft hover:border-healthcare transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Icon size={14} className="text-healthcare" />
             {label.replace(" visit", "")}
@@ -663,7 +933,7 @@ export function ModeChips({
 }
 
 /** 7-day strip for picking the visit day, like normal booking. */
-export function DateStrip({ onSend, onSelect }: { onSend?: (text: string) => void; onSelect?: (text: string, selection: BookingSelection) => void }) {
+export function DateStrip({ onSend, onSelect, disabled }: { onSend?: (text: string) => void; onSelect?: (text: string, selection: BookingSelection) => void; disabled?: boolean }) {
   const [picked, setPicked] = useState<string | null>(null);
   if (!onSend && !onSelect) return null;
   const send = (text: string, key: string) => {
@@ -694,9 +964,10 @@ export function DateStrip({ onSend, onSelect }: { onSend?: (text: string) => voi
           <button
             key={d.key}
             type="button"
+            disabled={disabled}
             onClick={() => send(`${d.label}, ${d.sub}`, d.key)}
             aria-pressed={picked === d.key}
-            className={`min-w-[68px] px-2.5 py-2 rounded-control border text-center transition shrink-0 ${
+            className={`min-w-[68px] px-2.5 py-2 rounded-control border text-center transition shrink-0 disabled:opacity-50 disabled:cursor-not-allowed ${
               picked === d.key
                 ? "bg-healthcare text-white border-healthcare-dark"
                 : "bg-white border-border hover:border-healthcare"
@@ -730,11 +1001,13 @@ export function DaySlots({
   durationMinutes,
   onSend,
   onSelect,
+  disabled,
 }: {
   schedule: NonNullable<ChatMessage["daySchedule"]>;
   durationMinutes: number;
   onSend?: (text: string) => void;
   onSelect?: (text: string, selection: BookingSelection) => void;
+  disabled?: boolean;
 }) {
   const [picked, setPicked] = useState<string | null>(null);
   if (!onSend && !onSelect) return null;
@@ -818,7 +1091,7 @@ export function DaySlots({
           <button
             key={s.iso}
             type="button"
-            disabled={!s.free}
+            disabled={disabled || !s.free}
             aria-pressed={picked === s.iso}
             onClick={() => send(`${dayLabel} at ${s.label}`, s.iso)}
             className={`shrink-0 min-w-[72px] px-2.5 py-2 rounded-control border text-[0.82rem] font-bold transition ${
