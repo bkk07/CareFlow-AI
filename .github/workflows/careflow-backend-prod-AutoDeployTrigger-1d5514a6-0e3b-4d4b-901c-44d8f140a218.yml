@@ -1,0 +1,45 @@
+name: Trigger auto deployment for careflow-backend-prod
+
+# When this action will be executed
+on:
+  # Automatically trigger it when detected changes in repo
+  push:
+    branches: 
+      [ main ]
+    paths:
+    - '**'
+    - '.github/workflows/careflow-backend-prod-AutoDeployTrigger-1d5514a6-0e3b-4d4b-901c-44d8f140a218.yml'
+
+  # Allow manual trigger 
+  workflow_dispatch:
+      
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout to the branch
+        uses: actions/checkout@v2
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.CAREFLOWBACKENDPROD_AZURE_CREDENTIALS }}
+
+      - name: Build and push container image to registry
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          appSourcePath: ${{ github.workspace }}/backend
+          _dockerfilePathKey_: _dockerfilePath_
+          _targetLabelKey_: _targetLabel_
+          registryUrl: careflowacrbkk.azurecr.io
+          registryUsername: ${{ secrets.CAREFLOWBACKENDPROD_REGISTRY_USERNAME }}
+          registryPassword: ${{ secrets.CAREFLOWBACKENDPROD_REGISTRY_PASSWORD }}
+          containerAppName: careflow-backend-prod
+          resourceGroup: careflow-rg
+          imageToBuild: careflowacrbkk.azurecr.io/careflow-backend-prod:${{ github.sha }}
+          
+            
+
+     
+
